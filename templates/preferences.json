@@ -1,0 +1,14 @@
+{
+  "language": "zh-CN",
+  "table_language": "en",
+  "timezone": "Asia/Shanghai",
+  "preserve_selected_model_and_permissions": true,
+  "automatic_task_limit": null,
+  "no_external_comments_or_message_replies": true,
+  "quiet_when_unchanged": true,
+  "archive_only_after_whole_task_acceptance": true,
+  "daily_review_time": "05:00",
+  "review_blackout": { "start_inclusive": "04:00:00", "end_exclusive": "12:00:00" },
+  "meetings": { "enabled": false, "lead_minutes": 45, "output": "Chinese brief and English talking points" },
+  "cloud_and_build_tools": { "enabled": false, "note": "Use host-installed skills and task-specific authorized credentials; no existing machines, leases or caches are imported." }
+}

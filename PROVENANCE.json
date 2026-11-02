@@ -1,0 +1,15 @@
+{
+  "version": "0.1.2",
+  "source": "local workflow runtime snapshot",
+  "source_files": {
+    "runtime/control.mjs": "22f185fd9a656a0706524c07a339085ad3728951f42e0fb09acc302eb03bdb6e",
+    "runtime/mailbox.mjs": "76338575de42fa27b539178a4b34cd4f75ba8ed06a9defc26b5b3516739d3cd0",
+    "runtime/progress.mjs": "98771a59e4cbbc9fe7e754028d102aaeef32b33b531314aefb810315cf35a539",
+    "runtime/watchdog.mjs": "f0f05b63a423c1de60b932f489a828a3834e6255bd3f91e24469153285a12bf0",
+    "runtime/daily-review.mjs": "c86a9599bdcaa56c8854e49e330c5f0adae5dfd5d069c979175caeb8e52f7b4f",
+    "runtime/review-window.mjs": "9b753b7e67d170e0c35e91dec094d76c3edf5bc15e45b0414b4f308efe0e09a7",
+    "runtime/engineering-principles.mjs": "6e77338e2d3ec9fe8a8e878ae37ce2ba7788c5f4c06fca74d74a2f73377e4570"
+  },
+  "state_included": false,
+  "credentials_included": false
+}

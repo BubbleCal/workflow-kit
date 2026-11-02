@@ -1,0 +1,46 @@
+{
+  "version": "0.1.2",
+  "verified_at": "2026-11-02T22:37:13.151979+00:00",
+  "environment": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "node": "v23.11.0"
+  },
+  "tests": {
+    "runtime": 103,
+    "portable_integration": 3,
+    "passed": 106,
+    "failed": 0
+  },
+  "verified": [
+    "Independent initialized instances have different IDs and databases",
+    "Identical event keys do not cross instance boundaries",
+    "Fixed-batch prompts use the installed path and bound role IDs",
+    "Unbound CLIs refuse to operate and do not create a mailbox",
+    "Repeated init refuses to overwrite existing state",
+    "Other-project dispatch, native creation and technical steering are rejected",
+    "External delivery is disabled until project-specific configuration and authorization",
+    "Review window, durable recovery and current-head guards retain passing regressions",
+    "macOS symlinked temporary paths execute the CLI correctly",
+    "Resolved unsent health events are superseded with durable receipts, while legacy keys, active batches and later recovery generations remain correct"
+  ],
+  "operational_data_exported": false,
+  "credentials_exported": false,
+  "production_threads_created": 0,
+  "production_automations_changed": 0,
+  "target_computer_installed": false,
+  "optional_extensions_not_activated": [
+    "calendar meeting preparation",
+    "VM/cloud administration",
+    "mbx build-cache bootstrap"
+  ],
+  "limits": [
+    "Codex native setup and connections must be verified on the destination Mac",
+    "No cross-machine task synchronization or automatic update service",
+    "Role model choices inherit by default; no running model was changed"
+  ],
+  "live_runtime_modified_by_packaging": false,
+  "health_retirement_verified": true,
+  "documentation_verified_at": "2026-11-02T22:48:57.409496+00:00",
+  "runtime_tests_reused_from": "0.1.1: 106 passing checks; runtime/test sources unchanged, CLI version text only updated"
+}

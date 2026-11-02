@@ -1,0 +1,93 @@
+# Continuation fallback on the existing dispatcher
+
+This protocol adds bounded recovery to
+the existing stage-continuation repair. It uses no new scheduler or worker owner.
+
+The five-minute trigger calls watchdog_targets. A durable cursor selects at most
+four accepted, unfinished owners per pass, combining registry candidates with
+registered goal stages. This bounds inspection work, not engineering concurrency.
+Repeated selection in the same five-minute slot is idempotent. The trigger reads
+only compact native status/latest-turn snapshots for those owners, alongside the
+three control/maintenance snapshots, and passes watchdog_round_id to mailbox plan.
+Up to two slots revisit unresolved recovery cases; the remaining sweep advances
+its durable cursor. Repeated identical blockers back off from five minutes to at
+most one hour; a real human hold waits for its source change.
+
+An idle terminal owner with indexed remaining work creates one persistent
+continuation-recovery case even if no worker result event exists. Active or
+approval-waiting owners, observed jobs, holds and existing drivers are preserved.
+Unknown job/permission/dependency state is a reconciliation request, never proof
+that restarting work is safe. The dispatcher never sends to engineering owners.
+The persisted case outbox is re-flushed after a crash without changing its key.
+
+## Coordinator recovery
+
+Handle recovery items before broad intake. Verify the original human scope,
+remaining acceptance, real jobs/holds, stage dependencies and existing control
+receipts. Use STAGE_CONTINUATION.md to repair the concrete plan and perform the
+normal guarded continuation once. Do not add a preparation-only turn where actual
+permitted work can proceed. No replacement chat, fake human_input or native
+permission change is authorized by the recovery event.
+
+Before ACK, call watchdog_resolve with case_key, recovery_key, disposition and
+evidence_ref. Supported dispositions:
+- queued: continuation_key must refer to a matching durable continuation. This
+  preserves the work but is not successful execution; further missed opportunity
+  can escalate until actual start is verified.
+- running: new_turn_id must differ from the detected old turn and work_evidence_ref
+  must prove actual work, not an ACK or repetitive status commentary.
+- blocked: reason, resume_condition and future next_check_at are required. Use a
+  measured job/dependency/access recheck interval; human_hold=true may wait for a
+  real human change without a timer. Recheck the evidence instead of renewing stale
+  text. This does not permit repeatedly retrying the same failed side effect.
+- complete: actual scope completion evidence is required and no registered owner
+  goal may remain unfinished. Do not close a parent merely because a child merged.
+- protected: close a false-positive diagnostic with reason and evidence_ref only
+  when the current registry/goal independently confirms every affected task is
+  held, archived, or owned by an existing control/service driver. This does not
+  complete or archive any goal. Text-valued holds count as explicit holds. The
+  detector filters these scopes after combining registry and progress sources,
+  and checks again at observation. A released protection permits a new recovery
+  generation; it does not permanently hide unfinished work.
+
+A recovery ACK without this disposition fails. A blocked recheck gets a new stable
+generation only when its recorded due time arrives. A queued continuation becomes
+resolved when its durable action records actual execution, or that exact stage
+has an accepted completion with evidence. Reconcile before choosing inspection
+targets and observing a round: actual work normally changes the owner turn, so
+the detector must not require seeing the old idle turn again. A sent receipt or
+a finished action without execution/accepted-stage evidence is insufficient.
+Retiring this diagnostic never completes the parent goal or hides its remaining
+stages. Existing uncertain dispatches remain subject to normal reconciliation,
+never blind retries.
+
+If the same idle gap remains after a coordinator batch created after the recovery
+opportunity has finished, and the coordinator is idle, one workflow-health case
+goes to the existing maintenance lane. A busy coordinator or elapsed time alone
+does not count as that opportunity. Maintenance diagnoses the failure and queues
+operational corrections; it does not become another registry writer. Human action
+is requested only for an actual irreducible blocker, once per meaningful change.
+
+Before reserving or authorizing a maintenance health delivery, recheck the case's
+durable disposition. A resolved/protected case or an explicitly recorded current
+blocker supersedes its unsent health item. Keep the original immutable payload
+and a superseded_health receipt with the actual resolution evidence; do not wake
+maintenance for an already handled recovery. Unknown cases and sending/sent/
+uncertain/running batches are preserved. If the case later starts a new recovery
+generation and misses another eligible round, it may escalate once under that
+generation's key. Historical case-only health keys still deduplicate their
+original generation.
+
+Manual maintenance addenda and health cases remain durably queued while another
+maintenance turn runs. Only scheduled daily-review items coalesce across days.
+Never drop a new actual human request as previous_review_unfinished.
+
+## Engineering guidance
+
+New guarded dispatch/create payloads receive engineering-principles.mjs guidance
+in their actual execution prompt. It preserves source text, project/model fields
+and immutable old actions. It applies real workloads/storage constraints, actual
+product maturity/consumers, first-principles design including in-scope breaking
+changes, and minimal sufficient validation/fallbacks. It adds no preparation
+phase or blanket compatibility/approval gate. Existing live jobs are not broadcast
+new prompts; apply guidance at the next necessary dispatch.
