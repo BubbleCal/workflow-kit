@@ -36,9 +36,34 @@ export class ContinuationWatchdog {
   }
   reconcileContinuations() {
     // Execution normally changes the owner turn, so retirement cannot depend on observing the old turn again.
-    for (const c of this.db.prepare("SELECT * FROM watchdog_cases WHERE phase IN ('queued','escalated') AND resolution IS NOT NULL").all()) {
-      const resolution = JSON.parse(c.resolution);
-      if (!resolution.continuation_key) continue;
+    const goals = this.progress.goals();
+    for (const c of this.db.prepare("SELECT * FROM watchdog_cases WHERE phase IN ('open','queued','escalated')").all()) {
+      const resolution = JSON.parse(c.resolution ?? '{}');
+      if (!resolution.continuation_key) {
+        // A separately handled result may start the exact successor before its
+        // recovery item is consumed. Match every affected task, not just a busy owner.
+        const tasks = JSON.parse(c.tasks), matches = new Map(tasks.map(id => [id, []]));
+        const candidates = this.db.prepare(`SELECT * FROM continuation_actions
+          WHERE owner_thread_id=? AND preflight_turn=? AND state IN ('running','finished') AND updated_at>=?`)
+          .all(c.owner_id,c.turn_id,c.opportunity_after);
+        for (const a of candidates) {
+          const receipt = JSON.parse(a.receipt ?? '{}');
+          const stage = goals.find(g => g.id === a.goal_id)?.stages.find(s => s.id === a.stage_id &&
+            s.owner_thread_id === c.owner_id && s.scope_key === a.scope_key);
+          if (!stage || !matches.has(stage.task_id) || !a.actual_turn || a.actual_turn === c.turn_id ||
+              receipt.control_action_key !== a.action_key || !receipt.work_evidence_ref) continue;
+          matches.get(stage.task_id).push({task_id:stage.task_id,continuation_key:a.action_key,
+            new_turn_id:a.actual_turn,work_evidence_ref:receipt.work_evidence_ref});
+        }
+        if (!tasks.length || [...matches.values()].some(actions => actions.length !== 1)) continue;
+        const actions = [...matches.values()].flat(), first = actions[0];
+        this.db.prepare("UPDATE watchdog_cases SET phase='resolved',resolution_key=?,resolution=? WHERE case_key=?")
+          .run(c.recovery_key,JSON.stringify({disposition:'running',evidence_ref:first.work_evidence_ref,
+            new_turn_id:first.new_turn_id,work_evidence_ref:first.work_evidence_ref,
+            reconciled_at:new Date(this.now()).toISOString(),
+            reconciliation:{kind:'matching_actual_continuations',actions}}),c.case_key);
+        continue;
+      }
       const action = this.db.prepare('SELECT * FROM continuation_actions WHERE action_key=?').get(resolution.continuation_key);
       if (!action || action.owner_thread_id !== c.owner_id) continue;
       const receipt = JSON.parse(action.receipt ?? '{}');

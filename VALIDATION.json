@@ -1,15 +1,15 @@
 {
-  "version": "0.2.5",
-  "verified_at": "2026-11-03T15:41:24.421714+00:00",
+  "version": "0.2.6",
+  "verified_at": "2026-11-03T16:19:25.863750+00:00",
   "environment": {
     "platform": "darwin",
     "architecture": "arm64",
     "node": "v23.11.0"
   },
   "tests": {
-    "runtime": 162,
+    "runtime": 164,
     "portable_integration": 3,
-    "passed": 165,
+    "passed": 167,
     "failed": 0
   },
   "verified": [
@@ -39,7 +39,8 @@
     "Retained designated approvals preserve original reviewed commit and require fresh matching GitHub approval/rule evidence; dismissed reviews, current-push rules, changed head and new material feedback still block",
     "Ordinary completed-task archive accepts fresh terminal notLoaded evidence without worker dispatch; active/unknown jobs, changed turn, approval, incomplete scope and unfinished parent still block",
     "Equal-priority unprocessed inputs rotate from durable finished-batch history; humans retain priority/order, unsent reservations do not count, and health identifies whether recovery was actually offered",
-    "Current-head failed jobs trigger draft/ready CI triage while other checks run; same failures deduplicate after task-bound disposition, typed package waits avoid repeated dispatch, and closed PRs/head races retain correct collection semantics"
+    "Current-head failed jobs trigger draft/ready CI triage while other checks run; same failures deduplicate after task-bound disposition, typed package waits avoid repeated dispatch, and closed PRs/head races retain correct collection semantics",
+    "Unbound recovery matches a unique current-generation actual continuation for every affected task; transport-only, wrong turn/task, partial/ambiguous/old evidence cannot retire it; original source ACK and incomplete goals remain"
   ],
   "operational_data_exported": false,
   "credentials_exported": false,

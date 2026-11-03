@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Mailbox, COORDINATOR } from './mailbox.mjs';
+import { Mailbox, COORDINATOR, MAINTENANCE } from './mailbox.mjs';
 
 const NOW = Date.parse('2026-11-02T17:00:00Z');
 const task = (id = 'T1', owner = 'worker') => ({ id, owner_thread_id: owner, status: 'engineering_active', authorization_message_id: 'actual-human', role: 'implementation' });
@@ -188,5 +188,41 @@ test('health distinguishes queue admission gaps from an unhandled offered recove
     assert.equal(health.payload.recovery_in_batch,admitted);
     assert.equal(health.payload.health_reason,admitted?'recovery_unhandled':'queue_admission_gap');
     assert.equal(health.payload.source_recovery_key,recovery.key);m.close();
+  }
+});
+
+function startedWithoutRecoveryBinding(m,now,{preflight='worker-old',stageTask='T1'}={}){
+  const key=m.progress.status().actions.find(a=>a.stage_id===stageTask).action_key;
+  const o={thread_id:'worker',status:'idle',turn_status:'completed',turn_id:preflight,checked_at:new Date(now).toISOString(),background_job_running:false,queued_input:false,existing_driver:false,hold:false};
+  assert.equal(m.progress.claim({key,observation:o}).reserved,true);
+  m.progress.delivery({key,outcome:'sent',control_action_key:key,evidence_ref:'guarded-send-receipt'});
+  m.progress.started({key,observation:{...o,status:'active',turn_id:'worker-new'},work_turn_id:'worker-new',work_evidence_ref:'actual-owner-source-work'});
+  return key;
+}
+
+test('actual same-task continuation retires an unbound recovery without hiding its unfinished goal',()=>{
+  let now=NOW;const m=new Mailbox(':memory:',{now:()=>now});pendingGoal(m,[task()]);observe(m,select(m),[poll(now)]);flush(m);
+  const c=m.watchdog.status()[0];completedRound(m,NOW+1,[c.recovery_key]);now+=300000;observe(m,select(m),[poll(now)],poll(now,COORDINATOR));flush(m);
+  const health=m.db.prepare("SELECT item_key FROM mail WHERE lane='maintenance'").get();assert.ok(health);
+  const action=startedWithoutRecoveryBinding(m,now);now+=300000;select(m);
+  const resolved=m.watchdog.status()[0];assert.equal(resolved.phase,'resolved');assert.equal(m.watchdog.canAck(c.case_key,c.recovery_key),true);
+  assert.equal(m.progress.unfinishedForOwner('worker'),true);assert.equal(m.progress.status().actions[0].state,'running');
+  assert.equal(JSON.parse(resolved.resolution).reconciliation.actions[0].continuation_key,action);
+  assert.equal(m.db.prepare('SELECT state FROM mail WHERE item_key=?').get(c.recovery_key).state,'pending');
+  assert.equal(m.reserve('maintenance',poll(now,MAINTENANCE)).reserved,false);
+  assert.equal(m.db.prepare('SELECT state FROM mail WHERE item_key=?').get(health.item_key).state,'superseded');m.close();
+});
+
+test('unbound retirement rejects a wrong preflight turn, unrelated task, partial task coverage or send-only receipt',()=>{
+  for(const mode of ['different-turn','different-task','partial-coverage','send-only','old-generation','ambiguous']){
+    let now=NOW;const m=new Mailbox(':memory:',{now:()=>now});
+    pendingGoal(m,[task(),...(mode==='different-task'||mode==='partial-coverage'?[task('T2')]:[])]);
+    observe(m,select(m),[poll(now)]);const c=m.watchdog.status()[0];
+    if(mode==='different-task')m.db.prepare('UPDATE watchdog_cases SET tasks=? WHERE case_key=?').run(JSON.stringify(['T1']),c.case_key);
+    startedWithoutRecoveryBinding(m,now,{preflight:mode==='different-turn'?'unrelated-old':'worker-old',stageTask:mode==='different-task'?'T2':'T1'});
+    if(mode==='old-generation')m.db.prepare('UPDATE watchdog_cases SET opportunity_after=? WHERE case_key=?').run(now+1,c.case_key);
+    if(mode==='ambiguous'){const a=m.db.prepare("SELECT * FROM continuation_actions WHERE state='running'").get(),receipt={...JSON.parse(a.receipt),control_action_key:'duplicate'};m.db.prepare('INSERT INTO continuation_actions VALUES (?,?,?,?,?,?,?,?,?,?,?)').run('duplicate',a.goal_id,a.stage_id,a.owner_thread_id,a.scope_key,a.payload,a.state,a.preflight_turn,a.actual_turn,JSON.stringify(receipt),a.updated_at);}
+    if(mode==='send-only')m.db.prepare("UPDATE continuation_actions SET state='sent',actual_turn=NULL,receipt=? WHERE state='running'").run(JSON.stringify({outcome:'sent',evidence_ref:'transport-only'}));
+    now+=300000;select(m);assert.notEqual(m.watchdog.status()[0].phase,'resolved',mode);m.close();
   }
 });

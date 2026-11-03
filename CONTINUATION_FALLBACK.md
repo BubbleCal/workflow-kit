@@ -102,3 +102,25 @@ can reopen a due recovery generation. Preserve the old generation and dispositio
 in superseded_health. This includes reserved-unsent batches, while sending, sent,
 uncertain and running batches remain untouched. New genuine missed generations
 retain their own escalation keys; retiring an old alert does not close the task.
+
+## Actual execution before explicit recovery binding
+
+A separate accepted result may start the same authorized continuation before the
+recovery item is consumed. Reconciliation can retire that old diagnostic without
+an explicit queued binding only when EVERY task in the case has exactly one
+matching durable continuation: same owner, preflight_turn equal to the detected
+old turn, matching goal/stage/task/scope, same-key guarded transport receipt,
+a different actual_turn with work_evidence_ref, running/finished action state,
+and action evidence recorded no earlier than this generation's opportunity.
+Ambiguous matches, partial task coverage, another task/turn, old-generation
+records and send-only/uncertain-without-work evidence leave the case untouched.
+
+Save the action/turn/work-reference mapping and resolution_key for that exact
+recovery generation. This proves that the old idle gap was followed by actual
+execution; it does not assert the owner's current native status or complete the
+original task. Preserve all remaining goals and actual jobs. The original source
+mail still requires normal coordinator ACK; automatic diagnostic retirement does
+not consume it. Unsent health can then retire under the existing rules; already
+sending/running health stays with its current batch. No worker message or new
+schedule is part of reconciliation. Human-only correction paths without matching
+continuation evidence still require the coordinator's explicit disposition.

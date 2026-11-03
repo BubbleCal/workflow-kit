@@ -1,5 +1,9 @@
 # Changes
 
+## 0.2.6
+
+Reconcile unbound recovery diagnostics against unique same-task/owner/preflight continuations with actual execution proof. Require complete task coverage and current-generation evidence; preserve unfinished goals, original source acknowledgement and active jobs.
+
 ## 0.2.5
 
 Collect exact-head individual CI checks/statuses and triage new failures before draft/readiness transitions. Deduplicate unchanged failures after task-bound repair or typed-wait disposition; preserve existing owners, required merge checks and closed-PR handling.
