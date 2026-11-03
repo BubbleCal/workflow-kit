@@ -102,9 +102,22 @@ export class LifecycleLedger {
     const uncertain = this.db.prepare(`SELECT action_key FROM actions WHERE kind IN ('slack_pr','pr_ready','merge')
       AND state IN ('claimed','uncertain') AND (json_extract(payload,'$.message')=? OR json_extract(payload,'$.pr_url')=?) LIMIT 1`).get(url, url);
     if (uncertain) return answer('delivery_uncertain', 'reconcile_delivery', { control_action_key: uncertain.action_key });
-    if (s.draft && this.db.prepare(`SELECT 1 FROM actions WHERE kind='pr_ready' AND state='sent'
-      AND json_extract(payload,'$.pr_url')=? AND json_extract(payload,'$.expected_head_sha')=?`).get(url,s.head_sha))
-      return answer('observation_due', 'refresh_pr');
+    if (s.draft) {
+      const ready = this.db.prepare(`SELECT action_key,updated_at FROM actions WHERE kind='pr_ready' AND state='sent'
+        AND json_extract(payload,'$.pr_url')=? AND json_extract(payload,'$.expected_head_sha')=?
+        ORDER BY updated_at DESC,action_key LIMIT 1`).get(url,s.head_sha);
+      if (ready) {
+        if (Date.parse(s.checked_at) <= ready.updated_at) return answer('observation_due', 'refresh_pr');
+        const handled = this.db.prepare(`SELECT 1 FROM lifecycle_intents WHERE pr_key=? AND action='reconcile_draft'
+          AND state='resolved' AND json_extract(payload,'$.head')=?
+          AND json_extract(payload,'$.artifact_revision')=? AND json_extract(payload,'$.ready_receipt')=?`)
+          .get(key,s.head_sha,s.state_revision,ready.action_key);
+        // A post-send draft may be an intentional reviewer withdrawal. Reconcile
+        // its actual cause once; neither refresh forever nor silently mark ready.
+        return handled ? answer('draft_disposition_recorded',null) :
+          answer('draft_after_ready','reconcile_draft',{ready_receipt:ready.action_key});
+      }
+    }
     if (s.draft || !sent) {
       if (!readiness || readiness.head !== s.head_sha || readiness.validation_passed !== true || readiness.technical_review_passed !== true)
         return answer('readiness_unknown', 'obtain_readiness');
@@ -175,18 +188,18 @@ export class LifecycleLedger {
         p.expected_head_sha !== current.head || row.action !== 'deliver_review' || a.kind !== 'slack_pr' ||
         p.message !== `https://github.com/${row.pr_key.replace('#','/pull/')}`) throw new Error('Exact delivered PR receipt required');
     } else if (disposition === 'progress') {
-      if ((!mergedRefresh && !['resolve_closed','decide_after_merge','decide_feedback','obtain_readiness','repair_feedback','triage_ci','reconcile_delivery','deliver_local','reconcile_release_route'].includes(row.action)) ||
+      if ((!mergedRefresh && !['resolve_closed','decide_after_merge','decide_feedback','obtain_readiness','repair_feedback','triage_ci','reconcile_draft','reconcile_delivery','deliver_local','reconcile_release_route'].includes(row.action)) ||
         progress_resolution?.verified !== true || !progress_resolution.task_ids?.includes(current.task_id))
         throw new Error('Actual task-bound progress disposition required');
-      if (['repair_feedback','triage_ci'].includes(row.action) && progress_resolution.task_complete === true)
-        throw new Error('Material feedback or CI failure needs a successor or verified wait, not task completion');
+      if (['repair_feedback','triage_ci','reconcile_draft'].includes(row.action) && progress_resolution.task_complete === true)
+        throw new Error('Material feedback, CI failure or draft reconciliation needs a successor or verified wait, not task completion');
       if (row.action==='reconcile_release_route' && !releaseSuccessorVerified(progress_resolution.goals,current.task_id,current.release_route))
         throw new Error('Persist the released-upstream, automatic-sync, consumer-adoption and integrated-acceptance successor path');
       if (mergedRefresh || ['decide_after_merge','deliver_local','reconcile_release_route'].includes(row.action) || row.action === 'resolve_closed' && progress_resolution.task_complete === true) {
         this.db.prepare('UPDATE lifecycle_prs SET retired=1 WHERE pr_key=?').run(row.pr_key);
         this.db.prepare("UPDATE lifecycle_intents SET state='superseded',resolved_at=? WHERE pr_key=? AND intent_key<>? AND state IN ('pending','waiting')")
           .run(this.now(),row.pr_key,key);
-      } else if (!['resolve_closed','triage_ci'].includes(row.action)) { state = 'waiting'; due = this.now() + 10 * 60000; }
+      } else if (!['resolve_closed','triage_ci','reconcile_draft'].includes(row.action)) { state = 'waiting'; due = this.now() + 10 * 60000; }
     } else if (disposition === 'wait') {
       if (wait?.pr_key !== row.pr_key || wait?.head !== current.head) throw new Error('Wait must belong to this exact PR/head');
       const result = this.checkWait(wait);

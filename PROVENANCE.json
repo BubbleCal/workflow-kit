@@ -1,9 +1,9 @@
 {
-  "version": "0.2.12",
+  "version": "0.2.13",
   "source": "local workflow runtime snapshot",
   "source_files": {
     "runtime/control.mjs": "dc6f36fa3ea07ce4ae4d4e86107455ec3b2f9e1d48c28839517da6557f8a44d6",
-    "runtime/mailbox.mjs": "ba4f87ff1729d998095bab571c5d45859e0d6713c1ebc35e09d7401c517a775f",
+    "runtime/mailbox.mjs": "1824d6f543145a135d9d94cebf6fe97fbcc7d1f79ab623c31ff9473318004c12",
     "runtime/progress.mjs": "da7b83bc897d1a1782904c69933afe4aef84667f174833c24b92ea364748d856",
     "runtime/watchdog.mjs": "5bcaea5039a08855eede19051afe2abd321f967cae9b5f763c8af34c48d16e72",
     "runtime/daily-review.mjs": "c86a9599bdcaa56c8854e49e330c5f0adae5dfd5d069c979175caeb8e52f7b4f",
@@ -13,7 +13,7 @@
     "runtime/fetch-review-feedback.mjs": "b801eeea9a2d4951d002b03ff7101a53e926b3c058f0e2fe945eceafda9fb562",
     "runtime/outcomes.mjs": "78e553fbb78a1433b6b4c7b3a739062602b74334e0c8b4ea0a104d77d7e017c2",
     "runtime/model-selection.mjs": "cde3b8be50882361e9676b86c18170052691ab31f71f1a3c01139037072e70a4",
-    "runtime/lifecycle.mjs": "d19a761b5ee6847017ea101405d6a0832bdf20c1ebe5905b9d54d12992d4b4cb",
+    "runtime/lifecycle.mjs": "e04308b5deaa0df7bcd8b19d7024fb9c591110610bc83a078928ab70639d032e",
     "runtime/waits.mjs": "aeb4cf2bdcf8bf5d939239d16d39f85122c3d11810ce6021d74c3875b09ba2de",
     "runtime/fetch-pr-state.mjs": "3ec4176c92caa3bc4858c93abbf5e46a031d14192d94e345ed16395924a158f5",
     "runtime/dependency-provenance.mjs": "fbaaded67eeca3a2ee62250e813d07d0667deef534d5b4d46e2ecab55060d320",

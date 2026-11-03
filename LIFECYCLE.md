@@ -57,8 +57,10 @@ The next actions are explicit:
   Read actual receipts for this exact head and preserve the existing PR/head
   idempotency keys. A new review head requires its own readiness and the existing
   explicit delivery gate; an old-head receipt cannot prove current delivery.
-  A prior ready receipt with a stale draft snapshot
-  causes a metadata refresh, never a blind repeat of the ready transition.
+  A prior ready receipt with a draft snapshot from before that receipt
+  causes a metadata refresh. A fresh post-receipt draft requires
+  reconcile_draft with actual cause and source-task disposition; never blindly
+  repeat the ready transition.
 - check_merge: inspect approval validity for the current PR (MERGE_APPROVAL.md), required checks and repository rules,
   then use the existing conditional merge guard when eligible.
 - refresh_ci: refresh incomplete, stale or mismatched individual CI source facts.
@@ -250,3 +252,23 @@ It does not guarantee acceptance: inspect evidence and record source-task
 completion or concrete successors before ACK. Follow this initial result
 acceptance before broad recovery scans. Keep existing batch size, soft budget,
 in-flight snapshots, native idle checks and task concurrency unchanged.
+
+## Draft observed after a ready transition
+
+A sent ready receipt is historical evidence, not proof that a PR remains ready.
+When the exact-head draft snapshot predates that receipt, refresh the source.
+When a fresh read after the receipt still shows draft, emit reconcile_draft
+instead of repeatedly refreshing or automatically marking ready again.
+Inspect actual timeline, actor, review dismissal and full feedback to determine
+whether readiness was withdrawn, the receipt disagrees, or an owner repair is
+needed. Preserve the reviewer decision and original owner; do not infer that
+ready evidence, a prior Slack URL or green CI authorizes reversing the draft.
+
+Resolve with exact-event, source-task record_progress(ack=false), then
+lifecycle_resolve(disposition=progress, progress_event_key=that event). Record
+a concrete successor or verified wait; neither old delivery receipts nor task
+completion satisfy this obligation. The same handled draft episode does not
+repeat on each poll. A new head/state transition or ready action retains its
+own disposition. Existing CI triage, full-feedback gates and uncertain sends
+remain prior checks. The watch/parent goal stay open; a later ready/Slack/merge
+operation still needs its ordinary actual authorization and delivery guards.

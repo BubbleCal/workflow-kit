@@ -51,6 +51,36 @@ test('a test log path alone does not establish review readiness, and failed CI r
   assert.equal(c.lifecycle.checkWait({kind:'pr',pr_key:key,head:HEAD,expected:'approval_pending',next_check_at:new Date(NOW+600000).toISOString()}).valid,false);c.close();
 });
 
+test('a fresh draft after a ready receipt requires disposition instead of repeated refresh or delivery',()=>{
+  let now=NOW;const c=setup(()=>now);sent(c);
+  c.db.prepare("INSERT INTO actions(action_key,kind,task_id,scope_key,digest,payload,state,due,created_at,updated_at) VALUES ('ready-transition','pr_ready','T-010','pr:42','fixture',?,'sent',?,?,?)")
+    .run(JSON.stringify({pr_url:`https://github.com/${repo}/pull/${number}`,expected_head_sha:HEAD}),NOW,NOW,NOW);
+  observe(c,now,{draft:true});assert.equal(c.lifecycle.inspect(key).action,'refresh_pr');
+  now+=1000;observe(c,now,{draft:true,updated_at:new Date(now).toISOString()});
+  const first=c.lifecycle.reconcile()[0];assert.equal(first.payload.action,'reconcile_draft');
+  assert.deepEqual(c.lifecycle.reconcile(),[first]);
+  assert.equal(c.lifecycle.checkWait({kind:'pr',pr_key:key,head:HEAD,expected:'approval_pending',next_check_at:new Date(now+600000).toISOString()}).valid,false);
+  assert.throws(()=>c.lifecycle.resolve({key:first.payload.lifecycle_key,generation:1,disposition:'receipt',evidence_ref:'old-send',control_action_key:'ready-url'}),/Exact delivered PR receipt/);
+  assert.throws(()=>c.lifecycle.resolve({key:first.payload.lifecycle_key,generation:1,disposition:'progress',evidence_ref:'wrong-task',progress_resolution:{verified:true,task_ids:['unrelated']}}),/task-bound/);
+  assert.throws(()=>c.lifecycle.resolve({key:first.payload.lifecycle_key,generation:1,disposition:'progress',evidence_ref:'not-completion',progress_resolution:{verified:true,task_ids:['T-010'],task_complete:true}}),/not task completion/);
+  c.lifecycle.resolve({key:first.payload.lifecycle_key,generation:1,disposition:'progress',evidence_ref:'actual-timeline-and-owner-repair-successor',progress_resolution:{verified:true,task_ids:['T-010'],task_complete:false}});
+  assert.equal(c.lifecycle.inspect(key).action,null);assert.equal(c.lifecycle.reconcile().length,0);
+  now+=21*60000;assert.equal(c.lifecycle.inspect(key).action,'refresh_pr');
+  observe(c,now,{draft:true,updated_at:new Date(NOW+1000).toISOString()});assert.equal(c.lifecycle.inspect(key).action,null);
+  now+=1000;observe(c,now,{draft:false,updated_at:new Date(now).toISOString()});assert.equal(c.lifecycle.inspect(key).action,'check_merge');
+  now+=1000;observe(c,now,{draft:true,updated_at:new Date(now).toISOString()});
+  const second=c.lifecycle.reconcile()[0];assert.equal(second.payload.action,'reconcile_draft');assert.notEqual(second.key,first.key);c.close();
+});
+
+test('draft reconciliation preserves uncertain sends and does not use another heads ready receipt',()=>{
+  for(const actionState of ['sent','uncertain']){
+    const c=setup();observe(c,NOW,{draft:true});
+    c.db.prepare("INSERT INTO actions(action_key,kind,task_id,scope_key,digest,payload,state,due,created_at,updated_at) VALUES ('other-ready','pr_ready','T-010','pr:42','fixture',?,?,?, ?,?)")
+      .run(JSON.stringify({pr_url:`https://github.com/${repo}/pull/${number}`,expected_head_sha:'b'.repeat(40)}),actionState,NOW-1000,NOW-1000,NOW-1000);
+    assert.equal(c.lifecycle.inspect(key).action,actionState==='uncertain'?'reconcile_delivery':'deliver_review');c.close();
+  }
+});
+
 test('COMMENTED material feedback invalidates merge waiting and queues assessment then repair',()=>{
   const c=setup();observe(c);sent(c);const prior=c.lifecycle.reconcile()[0];
   const reviews=[{id:5743158692,commit_id:HEAD,state:'COMMENTED',body:'Native JSON append now fails; please fix this regression.',user:{login:'reviewer'}}];
