@@ -163,7 +163,9 @@ These results receive urgent owned-result priority and cannot ACK without actual
 source-task progress. At least one recorded stage must retain that source task
 and owner. Declared task_complete=false, resource_cleanup_complete=false or a
 nonempty remaining_required list prevents consuming the result as all-goals-done:
-persist the concrete remaining cleanup/delivery step or a verified wait. An
+persist an unfinished stage for that source task containing its concrete remaining
+cleanup/delivery step or a verified wait. An unrelated unfinished goal cannot
+substitute for the assessment task's remaining obligations. An
 assessment answer may be delivered while resource closure remains; do not rerun
 measurements or convert optional design recommendations into implementation.
 New producers should use kind=worker_result, owner_thread_id, evidence_ref and

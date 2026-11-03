@@ -1,6 +1,6 @@
 {
-  "version": "0.2.10",
-  "verified_at": "2026-11-03T20:04:51.869978+00:00",
+  "version": "0.2.11",
+  "verified_at": "2026-11-03T20:07:50.312183+00:00",
   "environment": {
     "platform": "darwin",
     "architecture": "arm64",
@@ -44,7 +44,8 @@
     "New owned terminal results share urgent operational priority immediately; a result arriving during an old diagnostic batch enters the next batch without aging, while human precedence and durable successor ACK remain enforced",
     "Same-owner/same-turn strict task subsets reuse unhandled covering recovery without changing payloads or creating a second escalation; new tasks/turns and blocked/queued dispositions remain independently actionable",
     "Verified merged facts do not expire into refresh loops; exact original refresh-event/task progress plus fresh head/merge proof retires only that PR watch, preserving immutable batches, other PRs, unfinished parents and uncertain control receipts",
-    "Known completed assessments using legacy thread_id receive urgent result treatment and require source task/owner progress while preserving remaining cleanup; generic recipient fields, immutable payloads and version-1 contracts remain unchanged"
+    "Known completed assessments using legacy thread_id receive urgent result treatment and require source task/owner progress while preserving remaining cleanup; generic recipient fields, immutable payloads and version-1 contracts remain unchanged",
+    "An unrelated unfinished goal cannot replace remaining obligations on the source assessment task"
   ],
   "operational_data_exported": false,
   "credentials_exported": false,

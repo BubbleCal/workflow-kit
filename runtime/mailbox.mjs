@@ -358,6 +358,8 @@ export class Mailbox {
         if (item.payload?.task_id && requiresProgress(item,2) &&
           !input.goals?.some(g=>g.stages?.some(s=>s.task_id===item.payload.task_id)))
           throw new Error('Result disposition must cover the source task');
+        if (assessmentHasRemaining && !input.goals?.some(g=>!g.complete && g.stages?.some(s=>s.task_id===item.payload.task_id && s.state!=='complete')))
+          throw new Error('Assessment remaining work must stay with its source task');
         if (legacyOwner && !input.goals?.some(g=>g.stages?.some(s=>s.task_id===item.payload.task_id && s.owner_thread_id===legacyOwner)))
           throw new Error('Assessment disposition must preserve its source owner binding');
         this.waits.validateGoals(input.goals,this.progress.goals(),item.payload?.event==='wait_reconciliation'?item.payload:undefined);

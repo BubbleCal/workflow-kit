@@ -316,6 +316,8 @@ test('legacy assessment thread identity requires urgent exact-task progress whil
   const input={batch_id:b.id,event_key:packet.key,authorization_verified:true,evidence_ref:'actual-report-and-cleanup-record'};
   assert.throws(()=>m.recordProgress({...input,goals:[accepted]}),/remaining/);
   const goal={...accepted,complete:false,stages:[...accepted.stages,{id:'cleanup',task_id:'T-assessment',owner_thread_id:'assessment-owner',scope_key:'original-resource',state:'pending',step_id:'verify-existing-cleanup',action:'Confirm the already-requested deletion without repeating the assessment',depends_on:['assessment']}]};
+  const unrelated={...goal,id:'unrelated-goal',stages:goal.stages.map(s=>({...s,task_id:'another-task'}))};
+  assert.throws(()=>m.recordProgress({...input,goals:[accepted,unrelated]}),/remaining/);
   assert.throws(()=>m.recordProgress({...input,goals:[{...goal,stages:goal.stages.map(s=>({...s,task_id:'another-task'}))}]}),/source task/);
   assert.throws(()=>m.recordProgress({...input,goals:[{...goal,stages:goal.stages.map(s=>({...s,owner_thread_id:'another-owner'}))}]}),/owner/);
   m.recordProgress({...input,goals:[goal]});assert.deepEqual(m.get(b.id).snapshot,immutable);assert.deepEqual(JSON.parse(m.db.prepare('SELECT payload FROM mail WHERE item_key=?').get(packet.key).payload),packet.payload);

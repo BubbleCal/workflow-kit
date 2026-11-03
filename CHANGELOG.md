@@ -1,5 +1,9 @@
 # Changes
 
+## 0.2.11
+
+Require remaining assessment obligations to stay on the source task; unrelated unfinished goals cannot satisfy its cleanup requirement.
+
 ## 0.2.10
 
 Recognize the existing completed-assessment envelope using thread_id for its owner. Prioritize and require task/owner-bound progress without rewriting source payloads or dropping cleanup; preserve generic thread targets and version-1 contracts.
