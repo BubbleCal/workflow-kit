@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { reviewWindowAt, REVIEW_WINDOW } from './review-window.mjs';
 import { readDependencyPolicy, forkRoute, releaseSuccessorVerified } from './dependency-provenance.mjs';
+import { ciFailures } from './ci-state.mjs';
 
 const stable = v => JSON.stringify(v && typeof v === 'object' ? Array.isArray(v) ? v.map(x => JSON.parse(stable(x))) : Object.fromEntries(Object.keys(v).sort().map(k => [k, JSON.parse(stable(v[k]))])) : v ?? null);
 const hash = v => createHash('sha256').update(stable(v)).digest('hex').slice(0, 24);
@@ -49,7 +50,7 @@ export class LifecycleLedger {
     const previous = old.snapshot ? JSON.parse(old.snapshot) : null;
     if (previous && Date.parse(previous.checked_at) > Date.parse(snapshot.checked_at)) throw new Error('Out-of-order PR snapshot');
     const stateChanged = !previous || ['state','head_sha','draft'].some(k=>previous[k]!==snapshot[k]);
-    const saved = { ...snapshot, state_revision:(previous?.state_revision ?? 0)+Number(stateChanged) };
+    const saved = { ...snapshot, ...(snapshot.ci === undefined && previous?.head_sha === snapshot.head_sha && previous.ci ? {ci:previous.ci} : {}), state_revision:(previous?.state_revision ?? 0)+Number(stateChanged) };
     this.db.prepare('UPDATE lifecycle_prs SET snapshot=?,feedback_updated_at=CASE WHEN ? THEN ? ELSE feedback_updated_at END,updated_at=? WHERE pr_key=?')
       .run(stable(saved), Number(feedbackCollected), snapshot.updated_at, this.now(), key);
     return { observed: true, pr_key: key };
@@ -76,6 +77,15 @@ export class LifecycleLedger {
     if (releaseRoute) return answer(s.state==='closed'?'closed_unmerged':'release_route_required','reconcile_release_route',{release_route:releaseRoute});
     if (s.state === 'merged') return answer('merged', 'decide_after_merge', { merge_sha: s.merge_sha });
     if (s.state === 'closed') return answer('closed_unmerged', 'resolve_closed');
+    const ci = ciFailures(s,this.now());
+    if (ci.unknown) return answer('ci_observation_due','refresh_ci');
+    const failureVersion = hash(ci.failures);
+    const ciHandled = ci.failures.length && this.db.prepare(`SELECT 1 FROM lifecycle_intents
+      WHERE pr_key=? AND action='triage_ci' AND state='resolved'
+        AND json_extract(payload,'$.head')=? AND json_extract(payload,'$.failure_version')=?`).get(key,s.head_sha,failureVersion);
+    if (ci.failures.length && !ciHandled) return answer('ci_failed','triage_ci',
+      {artifact_revision:0,failure_version:failureVersion,failed_checks:ci.failures});
+
     if (w.feedback_updated_at !== s.updated_at) return answer('feedback_due', 'refresh_feedback');
     const feedback = this.feedback(s.repository, s.pr_number, s.head_sha);
     const feedbackVersion = hash(feedback.items);
@@ -101,8 +111,7 @@ export class LifecycleLedger {
       if (window.blocked) return answer('review_window', null, { due_at: window.next_eligible_at });
       return answer('ready_undelivered', 'deliver_review', { draft: s.draft });
     }
-    if (s.checks_state === 'failed' && s.checks_scope === 'required' && s.checks_head === s.head_sha)
-      return answer('ci_failed','triage_ci',{delivery_receipt:sent.action_key});
+    if (ciHandled) return answer('ci_disposition_recorded',null,{failure_version:failureVersion,delivery_receipt:sent.action_key});
     return answer('review_delivered', 'check_merge', { delivery_receipt: sent.action_key });
   }
   reconcile() {
@@ -156,13 +165,13 @@ export class LifecycleLedger {
       if (!['resolve_closed','decide_after_merge','decide_feedback','obtain_readiness','repair_feedback','triage_ci','reconcile_delivery','deliver_local','reconcile_release_route'].includes(row.action) ||
         progress_resolution?.verified !== true || !progress_resolution.task_ids?.includes(current.task_id))
         throw new Error('Actual task-bound progress disposition required');
-      if (row.action === 'repair_feedback' && progress_resolution.task_complete === true)
-        throw new Error('Material feedback must be assessed as addressed before completing its task');
+      if (['repair_feedback','triage_ci'].includes(row.action) && progress_resolution.task_complete === true)
+        throw new Error('Material feedback or CI failure needs a successor or verified wait, not task completion');
       if (row.action==='reconcile_release_route' && !releaseSuccessorVerified(progress_resolution.goals,current.task_id,current.release_route))
         throw new Error('Persist the released-upstream, automatic-sync, consumer-adoption and integrated-acceptance successor path');
       if (['decide_after_merge','deliver_local','reconcile_release_route'].includes(row.action) || row.action === 'resolve_closed' && progress_resolution.task_complete === true)
         this.db.prepare('UPDATE lifecycle_prs SET retired=1 WHERE pr_key=?').run(row.pr_key);
-      else if (row.action !== 'resolve_closed') { state = 'waiting'; due = this.now() + 10 * 60000; }
+      else if (!['resolve_closed','triage_ci'].includes(row.action)) { state = 'waiting'; due = this.now() + 10 * 60000; }
     } else if (disposition === 'wait') {
       if (wait?.pr_key !== row.pr_key || wait?.head !== current.head) throw new Error('Wait must belong to this exact PR/head');
       const result = this.checkWait(wait);

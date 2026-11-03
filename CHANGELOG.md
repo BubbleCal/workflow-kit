@@ -1,5 +1,9 @@
 # Changes
 
+## 0.2.5
+
+Collect exact-head individual CI checks/statuses and triage new failures before draft/readiness transitions. Deduplicate unchanged failures after task-bound repair or typed-wait disposition; preserve existing owners, required merge checks and closed-PR handling.
+
 ## 0.2.4
 
 Rotate unprocessed non-human inputs within equal aged priority using completed-batch history. Preserve human order, in-flight batches and receipts. Distinguish recovery queue admission gaps from offered-but-unhandled recovery in health evidence.

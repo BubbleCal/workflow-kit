@@ -31,7 +31,9 @@ Then control `lifecycle_observe` takes snapshot_file or snapshot. Required facts
 repository, pr_number, head_sha, state (open/closed/merged), draft, updated_at,
 checked_at and evidence_ref; merged also needs merged_at and merge_sha. A failed
 read is unknown, never closed or an empty feedback feed. The lightweight collector
-does not invent CI or approval facts. State facts older than 20 minutes require
+collects current-head individual check runs and commit statuses as observed CI,
+without inferring required-check policy or approval. Follow CI_FAILURES.md for
+partial failures, exact-job deduplication and legitimate package waits. State facts older than 20 minutes require
 refresh before any further lifecycle decision; existing external gates still
 require their own fresh checks immediately before an operation.
 
@@ -57,8 +59,11 @@ The next actions are explicit:
   causes a metadata refresh, never a blind repeat of the ready transition.
 - check_merge: inspect approval validity for the current PR (MERGE_APPROVAL.md), required checks and repository rules,
   then use the existing conditional merge guard when eligible.
-- triage_ci: classify and resolve a failed required check; do not just wait for
-  approval while a known failed required check remains unhandled.
+- refresh_ci: refresh incomplete, stale or mismatched individual CI source facts.
+- triage_ci: classify new failed/cancelled current-head checks even on drafts or
+  while other checks run. Save a concrete repair or verified wait; do not just
+  wait for approval or all jobs to finish. Same-head failure identities deduplicate
+  across polls and draft changes. Completed triage preserves required merge gates.
 - resolve_closed: stop waiting for merge. Decide whether to reopen, replace,
   supersede, abandon within original scope, or seek a real human decision.
 - decide_after_merge: record remaining adoption, publication or acceptance work,
@@ -157,7 +162,7 @@ are absent, replace owners or repeatedly wake an active worker to refresh status
 ## Priority and invariant sweep
 
 New coordinator batches prioritize actual human input, material feedback/closed-PR
-handling, review delivery/merge and stage results, then due waits/recovery and
+handling and CI triage, review delivery/merge and stage results, then due waits/recovery and
 configuration, then intake/projection. Waiting items gain priority every 30
 minutes; human input remains first and preserves its own order. Within an equal
 non-human priority, order by last completed-batch opportunity or original enqueue

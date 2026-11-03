@@ -67,3 +67,5 @@ For merge approval follow MERGE_APPROVAL.md. When the review commit differs from
 For fully completed unloaded owners, use the existing guarded archive path with truthful fresh terminal evidence as described in LIVENESS_RECOVERY.md. Do not wake a worker merely to archive it. Preserve unfinished-parent protection and native readback.
 
 Within the same aged priority, rotate unprocessed non-human inputs using their last completed-batch opportunity or enqueue time. Preserve human-command priority/order, fixed batches and receipts. Health distinguishes queue_admission_gap from recovery_unhandled; no extra timer or worker wakeup.
+
+Follow CI_FAILURES.md for current-head individual failed jobs even on drafts or partially running workflows. Exact-task triage records an original-owner successor or typed package/access/job wait before ACK. Preserve existing repairs and unchanged-failure deduplication; triage does not establish green CI or authorize retry/merge.

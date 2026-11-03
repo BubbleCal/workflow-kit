@@ -213,3 +213,55 @@ test('the cached invariant sweep covers accepted stage gaps while preserving hol
   const rows=m.db.prepare("SELECT payload FROM mail WHERE json_extract(payload,'$.event')='stage_reconciliation'").all();
   assert.equal(rows.length,1);assert.equal(JSON.parse(rows[0].payload).task_id,'a');m.close();
 });
+
+const partialCI = (now=NOW, head=HEAD) => ({head_sha:head,checked_at:new Date(now).toISOString(),evidence_ref:'current-head-check-runs',complete:true,
+  checks:[{kind:'check_run',id:'job-deny',name:'deny',head_sha:head,status:'completed',conclusion:'failure',url:'https://github.com/example/project/actions/runs/1/job/1'},
+    {kind:'check_run',id:'job-tests',name:'tests',head_sha:head,status:'in_progress',conclusion:null,url:'https://github.com/example/project/actions/runs/1/job/2'}]});
+
+test('a failed job routes immediately before draft readiness, feedback collection or aggregate CI completion',()=>{
+  for(const draft of [true,false]){
+    const c=setup();c.lifecycle.observe(observation(NOW,{draft,checks_state:'pending',ci:partialCI()}));
+    const action=c.lifecycle.inspect(key);assert.equal(action.action,'triage_ci');
+    assert.deepEqual(action.failed_checks.map(x=>x.id),['job-deny']);
+    assert.equal(action.owner_thread_id,'owner');
+    assert.equal(c.lifecycle.checkWait({kind:'pr',pr_key:key,head:HEAD,expected:'ci_pending',next_check_at:new Date(NOW+600000).toISOString()}).valid,false);c.close();
+  }
+});
+
+test('CI failures deduplicate across polls and draft transitions and never apply to another head',()=>{
+  let now=NOW;const c=setup(()=>now);c.lifecycle.observe(observation(now,{draft:true,ci:partialCI(now)}));const first=c.lifecycle.reconcile()[0];
+  now+=1000;c.lifecycle.observe(observation(now,{draft:false,evidence_ref:'second-file',ci:partialCI(now)}));
+  assert.equal(c.lifecycle.reconcile()[0].key,first.key);
+  now+=1000;c.lifecycle.observe(observation(now));assert.equal(c.lifecycle.inspect(key).action,'triage_ci');
+  now+=1000;c.lifecycle.observe(observation(now,{head_sha:'c'.repeat(40),ci:partialCI(now)}));
+  assert.equal(c.lifecycle.inspect(key).action,'refresh_ci');c.lifecycle.reconcile();
+  assert.equal(c.db.prepare('SELECT state FROM lifecycle_intents WHERE intent_key=?').get(first.payload.lifecycle_key).state,'superseded');c.close();
+});
+
+test('a real package dependency wait records a successor without restarting the repair owner',()=>{
+  const c=setup();c.lifecycle.observe(observation(NOW,{draft:true,ci:partialCI()}));
+  const m=new Mailbox(':memory:',{now:()=>NOW,lifecycleAccess:fn=>fn(c.lifecycle)});m.activateTransitions({source_message_id:'upgrade',actual_human_verified:true});
+  m.reconcileTransitions();const b=begin(m),event=b.snapshot.items[0];assert.equal(event.payload.action,'triage_ci');
+  const condition={kind:'dependency',fact_key:'java-beta',subject:'maven:released-beta',requirement:'official Java artifact'};
+  m.waits.observe({fact_key:condition.fact_key,kind:'dependency',subject:condition.subject,data:{available:false,requirement:condition.requirement},observed_at:new Date(NOW).toISOString(),expires_at:new Date(NOW+1800000).toISOString(),evidence_ref:'official-package-publication-failed'});
+  const goal={id:'package-wait',authorization_ref:'original-human',expected_revision:0,complete:false,stages:[{id:'adopt-package',task_id:'T-010',owner_thread_id:'owner',scope_key:'existing-branch',state:'blocked',depends_on:[],blocker:{kind:'dependency',reason:'Official Java artifact unavailable',resume_condition:'Official package published and source verified',evidence_ref:'actual-Maven-source',condition}}]};
+  m.recordProgress({batch_id:b.id,event_key:event.key,goals:[goal],authorization_verified:true,evidence_ref:'CI-triage-and-package-source',ack:false});
+  c.lifecycle.resolve({key:event.payload.lifecycle_key,generation:1,disposition:'progress',evidence_ref:'typed-package-wait',progress_resolution:{verified:m.progress.hasResolution(event.key),task_ids:['T-010'],task_complete:false}});
+  m.acknowledge(b.id,[event.key]);assert.equal(m.progress.status().actions.length,0);
+  assert.equal(c.lifecycle.reconcile().some(x=>x.payload.action==='triage_ci'),false);
+  observe(c,NOW,{draft:false,ci:partialCI()});sent(c);
+  assert.equal(c.lifecycle.inspect(key).state,'ci_disposition_recorded');
+  assert.equal(c.lifecycle.checkWait({kind:'pr',pr_key:key,head:HEAD,expected:'ci_pending',next_check_at:new Date(NOW+600000).toISOString()}).valid,false);
+  const newFailure=partialCI();newFailure.checks[0].id='new-attempt';observe(c,NOW,{ci:newFailure});
+  assert.equal(c.lifecycle.inspect(key).action,'triage_ci');m.finish(b.id);m.close();c.close();
+});
+
+
+test('stale or incomplete CI is unknown and a clean rerun does not resurrect an old failure',()=>{
+  const c=setup();for(const patch of [{complete:false},{checked_at:new Date(NOW-21*60000).toISOString()}]){
+    c.lifecycle.observe(observation(NOW,{ci:{...partialCI(),...patch}}));assert.equal(c.lifecycle.inspect(key).action,'refresh_ci');
+  }
+  const ci=partialCI();ci.checks[0].conclusion='success';observe(c,NOW,{ci});assert.equal(c.lifecycle.inspect(key).action,'deliver_review');
+  ci.checks.push({kind:'status',id:'external-error',name:'external-check',head_sha:HEAD,status:'completed',conclusion:'error',url:'https://example.test/check'});
+  c.lifecycle.observe(observation(NOW,{ci}));assert.equal(c.lifecycle.inspect(key).action,'triage_ci');c.close();
+});

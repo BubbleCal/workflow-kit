@@ -53,3 +53,5 @@ Follow MERGE_APPROVAL.md for current approval validity. A push alone does not di
 Completed-task archival accepts a verified terminal notLoaded owner under LIVENESS_RECOVERY.md, without waking it. Preserve actual status, native identity/freshness, whole-goal acceptance and all job, approval, delivery and cleanup checks. Only the coordinator archives and records the native receipt.
 
 Within the same aged priority, rotate unprocessed non-human inputs using their last completed-batch opportunity or enqueue time. Preserve human-command priority/order, fixed batches and receipts. Health distinguishes queue_admission_gap from recovery_unhandled; no extra timer or worker wakeup.
+
+Follow CI_FAILURES.md for current-head individual failed jobs even on drafts or partially running workflows. Exact-task triage records an original-owner successor or typed package/access/job wait before ACK. Preserve existing repairs and unchanged-failure deduplication; triage does not establish green CI or authorize retry/merge.

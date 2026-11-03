@@ -1,9 +1,9 @@
 {
-  "version": "0.2.4",
+  "version": "0.2.5",
   "source": "local workflow runtime snapshot",
   "source_files": {
     "runtime/control.mjs": "dc6f36fa3ea07ce4ae4d4e86107455ec3b2f9e1d48c28839517da6557f8a44d6",
-    "runtime/mailbox.mjs": "d19e74504e8ef05cf5bb9a9e9e4cb578fba32a3c8a51ce8f9bac05a4caa33331",
+    "runtime/mailbox.mjs": "9f76cfefedd9a88bb51826070ff32452a547452ccb86f6d78b0bf52a4f61bfc0",
     "runtime/progress.mjs": "85fcd1f52dc277157a5552e2eea328acfb25f24ad859805bc14244b25108873a",
     "runtime/watchdog.mjs": "22a1e38384d9f628d452fb47c0d1214dd66162ad084ff6b264e86475df6b1948",
     "runtime/daily-review.mjs": "c86a9599bdcaa56c8854e49e330c5f0adae5dfd5d069c979175caeb8e52f7b4f",
@@ -13,12 +13,13 @@
     "runtime/fetch-review-feedback.mjs": "b801eeea9a2d4951d002b03ff7101a53e926b3c058f0e2fe945eceafda9fb562",
     "runtime/outcomes.mjs": "78e553fbb78a1433b6b4c7b3a739062602b74334e0c8b4ea0a104d77d7e017c2",
     "runtime/model-selection.mjs": "cde3b8be50882361e9676b86c18170052691ab31f71f1a3c01139037072e70a4",
-    "runtime/lifecycle.mjs": "7e26586732bfe7ee48c9716844e931b8f1809bc32582a035609b0ad550f8b836",
+    "runtime/lifecycle.mjs": "a60d37f5190113249e5b5a7f011d2140f3e0615aa09543dd235421e6ca2d3f2f",
     "runtime/waits.mjs": "aeb4cf2bdcf8bf5d939239d16d39f85122c3d11810ce6021d74c3875b09ba2de",
-    "runtime/fetch-pr-state.mjs": "33a10543ee9abdc3c825ca9439f842e6658d1af560d836bdd58e126163b1f4d5",
+    "runtime/fetch-pr-state.mjs": "3ec4176c92caa3bc4858c93abbf5e46a031d14192d94e345ed16395924a158f5",
     "runtime/dependency-provenance.mjs": "fbaaded67eeca3a2ee62250e813d07d0667deef534d5b4d46e2ecab55060d320",
     "runtime/merge-approval.mjs": "026c58dc40ec63a93130221b8c830647e4bc256bbd97bd8dc73f2c2f839b7b22",
-    "runtime/fetch-merge-approval.mjs": "dfb051627abc9da83c5848245055f0bff5d6ea21d1f4cdd8da36724e1dd69b03"
+    "runtime/fetch-merge-approval.mjs": "dfb051627abc9da83c5848245055f0bff5d6ea21d1f4cdd8da36724e1dd69b03",
+    "runtime/ci-state.mjs": "8f00790daaa150c53f93c36ea0cabbcebd9bc2c0e571c478328a68db7444de58"
   },
   "state_included": false,
   "credentials_included": false
