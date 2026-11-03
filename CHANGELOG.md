@@ -1,5 +1,9 @@
 # Changes
 
+## 0.2.7
+
+Prioritize owned terminal results immediately alongside urgent operational work, preserving human precedence, retry rotation and progress/ACK guards. Avoid the thirty-minute aging prerequisite that delayed new deliverables behind old diagnostics.
+
 ## 0.2.6
 
 Reconcile unbound recovery diagnostics against unique same-task/owner/preflight continuations with actual execution proof. Require complete task coverage and current-generation evidence; preserve unfinished goals, original source acknowledgement and active jobs.

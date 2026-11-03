@@ -184,3 +184,5 @@ If instance.json disables external Slack delivery, open ready PRs produce
 deliver_local instead. Record actual local delivery and task-bound progress before
 resolving that obligation. This does not enable Slack, merging, Notion, or a new
 notification channel. Original task acceptance remains separate.
+
+Owned terminal results enter the urgent non-human operational tier immediately, without waiting thirty minutes for aging. Human input stays first, equal-priority rotation remains, and original progress/ACK/side-effect guards still apply. No concurrency or dispatch-count cap is introduced.

@@ -23,7 +23,7 @@ export function workPriority(row, now) {
   const p = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload;
   const base = p?.event === 'pr_lifecycle_action' ?
     (['repair_feedback','resolve_closed','assess_feedback','triage_ci'].includes(p.action) ? 1 : 2) :
-    p?.event === 'stage_reconciliation' ? 3 : requiresProgress({ kind:row.kind,payload:p },2) ? 2 : p?.event === 'wait_reconciliation' ? 3 :
+    p?.event === 'stage_reconciliation' ? 3 : requiresProgress({ kind:row.kind,payload:p },2) ? 1 : p?.event === 'wait_reconciliation' ? 3 :
     row.kind === 'recovery' ? 3 : row.kind === 'configuration' ? 4 : 6;
   return Math.max(1, base - Math.floor(Math.max(0,now-row.created_at)/1800000));
 }

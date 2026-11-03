@@ -169,3 +169,14 @@ test('released unsent reservations do not count as processing opportunities',()=
   const first=m.reserve('coordinator',idle()).batch;assert.equal(m.releaseReservation(first.id).released,true);
   const next=m.reserve('coordinator',idle()).batch;assert.deepEqual(next.snapshot.items.map(i=>i.key),first.snapshot.items.map(i=>i.key));m.close();
 });
+
+test('a completed worker result enters the next batch ahead of already offered aged diagnostics',()=>{
+  let now=NOW-4*3600000;const m=new Mailbox(':memory:',{now:()=>now});m.activateTransitions({source_message_id:'upgrade',actual_human_verified:true});
+  for(let i=0;i<20;i++)m.enqueue({key:'old-gap-'+i,lane:'coordinator',kind:'event',payload:{event:'stage_reconciliation',task_id:'old-'+i,owner_thread_id:'worker-'+i}});
+  now=NOW-1000;const first=sent(m);m.begin(first.id);
+  now=NOW-500;m.enqueue({key:'actual-deliverable',lane:'coordinator',kind:'worker_result',payload:{task_id:'T-new',owner_thread_id:'original-owner',evidence_ref:'actual-ready-artifact'}});
+  now=NOW;m.finish(first.id,{processed_keys:[]});m.enqueue(command('current-human'));
+  const next=sent(m);assert.equal(next.snapshot.items[0].key,'current-human');assert.equal(next.snapshot.items[1].key,'actual-deliverable');
+  m.begin(next.id);assert.throws(()=>m.acknowledge(next.id,['actual-deliverable']),/Durable successor/);
+  assert.equal(m.db.prepare("SELECT COUNT(*) AS n FROM mail WHERE item_key='actual-deliverable'").get().n,1);m.close();
+});
