@@ -1,15 +1,15 @@
 {
-  "version": "0.1.4",
-  "verified_at": "2026-11-03T01:04:51.867899+00:00",
+  "version": "0.1.5",
+  "verified_at": "2026-11-03T07:32:54.316Z",
   "environment": {
     "platform": "darwin",
     "architecture": "arm64",
     "node": "v23.11.0"
   },
   "tests": {
-    "runtime": 109,
+    "runtime": 111,
     "portable_integration": 3,
-    "passed": 112,
+    "passed": 114,
     "failed": 0
   },
   "verified": [
@@ -23,7 +23,8 @@
     "Review window, durable recovery and current-head guards retain passing regressions",
     "macOS symlinked temporary paths execute the CLI correctly",
     "Resolved unsent health events are superseded with durable receipts, while legacy keys, active batches and later recovery generations remain correct",
-    "All-author feedback coverage, current-head semantic disposition, existing repair deduplication and final publication gates"
+    "All-author feedback coverage, current-head semantic disposition, existing repair deduplication and final publication gates",
+    "Ordinary unloaded-owner continuation uses fresh matching native evidence and preserves job/hold/approval/permission/deduplication gates"
   ],
   "operational_data_exported": false,
   "credentials_exported": false,
@@ -44,5 +45,6 @@
   "health_retirement_verified": true,
   "documentation_verified_at": "2026-11-03T00:27:14.174982+00:00",
   "dispatcher_default_minutes": 10,
-  "review_feedback_guards_verified": true
+  "review_feedback_guards_verified": true,
+  "unloaded_owner_recovery_verified": true
 }

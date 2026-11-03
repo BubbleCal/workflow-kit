@@ -89,15 +89,27 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
   need(e.scope_authorized === true && typeof e.authorization_ref === 'string' && !!e.authorization_ref, 'authorization_evidence_required');
   need(typeof e.policy_version === 'string' && !!e.policy_version && e.policy_version === e.current_policy_version, 'policy_changed_or_unknown');
   if (kind !== 'human_input') need(e.stopped === false, 'human_hold_or_unknown_stop_state');
-  const idle = () => {
-    need(e.thread_status === 'idle', 'thread_not_idle');
+  const idle = (allowUnloaded = false) => {
+    const snapshot = e.native_thread_snapshot;
+    const flags = snapshot?.thread?.status?.activeFlags ?? [];
+    // App restarts unload terminal owners. Residency alone must not force a new
+    // human resume, but an unloaded badge alone proves neither quiescence nor safety.
+    const unloaded = allowUnloaded && e.thread_status === 'notLoaded' && e.thread_archived === false &&
+      snapshot?.thread?.id === payload?.thread_id && snapshot?.thread?.status?.type === 'notLoaded' &&
+      Array.isArray(flags) && flags.length === 0 && snapshot?.latestTurn?.id === e.actual_turn_id &&
+      ['completed', 'failed', 'interrupted'].includes(snapshot?.latestTurn?.status) &&
+      freshness({ verified_at: snapshot?.checked_at }, now) &&
+      e.native_approval_pending === false && e.native_permissions_unchanged === true &&
+      (snapshot.latestTurn.status !== 'interrupted' || e.interruption_reconciled === true &&
+        typeof e.interruption_evidence_ref === 'string' && !!e.interruption_evidence_ref.trim());
+    need(e.thread_status === 'idle' || unloaded, 'thread_not_idle');
     need(e.queued_input === false, 'queued_input_or_unknown');
     need(e.pending_dispatch === false, 'unconsumed_dispatch_or_unknown');
     need(e.underlying_job_running === false, 'background_job_or_unknown');
     need(typeof e.expected_turn_id === 'string' && !!e.expected_turn_id && e.expected_turn_id === e.actual_turn_id, 'turn_changed_or_unknown');
   };
   if (kind === 'dispatch') {
-    idle();
+    idle(true);
     const readOnly = payload?.execution_mode === 'read_only_analysis';
     if (readOnly) {
       const capabilities = payload.required_capabilities;

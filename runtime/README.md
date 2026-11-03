@@ -341,3 +341,16 @@ draft_only_preserved and exact_interval_preserved evidence. All non-prompt
 fields remain unchanged and current-config hash is rechecked before update.
 
 Read REVIEW_FEEDBACK.md before following PR feedback or attempting an enabled PR delivery/merge. Complete all-author source intake and current-head semantic assessments are mandatory; repeat polls reuse content/head evidence and repair routes.
+
+Ordinary authorized `dispatch` also supports an unloaded terminal owner. Keep
+`thread_status=notLoaded` and supply `native_thread_snapshot` with the actual
+`thread.id`, `thread.status`, `latestTurn.id/status`, and `checked_at` from a
+supported native read (fresh within 60 seconds at both prepare and claim).
+The snapshot must match the target and actual turn and be completed, failed or
+interrupted without active flags. Require `thread_archived=false`,
+`native_approval_pending=false` and `native_permissions_unchanged=true`.
+Interrupted turns additionally require `interruption_reconciled=true` and a
+nonempty `interruption_evidence_ref` establishing no human stop or unresolved
+native approval. All existing job, queued-input, owner, scope, native-permission
+and deduplication checks still apply; unknown jobs are not absent jobs. This is
+not a human_input action, archive exception, permission probe or new task.

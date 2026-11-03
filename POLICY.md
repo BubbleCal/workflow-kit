@@ -21,3 +21,10 @@ Validate proportionately and follow applicable repository requirements. Reuse va
 The installation request authorizes the specifically requested role/schedule setup, not arbitrary new user-visible work chats. Later new chats still require an explicit user request. Reuse original execution owners and respect existing task drivers.
 
 Enabled PR delivery and merge require the complete current-head feedback ledger described in REVIEW_FEEDBACK.md. Model semantic assessment, source/body identity and local fix evidence govern applicability; formal state or GitHub unresolved flags alone do not. Optional delivery remains disabled unless configured and authorized.
+
+## Unloaded owner recovery
+
+Follow LIVENESS_RECOVERY.md after a local app interruption. Ordinary dispatch can
+resume a verified terminal unloaded owner under the same authorization, job,
+permission and ownership checks. Do not invent human input or relabel native
+status. Scheduler recovery and actual engineering recovery are separate facts.

@@ -1,5 +1,9 @@
 # Changes
 
+## 0.1.5
+
+Allow ordinary continuation of an unloaded terminal owner with fresh matching native evidence while preserving job, hold, approval, permission and deduplication checks. Document shared scheduler/backend availability and supported recovery.
+
 ## 0.1.4
 
 Persist all-author PR feedback and current-head semantic dispositions. Gate enabled PR delivery/merge on complete feedback, deduplicate existing repair routes and preserve active owners. Add a read-only paginated gh collector; optional integrations remain opt-in.

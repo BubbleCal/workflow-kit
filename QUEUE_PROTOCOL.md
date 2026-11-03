@@ -21,3 +21,10 @@ Use existing control prepare/claim/settle, exact current-head guards and native 
 Before maintenance admission and final send authorization, the mailbox supersedes health events whose recovery has a durable current disposition. Immutable content and resolution evidence are retained. Already sending/running batches and unknown cases remain untouched. A later recovery generation can escalate once independently.
 
 Follow REVIEW_FEEDBACK.md for all-author PR feedback intake and current-head semantic assessment. Formal COMMENTED and green CI do not imply absence of material findings. Preserve existing implementation scope and repair routes; never post/resolve comments or duplicate a busy owner.
+
+## Unloaded owner recovery
+
+Follow LIVENESS_RECOVERY.md after a local app interruption. Ordinary dispatch can
+resume a verified terminal unloaded owner under the same authorization, job,
+permission and ownership checks. Do not invent human input or relabel native
+status. Scheduler recovery and actual engineering recovery are separate facts.

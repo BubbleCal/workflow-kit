@@ -81,6 +81,52 @@ test('fresh evidence and current policy are required at claim, not only prepare'
   s.close();
 });
 
+test('ordinary continuation can claim a verified unloaded terminal owner without inventing human input', () => {
+  const s = new ControlStore(':memory:', { now: () => NOW });
+  const a = action('unloaded-continuation');
+  Object.assign(a.evidence, { thread_status: 'notLoaded', thread_archived: false,
+    native_approval_pending: false, native_permissions_unchanged: true,
+    native_thread_snapshot: { checked_at: common().verified_at,
+      thread: { id: a.payload.thread_id, status: { type: 'notLoaded' } },
+      latestTurn: { id: 'turn-1', status: 'completed' } } });
+  assert.equal(s.prepare(a).prepared, true);
+  const claim = s.claim({ key: a.key, owner: 'coordinator', evidence: a.evidence });
+  assert.equal(claim.claimed, true);
+  assert.equal(claim.payload.dispatch_origin, undefined);
+  assert.equal(claim.payload.thread_id, 'worker-1');
+  s.settle({ key: a.key, attempt_id: claim.attempt_id, outcome: 'sent', evidence_ref: 'native-send-receipt' });
+  assert.equal(s.claim({ key: a.key, owner: 'coordinator', evidence: a.evidence }).claimed, false);
+  s.close();
+});
+
+test('unloaded recovery requires fresh matching terminal evidence and preserves every existing safety gate', () => {
+  const a = action();
+  const snapshot = { checked_at: common().verified_at,
+    thread: { id: 'worker-1', status: { type: 'notLoaded' } },
+    latestTurn: { id: 'turn-1', status: 'completed' } };
+  const e = { ...a.evidence, thread_status: 'notLoaded', thread_archived: false,
+    native_approval_pending: false, native_permissions_unchanged: true, native_thread_snapshot: snapshot };
+  for (const patch of [
+    { native_thread_snapshot: undefined }, { thread_archived: true }, { thread_archived: undefined },
+    { native_approval_pending: true }, { native_permissions_unchanged: false },
+    { queued_input: true }, { pending_dispatch: true }, { underlying_job_running: undefined },
+    { underlying_job_running: true }, { existing_driver_owns_step: true }, { overlapping_owner: true },
+    { stopped: true }, { runtime_permissions_verified: false }, { actual_turn_id: 'new-turn' },
+    { native_thread_snapshot: { ...snapshot, checked_at: new Date(NOW - 61000).toISOString() } },
+    { native_thread_snapshot: { ...snapshot, thread: { id: 'other-owner', status: { type: 'notLoaded' } } } },
+    { native_thread_snapshot: { ...snapshot, thread: { id: 'worker-1', status: { type: 'notLoaded', activeFlags: ['waitingOnApproval'] } } } },
+    ...['inProgress', 'unknown', 'interrupted'].map(status => ({ native_thread_snapshot: { ...snapshot, latestTurn: { id: 'turn-1', status } } })),
+  ]) assert.equal(assess('dispatch', a.payload, { ...e, ...patch }, NOW).allowed, false, JSON.stringify(patch));
+  const interrupted = { ...e, native_thread_snapshot: { ...snapshot, latestTurn: { id: 'turn-1', status: 'interrupted' } },
+    interruption_reconciled: true, interruption_evidence_ref: 'inspected-original-request-and-interruption' };
+  assert.equal(assess('dispatch', a.payload, interrupted, NOW).allowed, true);
+  assert.equal(assess('dispatch', a.payload, { ...interrupted, interruption_evidence_ref: undefined }, NOW).allowed, false);
+  const s = new ControlStore(':memory:', { now: () => NOW });
+  s.prepare({ ...a, evidence: e });
+  assert.equal(s.claim({ key: a.key, owner: 'coordinator', evidence: { ...e, underlying_job_running: true } }).claimed, false);
+  s.close();
+});
+
 test('five heavy jobs are allowed, a sixth is blocked, and light work can use the dispatch budget', () => {
   const p = action().payload;
   for (const active_heavy_count of [3, 4])
