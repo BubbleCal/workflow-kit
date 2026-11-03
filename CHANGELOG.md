@@ -1,5 +1,9 @@
 # Changes
 
+## 0.2.8
+
+Reuse unresolved covering recovery records when the same idle turn has a smaller task set. Preserve immutable scope, new-task/new-turn detection and explicit dispositions; do not rewrite existing duplicates or in-flight work.
+
 ## 0.2.7
 
 Prioritize owned terminal results immediately alongside urgent operational work, preserving human precedence, retry rotation and progress/ACK guards. Avoid the thirty-minute aging prerequisite that delayed new deliverables behind old diagnostics.

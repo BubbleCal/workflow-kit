@@ -226,3 +226,43 @@ test('unbound retirement rejects a wrong preflight turn, unrelated task, partial
     now+=300000;select(m);assert.notEqual(m.watchdog.status()[0].phase,'resolved',mode);m.close();
   }
 });
+
+test('shrinking the task set in the same idle turn reuses its unresolved covering recovery',()=>{
+  let now=NOW;const m=new Mailbox(':memory:',{now:()=>now}),tasks=[task('T1'),task('T2')];
+  observe(m,select(m,tasks),[poll(now)]);flush(m);const original=m.db.prepare('SELECT * FROM watchdog_cases').get();
+  now+=300000;observe(m,select(m,[task('T2')]),[poll(now)]);flush(m);
+  assert.equal(m.db.prepare('SELECT COUNT(*) AS n FROM watchdog_cases').get().n,1);
+  assert.equal(m.db.prepare("SELECT COUNT(*) AS n FROM mail WHERE kind='recovery'").get().n,1);
+  assert.equal(m.db.prepare('SELECT recovery_payload FROM watchdog_cases WHERE case_key=?').get(original.case_key).recovery_payload,original.recovery_payload);
+  assert.deepEqual(JSON.parse(original.tasks),['T1','T2']);m.close();
+});
+
+test('subset coalescing preserves new tasks, new turns and explicit blocked dispositions',()=>{
+  for(const mode of ['new-task','new-turn','blocked']){
+    let now=NOW;const m=new Mailbox(':memory:',{now:()=>now}),initial=mode==='new-task'?[task('T1')]:[task('T1'),task('T2')];
+    observe(m,select(m,initial),[poll(now)]);flush(m);const c=m.watchdog.status()[0];
+    if(mode==='blocked')m.watchdog.resolve({case_key:c.case_key,recovery_key:c.recovery_key,disposition:'blocked',evidence_ref:'verified-live-job',reason:'One existing job still runs',resume_condition:'Its result is verified',next_check_at:new Date(now+3600000).toISOString()});
+    now+=300000;const selected=mode==='new-task'?[task('T1'),task('T2')]:[task('T2')];
+    observe(m,select(m,selected),[poll(now,'worker',mode==='new-turn'?{latestTurn:{id:'worker-next',status:'completed'}}:{})]);flush(m);
+    assert.equal(m.db.prepare('SELECT COUNT(*) AS n FROM watchdog_cases').get().n,2,mode);m.close();
+  }
+});
+
+test('a shrinking task set cannot generate a second escalation for the same unresolved idle gap',()=>{
+  let now=NOW;const m=new Mailbox(':memory:',{now:()=>now}),tasks=[task('T1'),task('T2')];
+  observe(m,select(m,tasks),[poll(now)]);flush(m);const c=m.watchdog.status()[0];completedRound(m,NOW+1,[c.recovery_key]);
+  now+=300000;observe(m,select(m,tasks),[poll(now)],poll(now,COORDINATOR));flush(m);
+  now+=300000;observe(m,select(m,[task('T2')]),[poll(now)],poll(now,COORDINATOR));flush(m);
+  assert.equal(m.db.prepare("SELECT COUNT(*) AS n FROM mail WHERE kind='workflow_recovery'").get().n,1);
+  assert.equal(m.watchdog.status().length,1);m.close();
+});
+
+test('an escalated queued disposition cannot absorb an independently actionable subset',()=>{
+  let now=NOW;const m=new Mailbox(':memory:',{now:()=>now}),tasks=[task('T1'),task('T2')];pendingGoal(m,tasks);
+  observe(m,select(m,tasks),[poll(now)]);flush(m);const c=m.watchdog.status()[0],action=m.progress.status().actions.find(a=>a.stage_id==='T1').action_key;
+  m.watchdog.resolve({case_key:c.case_key,recovery_key:c.recovery_key,disposition:'queued',continuation_key:action,evidence_ref:'actual-pending-action'});
+  completedRound(m,NOW+1,[c.recovery_key]);now+=300000;observe(m,select(m,tasks),[poll(now)],poll(now,COORDINATOR));
+  assert.equal(m.watchdog.status()[0].phase,'escalated');
+  now+=300000;observe(m,select(m,[{...tasks[0],hold:true},tasks[1]]),[poll(now)]);
+  assert.equal(m.watchdog.status().length,2);m.close();
+});

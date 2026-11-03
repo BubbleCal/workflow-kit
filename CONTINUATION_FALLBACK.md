@@ -124,3 +124,19 @@ not consume it. Unsent health can then retire under the existing rules; already
 sending/running health stays with its current batch. No worker message or new
 schedule is part of reconciliation. Human-only correction paths without matching
 continuation evidence still require the coordinator's explicit disposition.
+
+## Shrinking task sets on the same terminal turn
+
+If some tasks leave the selected set while the owner and terminal turn are
+unchanged, first look for an unhandled open/escalated case whose original task
+set strictly contains all selected tasks. Reuse the smallest covering case (then
+oldest stable identity). Its recovery source must still be pending/in-flight or
+awaiting outbox flush, with no current resolution_key. Preserve its exact original
+scope, payload and deduplication keys; later health cites that original scope.
+
+A new task or different turn still produces its own case. Do not reuse an explicit
+queued, blocked, protected or resolved disposition: a wait accepted for a broader
+scope must not hide an independently actionable subset. Existing duplicate rows
+and in-flight batch snapshots are not rewritten; the coordinator reconciles them
+from current task evidence. Coalescing does not authorize dispatch, retirement,
+archival or completion, or bypass current holds/drivers/permissions.

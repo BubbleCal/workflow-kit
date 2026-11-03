@@ -1,15 +1,15 @@
 {
-  "version": "0.2.7",
-  "verified_at": "2026-11-03T16:58:48.785893+00:00",
+  "version": "0.2.8",
+  "verified_at": "2026-11-03T18:20:34.866360+00:00",
   "environment": {
     "platform": "darwin",
     "architecture": "arm64",
     "node": "v23.11.0"
   },
   "tests": {
-    "runtime": 165,
+    "runtime": 169,
     "portable_integration": 3,
-    "passed": 168,
+    "passed": 172,
     "failed": 0
   },
   "verified": [
@@ -41,7 +41,8 @@
     "Equal-priority unprocessed inputs rotate from durable finished-batch history; humans retain priority/order, unsent reservations do not count, and health identifies whether recovery was actually offered",
     "Current-head failed jobs trigger draft/ready CI triage while other checks run; same failures deduplicate after task-bound disposition, typed package waits avoid repeated dispatch, and closed PRs/head races retain correct collection semantics",
     "Unbound recovery matches a unique current-generation actual continuation for every affected task; transport-only, wrong turn/task, partial/ambiguous/old evidence cannot retire it; original source ACK and incomplete goals remain",
-    "New owned terminal results share urgent operational priority immediately; a result arriving during an old diagnostic batch enters the next batch without aging, while human precedence and durable successor ACK remain enforced"
+    "New owned terminal results share urgent operational priority immediately; a result arriving during an old diagnostic batch enters the next batch without aging, while human precedence and durable successor ACK remain enforced",
+    "Same-owner/same-turn strict task subsets reuse unhandled covering recovery without changing payloads or creating a second escalation; new tasks/turns and blocked/queued dispositions remain independently actionable"
   ],
   "operational_data_exported": false,
   "credentials_exported": false,

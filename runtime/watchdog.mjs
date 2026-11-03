@@ -124,8 +124,19 @@ export class ContinuationWatchdog {
       const o = snapshots.find(p => p.thread?.id === owner.thread_id);
       if (!o || o.error || !fresh(o.checked_at, this.now())) { seen.push({ owner: owner.thread_id, reason: 'unknown_or_stale' }); continue; }
       if (!idle(o) || o.background_job_running === true || o.hold === true || o.existing_driver === true) { seen.push({ owner: owner.thread_id, reason: 'preserve_busy_job_hold_or_driver' }); continue; }
-      const caseKey = `continuation-gap:${hash([owner.thread_id, o.latestTurn.id, owner.task_ids])}`;
+      let caseKey = `continuation-gap:${hash([owner.thread_id, o.latestTurn.id, owner.task_ids])}`;
       let c = this.db.prepare('SELECT * FROM watchdog_cases WHERE case_key=?').get(caseKey);
+      if (!c) {
+        // A smaller unfinished set is already covered by the same unresolved
+        // idle-turn input. Keep its immutable scope instead of adding another alert.
+        c = this.db.prepare(`SELECT c.* FROM watchdog_cases c LEFT JOIN mail m ON m.item_key=c.recovery_key
+          WHERE c.owner_id=? AND c.turn_id=? AND c.phase IN ('open','escalated') AND c.resolution_key IS NULL
+            AND (m.item_key IS NULL OR (m.kind='recovery' AND m.state IN ('pending','in_batch')))
+          ORDER BY json_array_length(c.tasks),c.created_at,c.case_key`).all(owner.thread_id,o.latestTurn.id)
+          .find(candidate => { const covered = JSON.parse(candidate.tasks);
+            return covered.length > owner.task_ids.length && owner.task_ids.every(id => covered.includes(id)); });
+        if (c) caseKey = c.case_key;
+      }
       if (!c) {
         const recoveryKey = `${caseKey}:recovery:1`;
         const payload = { watchdog_case: caseKey, owner_thread_id: owner.thread_id, host_id: owner.host_id, task_ids: owner.task_ids,
@@ -148,7 +159,7 @@ export class ContinuationWatchdog {
       if (opportunity && fresh(coordinator_snapshot?.checked_at, this.now()) && idle(coordinator_snapshot)) {
         const admitted = JSON.parse(opportunity.snapshot).items?.some(i => i.key === c.recovery_key) === true;
         const payload = { workflow_health: true, watchdog_case: caseKey, source_recovery_key: c.recovery_key,
-          owner_thread_id: owner.thread_id, task_ids: owner.task_ids, eligible_coordinator_batch: opportunity.id,
+          owner_thread_id: owner.thread_id, task_ids: JSON.parse(c.tasks), eligible_coordinator_batch: opportunity.id,
           recovery_in_batch: admitted, health_reason: admitted ? 'recovery_unhandled' : 'queue_admission_gap',
           text: (admitted ? 'A recovery remained unhandled/unstarted after its completed coordinator batch.' :
             'A queued recovery was not admitted to the completed coordinator batch. Inspect queue priority and retry rotation before attributing this to the owner.') + ' Inspect this case, source receipts and concrete blocker in the existing maintenance owner; repair the workflow without becoming a second task-state writer. Use coordinator mailbox for operational changes. Do not directly wake workers, bypass permissions, replay uncertain starts or add a scheduler. If human action is truly required, queue the precise blocker once.' };

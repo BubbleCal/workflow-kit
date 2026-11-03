@@ -73,3 +73,5 @@ Follow CI_FAILURES.md for current-head individual failed jobs even on drafts or 
 Recovery diagnostics may retire from a unique actual continuation for every affected task, matching owner, old preflight turn, goal/stage/scope and current-generation execution evidence. Preserve unfinished goals and original source ACK; do not dispatch again. See CONTINUATION_FALLBACK.md.
 
 Owned terminal results enter the urgent non-human operational tier immediately, without waiting thirty minutes for aging. Human input stays first, equal-priority rotation remains, and original progress/ACK/side-effect guards still apply. No concurrency or dispatch-count cap is introduced.
+
+On the same terminal owner turn, a newly observed strict task subset reuses an unresolved covering recovery with an unconsumed source and no current disposition. Preserve original scope/keys; new tasks/turns and explicit queued/blocked/protected/resolved cases remain independent. Existing duplicates are reconciled by the coordinator, not rewritten.
