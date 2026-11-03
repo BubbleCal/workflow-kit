@@ -10,6 +10,7 @@ import { ReviewFeedback, pullRequestIdentity } from './review-feedback.mjs';
 import { readOutcomeBindings, outcomeSyncAllowed } from './outcomes.mjs';
 import { readModelSelection, withCreationModel } from './model-selection.mjs';
 import { LifecycleLedger } from './lifecycle.mjs';
+import { readDependencyPolicy, dependencyReasons } from './dependency-provenance.mjs';
 import { isReviewDelivery, readReviewWindow, reviewWindowAt, withReviewWindowGuidance, REVIEW_WINDOW } from './review-window.mjs';
 
 export const INBOX = bindings.threads.inbox;
@@ -80,8 +81,9 @@ export function resolvePlacement({ projects, project_id, project_label, host_id,
 
 // These checks validate supplied evidence. The coordinator must obtain that
 // evidence from the owning tools; this is not a replacement for tool permissions.
-export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPACITY_LIMITS, reviewRule = REVIEW_WINDOW, outcomeBindings = kind === 'notion_sync' && payload?.page_id !== PAGE ? readOutcomeBindings() : null) {
+export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPACITY_LIMITS, reviewRule = REVIEW_WINDOW, outcomeBindings = kind === 'notion_sync' && payload?.page_id !== PAGE ? readOutcomeBindings() : null, dependencyPolicy = ['pr_ready','slack_pr','merge'].includes(kind) ? readDependencyPolicy() : null) {
   const reasons = instancePolicyReasons(kind, payload, e);
+  reasons.push(...dependencyReasons(kind,payload,e,dependencyPolicy,now));
   const need = (condition, reason) => { if (!condition) reasons.push(reason); };
   // A current human instruction can start engineering directly. This only
   // removes our workflow's probe phase; native app/tool permissions still apply.
@@ -295,13 +297,14 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
 }
 
 export class ControlStore {
-  constructor(path, { now = () => Date.now(), capacity = CAPACITY_LIMITS, progress = null, reviewRule = readReviewWindow, outcomeBindings = readOutcomeBindings, modelSelection = readModelSelection } = {}) {
+  constructor(path, { now = () => Date.now(), capacity = CAPACITY_LIMITS, progress = null, reviewRule = readReviewWindow, outcomeBindings = readOutcomeBindings, modelSelection = readModelSelection, dependencyPolicy = readDependencyPolicy } = {}) {
     this.now = now;
     this.capacity = capacity;
     this.progress = progress;
     this.reviewRule = reviewRule;
     this.outcomeBindings = outcomeBindings;
     this.modelSelection = modelSelection;
+    this.dependencyPolicy = dependencyPolicy;
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;
@@ -326,7 +329,7 @@ export class ControlStore {
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       INSERT OR IGNORE INTO settings VALUES ('processing', 'on');`);
     this.feedback = new ReviewFeedback(this.db,this.now);
-    this.lifecycle = new LifecycleLedger(this.db, { now: this.now, deliveryMode:bindings.delivery.slack_enabled?'slack':'local', unacknowledged:()=>{
+    this.lifecycle = new LifecycleLedger(this.db, { now: this.now, dependencyPolicy:this.dependencyPolicy, deliveryMode:bindings.delivery.slack_enabled?'slack':'local', unacknowledged:()=>{
       const file=path === ':memory:' ? null : resolve(dirname(path),'mailbox.sqlite');
       if (!file || !existsSync(file)) return new Set();
       const m=new DatabaseSync(file,{readOnly:true});
@@ -377,6 +380,8 @@ export class ControlStore {
     const prior = this.db.prepare('SELECT payload FROM actions WHERE action_key=?').get(key);
     if (['dispatch','create_thread'].includes(input.kind) && (!prior || JSON.parse(prior.payload).result_contract_version === 2))
       input = { ...input, payload: { ...input.payload, result_contract_version:2 } };
+    if (['dispatch','create_thread'].includes(input.kind) && (!prior || JSON.parse(prior.payload).dependency_guidance_version === 1))
+      input = { ...input, payload: { ...input.payload, dependency_guidance_version:1 } };
     if (input.kind === 'create_thread') {
       const selection = prior ? JSON.parse(prior.payload).model_selection : this.modelSelection();
       input = { ...input, payload: withCreationModel(input.kind, input.payload, selection) };
@@ -398,7 +403,7 @@ export class ControlStore {
         return { prepared: false, key, state: old.state, reason: 'already_recorded' };
       }
       const rule = isReviewDelivery(kind) ? this.reviewRule() : REVIEW_WINDOW;
-      const result = assess(kind, input.payload, input.evidence, this.now(), this.capacity, rule, kind === 'notion_sync' && input.payload?.page_id !== PAGE ? this.outcomeBindings() : null);
+      const result = assess(kind, input.payload, input.evidence, this.now(), this.capacity, rule, kind === 'notion_sync' && input.payload?.page_id !== PAGE ? this.outcomeBindings() : null, ['pr_ready','slack_pr','merge'].includes(kind)?this.dependencyPolicy():null);
       const deferred = result.reasons.length === 1 && result.reasons[0] === 'review_delivery_blackout';
       if (!result.allowed && !deferred) return { prepared: false, key, ...result };
       const feedback = this.feedbackGate(kind,input.payload);
@@ -477,7 +482,7 @@ export class ControlStore {
         checkedEvidence = { ...checkedEvidence, dispatches_this_run: Number.isSafeInteger(evidence?.dispatches_this_run) && evidence.dispatches_this_run >= 0
           ? Math.max(evidence.dispatches_this_run, claimedInRun) : evidence?.dispatches_this_run };
       }
-      const result = assess(row.kind, payload, checkedEvidence, this.now(), this.capacity, isReviewDelivery(row.kind) ? this.reviewRule() : REVIEW_WINDOW, row.kind === 'notion_sync' && payload.page_id !== PAGE ? this.outcomeBindings() : null);
+      const result = assess(row.kind, payload, checkedEvidence, this.now(), this.capacity, isReviewDelivery(row.kind) ? this.reviewRule() : REVIEW_WINDOW, row.kind === 'notion_sync' && payload.page_id !== PAGE ? this.outcomeBindings() : null, ['pr_ready','slack_pr','merge'].includes(row.kind)?this.dependencyPolicy():null);
       if (!result.allowed) return { claimed: false, ...result };
       const feedback = this.feedbackGate(row.kind,payload);
       if (!feedback.allowed) return {claimed:false,...feedback};
@@ -498,7 +503,7 @@ export class ControlStore {
       const rule = this.reviewRule(), window = reviewWindowAt(this.now(),rule);
       if (window.blocked) return { send: false, ...this.deferReview(key,rule) };
       if (this.db.prepare("SELECT value FROM settings WHERE key='processing'").get().value !== 'on') return { send: false, reason: 'processing_paused' };
-      const result = assess(row.kind,JSON.parse(row.payload),evidence,this.now(),this.capacity,rule);
+      const result = assess(row.kind,JSON.parse(row.payload),evidence,this.now(),this.capacity,rule,null,this.dependencyPolicy());
       if (!result.allowed) return { send: false, ...result };
       const feedback = this.feedbackGate(row.kind,JSON.parse(row.payload));
       if (!feedback.allowed) return {send:false,...feedback};
@@ -710,6 +715,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
             throw new Error('Progress does not cover the PR task');
           const taskStages = mailbox.progress.goals().flatMap(g=>g.stages).filter(s=>s.task_id===task);
           progress_resolution = { verified:true, event_key:input.progress_event_key, task_ids:[task],
+            goals:mailbox.progress.goals().filter(g=>g.stages.some(s=>s.task_id===task)),
             task_complete:taskStages.length>0 && taskStages.every(s=>s.state==='complete'), evidence_ref:event.evidence_ref };
         }
         return control.atomic(()=>control.lifecycle.resolve({ ...input, progress_resolution }));

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { reviewWindowAt, REVIEW_WINDOW } from './review-window.mjs';
+import { readDependencyPolicy, forkRoute, releaseSuccessorVerified } from './dependency-provenance.mjs';
 
 const stable = v => JSON.stringify(v && typeof v === 'object' ? Array.isArray(v) ? v.map(x => JSON.parse(stable(x))) : Object.fromEntries(Object.keys(v).sort().map(k => [k, JSON.parse(stable(v[k]))])) : v ?? null);
 const hash = v => createHash('sha256').update(stable(v)).digest('hex').slice(0, 24);
@@ -11,8 +12,8 @@ export const prKey = (repository, number) => `${repository}#${number}`;
 // This ledger determines the next obligation; existing control guards still
 // authorize every external action and original owners remain the only writers.
 export class LifecycleLedger {
-  constructor(db, { now = () => Date.now(), readOnly = false, unacknowledged = () => new Set(), deliveryMode = 'slack' } = {}) {
-    this.db = db; this.now = now; this.unacknowledged = unacknowledged; this.deliveryMode = deliveryMode;
+  constructor(db, { now = () => Date.now(), readOnly = false, unacknowledged = () => new Set(), deliveryMode = 'slack', dependencyPolicy = readDependencyPolicy } = {}) {
+    this.db = db; this.now = now; this.unacknowledged = unacknowledged; this.deliveryMode = deliveryMode; this.dependencyPolicy=dependencyPolicy;
     if (!readOnly) db.exec(`
       CREATE TABLE IF NOT EXISTS lifecycle_prs (
         pr_key TEXT PRIMARY KEY, task_id TEXT NOT NULL, owner_id TEXT NOT NULL,
@@ -71,6 +72,8 @@ export class LifecycleLedger {
       head: s?.head_sha ?? null, artifact_revision:s?.state_revision ?? 0, snapshot_ref: s?.evidence_ref ?? null };
     const answer = (state, action, details = {}) => ({ ...base, state, action, ...details });
     if (!s || !fresh(s.checked_at, this.now())) return answer('observation_due', 'refresh_pr');
+    const releaseRoute=forkRoute(this.dependencyPolicy(),s.repository);
+    if (releaseRoute) return answer(s.state==='closed'?'closed_unmerged':'release_route_required','reconcile_release_route',{release_route:releaseRoute});
     if (s.state === 'merged') return answer('merged', 'decide_after_merge', { merge_sha: s.merge_sha });
     if (s.state === 'closed') return answer('closed_unmerged', 'resolve_closed');
     if (w.feedback_updated_at !== s.updated_at) return answer('feedback_due', 'refresh_feedback');
@@ -150,12 +153,14 @@ export class LifecycleLedger {
         p.expected_head_sha !== current.head || row.action !== 'deliver_review' || a.kind !== 'slack_pr' ||
         p.message !== `https://github.com/${row.pr_key.replace('#','/pull/')}`) throw new Error('Exact delivered PR receipt required');
     } else if (disposition === 'progress') {
-      if (!['resolve_closed','decide_after_merge','decide_feedback','obtain_readiness','repair_feedback','triage_ci','reconcile_delivery','deliver_local'].includes(row.action) ||
+      if (!['resolve_closed','decide_after_merge','decide_feedback','obtain_readiness','repair_feedback','triage_ci','reconcile_delivery','deliver_local','reconcile_release_route'].includes(row.action) ||
         progress_resolution?.verified !== true || !progress_resolution.task_ids?.includes(current.task_id))
         throw new Error('Actual task-bound progress disposition required');
       if (row.action === 'repair_feedback' && progress_resolution.task_complete === true)
         throw new Error('Material feedback must be assessed as addressed before completing its task');
-      if (['decide_after_merge','deliver_local'].includes(row.action) || row.action === 'resolve_closed' && progress_resolution.task_complete === true)
+      if (row.action==='reconcile_release_route' && !releaseSuccessorVerified(progress_resolution.goals,current.task_id,current.release_route))
+        throw new Error('Persist the released-upstream, automatic-sync, consumer-adoption and integrated-acceptance successor path');
+      if (['decide_after_merge','deliver_local','reconcile_release_route'].includes(row.action) || row.action === 'resolve_closed' && progress_resolution.task_complete === true)
         this.db.prepare('UPDATE lifecycle_prs SET retired=1 WHERE pr_key=?').run(row.pr_key);
       else if (row.action !== 'resolve_closed') { state = 'waiting'; due = this.now() + 10 * 60000; }
     } else if (disposition === 'wait') {

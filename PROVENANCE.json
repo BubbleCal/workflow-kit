@@ -1,21 +1,22 @@
 {
-  "version": "0.2.0",
+  "version": "0.2.1",
   "source": "local workflow runtime snapshot",
   "source_files": {
-    "runtime/control.mjs": "f54e8d6c5734efbf779b5e1f5b4ce3b419111388302b50ea3205d7298b0d219d",
+    "runtime/control.mjs": "ec2961cc6d84a241f5f73a90705bb2648cec88a00f764b2c0fb87ddd99244d8c",
     "runtime/mailbox.mjs": "f28305c5e2ce83368c4124255c889708a8390d8aaf258b60eb0a3504c4993b6d",
     "runtime/progress.mjs": "85fcd1f52dc277157a5552e2eea328acfb25f24ad859805bc14244b25108873a",
     "runtime/watchdog.mjs": "6b2dd4e02385beb3115f147d50805d0d9c6dd57a40354ac865fa8644af6b67b4",
     "runtime/daily-review.mjs": "c86a9599bdcaa56c8854e49e330c5f0adae5dfd5d069c979175caeb8e52f7b4f",
     "runtime/review-window.mjs": "9b753b7e67d170e0c35e91dec094d76c3edf5bc15e45b0414b4f308efe0e09a7",
-    "runtime/engineering-principles.mjs": "19523e3c1604406ecbd31cf490a23b850b61c8ad665ffedb3a4f8eb73646c9f9",
+    "runtime/engineering-principles.mjs": "04c91677387887f5c093a299704eadbb5d895bc99eb3b19f16cbcaa06e04bb1d",
     "runtime/review-feedback.mjs": "a47f6c4f240ef3d65d009c478e39bced98963a3f2a574b331b10a74d76fd3c23",
     "runtime/fetch-review-feedback.mjs": "b801eeea9a2d4951d002b03ff7101a53e926b3c058f0e2fe945eceafda9fb562",
     "runtime/outcomes.mjs": "78e553fbb78a1433b6b4c7b3a739062602b74334e0c8b4ea0a104d77d7e017c2",
     "runtime/model-selection.mjs": "cde3b8be50882361e9676b86c18170052691ab31f71f1a3c01139037072e70a4",
-    "runtime/lifecycle.mjs": "1768b4857eef802c18d3c1c6466c79be42baf3cb1d6f1ab89bc9ce66b22bd2e1",
+    "runtime/lifecycle.mjs": "7e26586732bfe7ee48c9716844e931b8f1809bc32582a035609b0ad550f8b836",
     "runtime/waits.mjs": "aeb4cf2bdcf8bf5d939239d16d39f85122c3d11810ce6021d74c3875b09ba2de",
-    "runtime/fetch-pr-state.mjs": "33a10543ee9abdc3c825ca9439f842e6658d1af560d836bdd58e126163b1f4d5"
+    "runtime/fetch-pr-state.mjs": "33a10543ee9abdc3c825ca9439f842e6658d1af560d836bdd58e126163b1f4d5",
+    "runtime/dependency-provenance.mjs": "fbaaded67eeca3a2ee62250e813d07d0667deef534d5b4d46e2ecab55060d320"
   },
   "state_included": false,
   "credentials_included": false

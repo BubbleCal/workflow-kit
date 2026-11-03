@@ -1,5 +1,9 @@
 # Changes
 
+## 0.2.1
+
+Add optional release-provenance policy: reject manual mirror PR delivery, require published upstream and automatic-sync evidence for declared consumer pin changes, and require a concrete release-first successor for obsolete mirror PRs. Existing owners and ordinary ungoverned changes are preserved.
+
 ## 0.2.0
 
 Add durable PR lifecycle obligations, universal owned-result dispositions, typed expiring waits, action priority with aging, and cached invariant reconciliation. Activation preserves in-flight batch contracts; optional external delivery remains disabled by default.

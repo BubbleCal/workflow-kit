@@ -7,6 +7,8 @@ export function withEngineeringPrinciples(kind, payload) {
   const append = text => {
     let value = text.includes('[workflow-engineering-principles:v1]') ? text : `${text}\n\n${ENGINEERING_GUIDANCE}`;
     if (payload.result_contract_version === 2 && !value.includes('[workflow-result-contract:v2]')) value += `\n\n${resultRule}`;
+    if (payload.dependency_guidance_version === 1 && !value.includes('[workflow-dependency-route:v1]'))
+      value += '\n\n[workflow-dependency-route:v1] For governed dependency adoption, follow DEPENDENCY_PROVENANCE.md and the instance policy. Reuse a suitable published upstream release, observe the existing automatic mirror sync, then use the normal consumer dependency PR and required integrated acceptance. Do not substitute a manual mirror PR or an unpublished production pin. A closed-unmerged dependency is not delivered; persist the correct authorized successor. This guidance changes no live job or release authorization.';
     return value;
   };
   if (typeof payload.prompt === 'string') result.prompt = append(payload.prompt);

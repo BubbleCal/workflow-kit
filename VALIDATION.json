@@ -1,15 +1,15 @@
 {
-  "version": "0.2.0",
-  "verified_at": "2026-11-03T13:56:24.742Z",
+  "version": "0.2.1",
+  "verified_at": "2026-11-03T14:39:05.611Z",
   "environment": {
     "platform": "darwin",
     "architecture": "arm64",
     "node": "v23.11.0"
   },
   "tests": {
-    "runtime": 140,
+    "runtime": 144,
     "portable_integration": 3,
-    "passed": 143,
+    "passed": 147,
     "failed": 0
   },
   "verified": [
@@ -34,7 +34,8 @@
     "All owned terminal result names require a disposition in v2 batches; ready artifacts bind original task and owner",
     "Typed dependency/job/access/human/PR waiting predicates expire or change; repeated pending waits coalesce",
     "Operational actions are prioritized with aging, and cached stage/PR/wait contradictions are checked independently of native owner idleness",
-    "Cutover preserves existing batch contracts, jobs, original owners and disabled external delivery"
+    "Cutover preserves existing batch contracts, jobs, original owners and disabled external delivery",
+    "Configured automatic mirrors reject normal manual publication at prepare/claim/final send; consumer provenance ties published release, automatic sync and pin; closed mirror PRs require a concrete authorized successor"
   ],
   "operational_data_exported": false,
   "credentials_exported": false,

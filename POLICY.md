@@ -43,3 +43,7 @@ Follow LIFECYCLE.md for actual PR-state obligations, owned-result disposition, t
 wait evidence, operational priority with aging, and cached-state invariant checks
 on the existing dispatcher. Enable only at a verified batch boundary; existing
 work and external integration opt-ins remain unchanged.
+
+For explicitly governed dependency mirrors, follow DEPENDENCY_PROVENANCE.md.
+Manual mirror PRs are not a substitute for published upstream and verified
+automatic synchronization. Keep this optional policy scoped to its own instance.
