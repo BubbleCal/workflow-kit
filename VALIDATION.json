@@ -1,15 +1,15 @@
 {
-  "version": "0.2.1",
-  "verified_at": "2026-11-03T14:39:05.611Z",
+  "version": "0.2.2",
+  "verified_at": "2026-11-03T14:57:05.786421+00:00",
   "environment": {
     "platform": "darwin",
     "architecture": "arm64",
     "node": "v23.11.0"
   },
   "tests": {
-    "runtime": 144,
+    "runtime": 149,
     "portable_integration": 3,
-    "passed": 147,
+    "passed": 152,
     "failed": 0
   },
   "verified": [
@@ -35,7 +35,8 @@
     "Typed dependency/job/access/human/PR waiting predicates expire or change; repeated pending waits coalesce",
     "Operational actions are prioritized with aging, and cached stage/PR/wait contradictions are checked independently of native owner idleness",
     "Cutover preserves existing batch contracts, jobs, original owners and disabled external delivery",
-    "Configured automatic mirrors reject normal manual publication at prepare/claim/final send; consumer provenance ties published release, automatic sync and pin; closed mirror PRs require a concrete authorized successor"
+    "Configured automatic mirrors reject normal manual publication at prepare/claim/final send; consumer provenance ties published release, automatic sync and pin; closed mirror PRs require a concrete authorized successor",
+    "Retained designated approvals preserve original reviewed commit and require fresh matching GitHub approval/rule evidence; dismissed reviews, current-push rules, changed head and new material feedback still block"
   ],
   "operational_data_exported": false,
   "credentials_exported": false,

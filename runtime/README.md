@@ -259,8 +259,10 @@ Missing facts fail closed. Names below are the JSON keys the implementation uses
   configured GitHub-user ownership, open non-draft PR, ordinary change, no material findings,
   current validation and technical review, already_announced=false.
 - merge: the same ready-PR facts plus matching payload.pr_url, verified configured-approver
-  APPROVED review for current head, required_checks_pass, repository_rules_satisfied,
-  mergeable=true and admin_override=false.
+  APPROVED review valid for the current PR, required_checks_pass, repository_rules_satisfied,
+  mergeable=true and admin_override=false. If approved_head_sha differs from current
+  head, supply approval_review_id and fresh approval_verification as described
+  in MERGE_APPROVAL.md. Preserve the actual reviewed SHA.
 - archive: idle/turn checks above, matching owner_thread_id,
   task_complete/completion_evidence_saved/important_result_delivered=true;
   pending_decision/pending_cleanup/pending_delivery/control_or_service_chat=false.

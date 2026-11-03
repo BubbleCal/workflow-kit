@@ -55,7 +55,7 @@ The next actions are explicit:
   explicit delivery gate; an old-head receipt cannot prove current delivery.
   A prior ready receipt with a stale draft snapshot
   causes a metadata refresh, never a blind repeat of the ready transition.
-- check_merge: inspect current-head approval, required checks and repository rules,
+- check_merge: inspect approval validity for the current PR (MERGE_APPROVAL.md), required checks and repository rules,
   then use the existing conditional merge guard when eligible.
 - triage_ci: classify and resolve a failed required check; do not just wait for
   approval while a known failed required check remains unhandled.

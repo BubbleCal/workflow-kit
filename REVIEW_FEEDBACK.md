@@ -60,7 +60,8 @@ Snapshots and assessments live in control.sqlite, written by the coordinator.
 Repeated polling of the same ID/content/head reuses its assessment and route.
 Local accepted fix evidence can clear a finding even if GitHub's thread still
 shows unresolved; no GitHub reply/edit/resolve/review operation is authorized.
-GitHub branch protection and current-head approval still apply separately.
+GitHub branch protection and approval validity for the current PR still apply
+separately; use MERGE_APPROVAL.md for a retained approval on an older commit.
 
 Incident reference: #10638 review 5743158692 is COMMENTED but requests changes;
 inline 4447591625 reports a JSONB append regression on 43f4a5bd1a58af454fe8a99cf3a31997b05a2cb5.

@@ -61,3 +61,5 @@ work and external integration opt-ins remain unchanged.
 For explicitly governed dependency mirrors, follow DEPENDENCY_PROVENANCE.md.
 Manual mirror PRs are not a substitute for published upstream and verified
 automatic synchronization. Keep this optional policy scoped to its own instance.
+
+For merge approval follow MERGE_APPROVAL.md. When the review commit differs from current head, use fresh retained-approval evidence instead of assuming dismissal or rewriting the review commit. Only the existing coordinator merges after ordinary feedback, CI and conditional-head checks. Preserve prior receipts and uncertain attempts.

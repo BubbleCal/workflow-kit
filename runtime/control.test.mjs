@@ -344,7 +344,7 @@ test('Slack exception is restricted to the matching ready PR URL and channel', (
     assert.equal(assess('slack_pr', { ...p, ...patch }, e, NOW).allowed, false);
 });
 
-test('merge requires current-head approval, required checks and repository rules', () => {
+test('merge requires approval evidence, required checks and repository rules', () => {
   const p = { pr_url: prEvidence().pr_url, expected_head_sha: head };
   const e = { ...prEvidence(), approver: 'test-reviewer', approver_identity_verified: true,
     approval_state: 'APPROVED', approved_head_sha: head, required_checks_pass: true,
@@ -528,4 +528,87 @@ test('standup prompt refinement preserves draft-only and exact-interval scope', 
  assert.equal(assess('automation_update',p,e,NOW).allowed,true);
  assert.equal(assess('automation_update',p,{...e,draft_only_preserved:false},NOW).allowed,false);
  assert.equal(assess('automation_update',p,{...e,exact_interval_preserved:false},NOW).allowed,false);
+});
+
+function retainedApprovalEvidence() {
+  const reviewed='b'.repeat(40),at=new Date(NOW).toISOString();
+  return { ...prEvidence(), approver:'test-reviewer', approver_identity_verified:true,
+    approval_state:'APPROVED', approval_review_id:'review-1', approved_head_sha:reviewed,
+    required_checks_pass:true,repository_rules_satisfied:true,mergeable:true,admin_override:false,
+    approval_verification:{pr_url:prEvidence().pr_url,head_sha:head,head_before:head,head_after:head,
+      base_ref:'main',base_before:'main',base_after:'main',checked_at:at,evidence_ref:'native-review-and-rules',
+      review_decision:'APPROVED',merge_state_status:'CLEAN',reviews_complete:true,
+      reviews:[{id:'review-1',state:'APPROVED',user:{login:'test-reviewer'},commit_id:reviewed,submitted_at:'2026-11-02T05:00:00Z'}],
+      rules:{complete:true,base_ref:'main',checked_at:at,evidence_ref:'matched-branch-and-active-rules',branch_protection:null,branch_rules:[]}} };
+}
+
+test('a retained designated approval follows current GitHub rules without rewriting its reviewed commit',()=>{
+  const e=retainedApprovalEvidence(),p={pr_url:e.pr_url,expected_head_sha:head};
+  assert.equal(assess('merge',p,e,NOW).allowed,true);
+  assert.notEqual(e.approved_head_sha,e.current_head_sha);
+  assert.equal(e.approval_verification.reviews[0].commit_id,e.approved_head_sha);
+  e.approval_verification.reviews.push({id:'comment-2',state:'COMMENTED',user:{login:'test-reviewer'},commit_id:head,submitted_at:'2026-11-02T05:30:00Z'});
+  assert.equal(assess('merge',p,e,NOW).allowed,true);
+});
+
+test('retained approval rejects revoked, stale, incomplete, wrong-identity or moved-head evidence',()=>{
+  const cases=[
+    e=>delete e.approval_verification,
+    e=>e.approval_verification.reviews=[],
+    e=>e.approval_verification.reviews[0].user.login='another-reviewer',
+    e=>e.approval_verification.reviews[0].state='DISMISSED',
+    e=>e.approval_verification.reviews.push({id:'review-2',state:'CHANGES_REQUESTED',user:{login:'test-reviewer'},commit_id:head,submitted_at:'2026-11-02T05:30:00Z'}),
+    e=>e.approval_verification.reviews.push({id:'review-2',state:'DISMISSED',user:{login:'test-reviewer'},commit_id:head,submitted_at:'2026-11-02T05:30:00Z'}),
+    e=>e.approval_review_id='different-review',
+    e=>e.approval_verification.reviews[0].commit_id=head,
+    e=>e.approval_verification.review_decision='CHANGES_REQUESTED',
+    e=>e.approval_verification.review_decision='REVIEW_REQUIRED',
+    e=>e.approval_verification.merge_state_status='BLOCKED',
+    e=>e.approval_verification.reviews_complete=false,
+    e=>e.approval_verification.checked_at=new Date(NOW-61000).toISOString(),
+    e=>e.approval_verification.head_after='c'.repeat(40),
+    e=>e.current_head_sha='c'.repeat(40),
+    e=>e.approval_verification.base_after='release',
+    e=>e.approval_verification.pr_url='https://github.com/example/service/pull/2',
+    e=>e.approval_verification.rules.complete=false,
+    e=>e.approval_verification.rules.base_ref='release',
+    e=>e.approval_verification.rules.checked_at=new Date(NOW-61000).toISOString(),
+  ];
+  for(const mutate of cases){const e=retainedApprovalEvidence();mutate(e);assert.equal(assess('merge',{pr_url:prEvidence().pr_url,expected_head_sha:head},e,NOW).allowed,false,String(mutate));}
+});
+
+test('stale-dismissal and latest-push rules cannot be bypassed by a retained approval',()=>{
+  for(const field of ['dismissesStaleReviews','requireLastPushApproval']){
+    const e=retainedApprovalEvidence();e.approval_verification.rules.branch_protection={dismissesStaleReviews:false,requireLastPushApproval:false,[field]:true};
+    assert.equal(assess('merge',{pr_url:e.pr_url,expected_head_sha:head},e,NOW).allowed,false);
+  }
+  for(const field of ['dismiss_stale_reviews_on_push','require_last_push_approval']){
+    const e=retainedApprovalEvidence();e.approval_verification.rules.branch_rules=[{type:'pull_request',parameters:{dismiss_stale_reviews_on_push:false,require_last_push_approval:false,[field]:true}}];
+    assert.equal(assess('merge',{pr_url:e.pr_url,expected_head_sha:head},e,NOW).allowed,false);
+  }
+});
+
+test('retained approval still requires feedback disposition and a fresh approval at claim',()=>{
+  const c=new ControlStore(':memory:',{now:()=>NOW}),e=retainedApprovalEvidence();
+  const [repository,pr_number]=['example/service',1];
+  const s={repository,pr_number,head_sha:head,head_before:head,head_after:head,checked_at:new Date(NOW).toISOString(),evidence_ref:'all-feeds',
+    complete:{reviews:true,review_comments:true,issue_comments:true,review_threads:true},reviews:[],review_comments:[],issue_comments:[],review_threads:[]};
+  const a={key:'retained-merge',kind:'merge',task_id:'T-001',payload:{pr_url:e.pr_url,expected_head_sha:head},evidence:e};
+  assert.equal(c.prepare(a).prepared,false);
+  c.feedback.ingest(s);assert.equal(c.prepare(a).prepared,true);
+  c.feedback.ingest({...s,issue_comments:[{id:'new-finding',body:'The current code loses rows.',user:{login:'reviewer'}}]});
+  assert.equal(c.claim({key:a.key,owner:'coordinator',evidence:e}).claimed,false);
+  const f=c.feedback.status(repository,pr_number).items[0];c.feedback.assess({repository,pr_number,head,decisions:[{key:f.key,digest:f.digest,disposition:'addressed',reason:'Verified current fix',evidence_ref:'actual-code-check',validation_ref:'regression-proof',current_code_relevance_verified:true}]});
+  const revoked=structuredClone(e);revoked.approval_verification.reviews[0].state='DISMISSED';
+  assert.equal(c.claim({key:a.key,owner:'coordinator',evidence:revoked}).claimed,false);
+  assert.equal(c.claim({key:a.key,owner:'coordinator',evidence:e}).claimed,true);
+  c.close();
+});
+
+
+test('an actual current-head approval satisfies fresh-push rules without the retained-review exception',()=>{
+  const e=retainedApprovalEvidence();e.approved_head_sha=head;e.approval_verification.reviews[0].commit_id=head;
+  e.approval_verification.rules.branch_protection={dismissesStaleReviews:true,requireLastPushApproval:true};
+  e.approval_verification.rules.branch_rules=[{type:'pull_request',parameters:{dismiss_stale_reviews_on_push:true,require_last_push_approval:true}}];
+  assert.equal(assess('merge',{pr_url:e.pr_url,expected_head_sha:head},e,NOW).allowed,true);
 });

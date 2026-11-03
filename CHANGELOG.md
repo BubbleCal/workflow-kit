@@ -1,5 +1,9 @@
 # Changes
 
+## 0.2.2
+
+Accept retained designated approval with fresh GitHub acceptance and applicable-rule evidence. Preserve real review identity/commit, complete material-feedback checks, required CI and conditional-head merge. Revoked approval, stale evidence and unsatisfied current-push requirements remain blocked.
+
 ## 0.2.1
 
 Add optional release-provenance policy: reject manual mirror PR delivery, require published upstream and automatic-sync evidence for declared consumer pin changes, and require a concrete release-first successor for obsolete mirror PRs. Existing owners and ordinary ungoverned changes are preserved.

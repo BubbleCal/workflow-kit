@@ -11,6 +11,7 @@ import { readOutcomeBindings, outcomeSyncAllowed } from './outcomes.mjs';
 import { readModelSelection, withCreationModel } from './model-selection.mjs';
 import { LifecycleLedger } from './lifecycle.mjs';
 import { readDependencyPolicy, dependencyReasons } from './dependency-provenance.mjs';
+import { retainedApprovalReasons } from './merge-approval.mjs';
 import { isReviewDelivery, readReviewWindow, reviewWindowAt, withReviewWindowGuidance, REVIEW_WINDOW } from './review-window.mjs';
 
 export const INBOX = bindings.threads.inbox;
@@ -243,7 +244,9 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
   }
   if (kind === 'merge') {
     need(prUrl(payload?.pr_url) && payload.pr_url === e.pr_url, 'merge_PR_identity_mismatch');
-    need(e.approver === bindings.delivery.approver_login && e.approver_identity_verified === true && e.approval_state === 'APPROVED' && e.approved_head_sha === e.current_head_sha, 'current_head_designated_approval_missing');
+    need(e.approver === bindings.delivery.approver_login && e.approver_identity_verified === true && e.approval_state === 'APPROVED', 'designated_approval_missing');
+    if (e.approved_head_sha !== e.current_head_sha || e.approval_verification)
+      reasons.push(...retainedApprovalReasons(payload, e, now));
     need(e.required_checks_pass === true && e.repository_rules_satisfied === true && e.mergeable === true, 'repository_merge_requirements_unsatisfied');
     need(e.admin_override === false, 'admin_override_forbidden');
   }
