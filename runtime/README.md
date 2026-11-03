@@ -339,3 +339,5 @@ The automation_update guard also allows the explicitly authorized
 daily-pr-standup-draft prompt refinement with standup_refinement_authorized,
 draft_only_preserved and exact_interval_preserved evidence. All non-prompt
 fields remain unchanged and current-config hash is rechecked before update.
+
+Read REVIEW_FEEDBACK.md before following PR feedback or attempting an enabled PR delivery/merge. Complete all-author source intake and current-head semantic assessments are mandatory; repeat polls reuse content/head evidence and repair routes.

@@ -1,15 +1,15 @@
 {
-  "version": "0.1.3",
-  "verified_at": "2026-11-02T22:37:13.151979+00:00",
+  "version": "0.1.4",
+  "verified_at": "2026-11-03T01:04:51.867899+00:00",
   "environment": {
     "platform": "darwin",
     "architecture": "arm64",
     "node": "v23.11.0"
   },
   "tests": {
-    "runtime": 103,
+    "runtime": 109,
     "portable_integration": 3,
-    "passed": 106,
+    "passed": 112,
     "failed": 0
   },
   "verified": [
@@ -22,7 +22,8 @@
     "External delivery is disabled until project-specific configuration and authorization",
     "Review window, durable recovery and current-head guards retain passing regressions",
     "macOS symlinked temporary paths execute the CLI correctly",
-    "Resolved unsent health events are superseded with durable receipts, while legacy keys, active batches and later recovery generations remain correct"
+    "Resolved unsent health events are superseded with durable receipts, while legacy keys, active batches and later recovery generations remain correct",
+    "All-author feedback coverage, current-head semantic disposition, existing repair deduplication and final publication gates"
   ],
   "operational_data_exported": false,
   "credentials_exported": false,
@@ -42,6 +43,6 @@
   "live_runtime_modified_by_packaging": false,
   "health_retirement_verified": true,
   "documentation_verified_at": "2026-11-03T00:27:14.174982+00:00",
-  "runtime_tests_reused_from": "0.1.1 runtime sources unchanged; 3 portable integration checks rerun for the ten-minute initializer default",
-  "dispatcher_default_minutes": 10
+  "dispatcher_default_minutes": 10,
+  "review_feedback_guards_verified": true
 }

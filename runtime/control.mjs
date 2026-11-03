@@ -6,6 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Mailbox, COORDINATOR } from './mailbox.mjs';
 import { withEngineeringPrinciples } from './engineering-principles.mjs';
+import { ReviewFeedback, pullRequestIdentity } from './review-feedback.mjs';
 import { isReviewDelivery, readReviewWindow, reviewWindowAt, withReviewWindowGuidance, REVIEW_WINDOW } from './review-window.mjs';
 
 export const INBOX = bindings.threads.inbox;
@@ -305,6 +306,7 @@ export class ControlStore {
         updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       INSERT OR IGNORE INTO settings VALUES ('processing', 'on');`);
+    this.feedback = new ReviewFeedback(this.db,this.now);
   }
   close() { this.db.close(); }
   atomic(fn) {
@@ -367,6 +369,8 @@ export class ControlStore {
       const result = assess(kind, input.payload, input.evidence, this.now(), this.capacity, rule);
       const deferred = result.reasons.length === 1 && result.reasons[0] === 'review_delivery_blackout';
       if (!result.allowed && !deferred) return { prepared: false, key, ...result };
+      const feedback = this.feedbackGate(kind,input.payload);
+      if (!feedback.allowed) return { prepared:false,key,...feedback };
       this.db.prepare(`INSERT INTO actions
         (action_key,kind,task_id,scope_key,digest,payload,state,due,created_at,updated_at)
         VALUES (?,?,?,?,?,?,?,?,?,?)`).run(key, kind, task, scope, digest, canonical(input.payload), deferred ? 'deferred' : 'prepared',
@@ -381,6 +385,11 @@ export class ControlStore {
     this.db.prepare("UPDATE actions SET state='deferred',due=?,attempt_id=NULL,owner=NULL,last_error='review_delivery_blackout',updated_at=? WHERE action_key=?")
       .run(due, this.now(), key);
     return { deferred: true, state: 'deferred', reason: 'review_delivery_blackout', due, send_tool_forbidden: true };
+  }
+  feedbackGate(kind,payload) {
+    if (!['slack_pr','pr_ready','merge'].includes(kind)) return {allowed:true};
+    const pr=pullRequestIdentity(payload);
+    return pr?this.feedback.gate(pr.repository,pr.pr_number,payload.expected_head_sha):{allowed:false,reasons:['valid_PR_feedback_identity_required']};
   }
   claim({ key, owner, evidence }) {
     required(owner, 'owner');
@@ -438,6 +447,8 @@ export class ControlStore {
       }
       const result = assess(row.kind, payload, checkedEvidence, this.now(), this.capacity, isReviewDelivery(row.kind) ? this.reviewRule() : REVIEW_WINDOW);
       if (!result.allowed) return { claimed: false, ...result };
+      const feedback = this.feedbackGate(row.kind,payload);
+      if (!feedback.allowed) return {claimed:false,...feedback};
       const attempt = randomUUID();
       this.db.prepare("UPDATE actions SET state='claimed',attempt_id=?,owner=?,attempts=attempts+1,last_error=NULL,updated_at=? WHERE action_key=?").run(attempt, owner, this.now(), key);
       return { claimed: true, key, attempt_id: attempt, payload: JSON.parse(row.payload),
@@ -457,6 +468,8 @@ export class ControlStore {
       if (this.db.prepare("SELECT value FROM settings WHERE key='processing'").get().value !== 'on') return { send: false, reason: 'processing_paused' };
       const result = assess(row.kind,JSON.parse(row.payload),evidence,this.now(),this.capacity,rule);
       if (!result.allowed) return { send: false, ...result };
+      const feedback = this.feedbackGate(row.kind,JSON.parse(row.payload));
+      if (!feedback.allowed) return {send:false,...feedback};
       const validUntil = Math.min(this.now()+60000,window.next_block_at);
       this.db.prepare('INSERT INTO review_send_permits VALUES (?,?,?,?)').run(attempt_id,key,this.now(),validUntil);
       return { send: true, key, attempt_id, payload: JSON.parse(row.payload), valid_until: validUntil,
@@ -565,6 +578,7 @@ export class ControlStore {
         .map(row => ({ ...row, payload: JSON.parse(row.payload), due_now: row.due <= this.now() })),
       prepared_reviews: this.db.prepare("SELECT action_key,kind,task_id,due FROM actions WHERE kind IN ('slack_pr','pr_ready') AND state='prepared' ORDER BY due,created_at").all(),
       events: this.db.prepare('SELECT COUNT(*) AS count FROM events').get().count,
+      review_feedback_snapshots: this.db.prepare('SELECT * FROM feedback_snapshots ORDER BY checked_at DESC LIMIT 20').all(),
       actions: this.db.prepare('SELECT state,COUNT(*) AS count FROM actions GROUP BY state').all(),
       unsettled: this.db.prepare("SELECT action_key,kind,task_id,scope_key,state,attempts,last_error FROM actions WHERE state IN ('claimed','uncertain','failed') ORDER BY created_at").all(),
       pending_thread_setups: this.db.prepare("SELECT creation_key,task_id,thread_id,client_thread_id,host_id,state,placement,evidence_ref FROM thread_setups WHERE state NOT IN ('complete','cancelled') ORDER BY updated_at").all()
@@ -637,6 +651,11 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       reconcile: () => control.reconcile(input), cancel: () => control.cancel(input),
       processing: () => control.processing(input.enabled), status: () => control.status(),
       review_window: () => reviewWindowAt(control.now(),control.reviewRule()),
+      feedback_ingest: () => control.atomic(()=>control.feedback.ingest(input.snapshot_file ? JSON.parse(readFileSync(input.snapshot_file,'utf8')) : input.snapshot)),
+      feedback_assess: () => control.atomic(()=>control.feedback.assess(input)),
+      feedback_status: () => control.feedback.status(input.repository,input.pr_number),
+      feedback_plan: () => control.feedback.plan(input),
+      feedback_record_route: () => control.atomic(()=>control.feedback.recordRoute(input)),
       import_legacy: () => control.status(),
     };
     if (!operations[input.op]) throw new Error(`Unknown operation: ${input.op}`);

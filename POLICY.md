@@ -19,3 +19,5 @@ The task-count limits are null/unlimited; real resources, user scope and one own
 Validate proportionately and follow applicable repository requirements. Reuse valid evidence for the same code/environment. Benchmarks must represent the authorized product workload. Protect actual stable contracts and production consumers; do not add speculative compatibility layers for unreleased iterations. No repeated preparation-only rounds, redundant benchmarks, suppressed checks or invented performance gains.
 
 The installation request authorizes the specifically requested role/schedule setup, not arbitrary new user-visible work chats. Later new chats still require an explicit user request. Reuse original execution owners and respect existing task drivers.
+
+Enabled PR delivery and merge require the complete current-head feedback ledger described in REVIEW_FEEDBACK.md. Model semantic assessment, source/body identity and local fix evidence govern applicability; formal state or GitHub unresolved flags alone do not. Optional delivery remains disabled unless configured and authorized.

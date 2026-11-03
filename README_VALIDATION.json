@@ -1,5 +1,5 @@
 {
-  "version": "0.1.3",
+  "version": "0.1.4",
   "verified_at": "2026-11-03T00:27:14.175396+00:00",
   "same_install_prompt_in_live_and_portable_readmes": true,
   "required_entry_points_exist": true,
@@ -7,5 +7,5 @@
   "runtime_tests_reused_from": "0.1.1",
   "runtime_tests_rerun": false,
   "native_setup_or_schedule_changes": false,
-  "change_scope": "New-instance dispatcher default changed from five to ten minutes; existing schedules unaffected"
+  "change_scope": "PR feedback intake, semantic disposition and publication guards with existing owner routing"
 }

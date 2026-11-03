@@ -15,6 +15,11 @@ const evidence = (now, kind = 'slack_pr') => ({ verified_at: new Date(now).toISO
 const action = (now, kind = 'slack_pr') => ({ key: kind + ':head-a', kind, task_id: 'T-test',
   payload: { expected_head_sha: head, ...(kind === 'slack_pr' ? { channel_id: CHANNEL, message: url } : { pr_url: url, operation: 'mark_ready' }) },
   evidence: evidence(now, kind) });
+function refreshFeedback(c,now) {
+  c.feedback.ingest({repository:'example/service',pr_number:1,head_sha:head,head_before:head,head_after:head,checked_at:new Date(now).toISOString(),evidence_ref:'complete-empty-feedback-fixture',
+    complete:{reviews:true,review_comments:true,issue_comments:true,review_threads:true},reviews:[],review_comments:[],issue_comments:[],review_threads:[]});
+  return c;
+}
 
 test('review delivery obeys Beijing boundaries for Slack and draft-to-ready', () => {
   for (const kind of ['slack_pr','pr_ready']) for (const [time, allowed] of [['03:59:59',true],['04:00:00',false],['11:59:59',false],['12:00:00',true]]) {
@@ -25,7 +30,7 @@ test('review delivery obeys Beijing boundaries for Slack and draft-to-ready', ()
 
 test('deferred review survives restart, requires fresh matching evidence at noon, and sends only once', () => {
   const dir = mkdtempSync(join(tmpdir(),'review-window-')), path = join(dir,'actions.sqlite');
-  let now = at('04:00:00'), c = new ControlStore(path, { now: () => now });
+  let now = at('04:00:00'), c = refreshFeedback(new ControlStore(path, { now: () => now }),now);
   const a = action(now);
   try {
     assert.equal(c.prepare(a).deferred, true);
@@ -34,6 +39,7 @@ test('deferred review survives restart, requires fresh matching evidence at noon
     assert.equal(c.prepare(a).state, 'deferred');
     assert.equal(c.claim({ key: a.key, owner: 'coordinator', evidence: evidence(now) }).claimed, false);
     now = at('12:00:00');
+    refreshFeedback(c,now);
     assert.equal(c.claim({ key: a.key, owner: 'coordinator', evidence: a.evidence }).claimed, false);
     assert.equal(c.claim({ key: a.key, owner: 'coordinator', evidence: { ...evidence(now), current_head_sha: 'b'.repeat(40) } }).claimed, false);
     const claim = c.claim({ key: a.key, owner: 'coordinator', evidence: evidence(now) });
@@ -49,7 +55,7 @@ test('deferred review survives restart, requires fresh matching evidence at noon
 test('both prepared and claimed actions are stopped when the send crosses 04:00', () => {
   for (const claimed of [false,true]) {
     let now = at('03:59:59'); const c = new ControlStore(':memory:',{now:()=>now}), a = action(now);
-    c.prepare(a); const claim = claimed ? c.claim({ key:a.key, owner:'coordinator', evidence:evidence(now) }) : null;
+    refreshFeedback(c,now);c.prepare(a); const claim = claimed ? c.claim({ key:a.key, owner:'coordinator', evidence:evidence(now) }) : null;
     now = at('04:00:00');
     const result = claimed ? c.authorizeReviewSend({ key:a.key, attempt_id:claim.attempt_id, owner:'coordinator', evidence:evidence(now), operation_not_started:true }) : c.claim({key:a.key,owner:'coordinator',evidence:evidence(now)});
     assert.equal(result.deferred,true); assert.equal(c.status().deferred_reviews.length,1); c.close();
@@ -58,7 +64,7 @@ test('both prepared and claimed actions are stopped when the send crosses 04:00'
 
 test('an already authorized but uncertain send is not silently reset across the boundary', () => {
   let now = at('03:59:59'); const c = new ControlStore(':memory:',{now:()=>now}), a=action(now);
-  c.prepare(a); const claim=c.claim({key:a.key,owner:'coordinator',evidence:evidence(now)});
+  refreshFeedback(c,now);c.prepare(a); const claim=c.claim({key:a.key,owner:'coordinator',evidence:evidence(now)});
   const args={key:a.key,attempt_id:claim.attempt_id,owner:'coordinator',evidence:evidence(now),operation_not_started:true};
   const permit=c.authorizeReviewSend(args);assert.equal(permit.send,true);assert.equal(permit.valid_until,at('04:00:00'));
   now=at('04:00:00'); assert.equal(c.authorizeReviewSend({...args,evidence:evidence(now)}).send,false);

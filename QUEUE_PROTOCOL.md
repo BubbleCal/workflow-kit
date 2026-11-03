@@ -19,3 +19,5 @@ Maintenance runs a twenty-minute soft batch, changes only workflow-local code/do
 Use existing control prepare/claim/settle, exact current-head guards and native conditional operations for side effects. For slack_pr and pr_ready, authorize_review_send after claim is mandatory; obey its exclusive deadline. No direct non-draft publication or other channel may bypass the review window. External features require this project's explicit bindings and authorization.
 
 Before maintenance admission and final send authorization, the mailbox supersedes health events whose recovery has a durable current disposition. Immutable content and resolution evidence are retained. Already sending/running batches and unknown cases remain untouched. A later recovery generation can escalate once independently.
+
+Follow REVIEW_FEEDBACK.md for all-author PR feedback intake and current-head semantic assessment. Formal COMMENTED and green CI do not imply absence of material findings. Preserve existing implementation scope and repair routes; never post/resolve comments or duplicate a busy owner.
