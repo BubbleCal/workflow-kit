@@ -6,12 +6,20 @@ const digest = value => createHash('sha256').update(stable(value)).digest('hex')
 const required = (value, field) => { if (typeof value !== 'string' || !value.trim()) throw new Error(`${field} is required`); };
 const fresh = (at, now) => Number.isFinite(Date.parse(at)) && Date.parse(at) <= now + 5000 && now - Date.parse(at) <= 60000;
 
+// This historical assessment producer used thread_id for its execution owner.
+// Do not infer owner identity from a generic event's recipient/thread field.
+export function legacyAssessmentOwner(item) {
+  const p = item.payload ?? {};
+  if (item.kind !== 'event' || p.event !== 'assessment_complete' || p.assessment_complete !== true || p.owner_thread_id != null) return null;
+  return [p.task_id,p.thread_id,p.report ?? p.evidence_ref].every(v=>typeof v==='string' && !!v.trim()) ? p.thread_id : null;
+}
+
 export function requiresProgress(item, contractVersion = 1) {
   if (item.kind === 'worker_result') return true;
   if (item.kind !== 'event') return false;
   const p = item.payload ?? {};
   if (['pr_lifecycle_action','wait_reconciliation'].includes(p.event)) return false;
-  if (contractVersion >= 2 && p.task_id && p.owner_thread_id) return true;
+  if (contractVersion >= 2 && p.task_id && (p.owner_thread_id || legacyAssessmentOwner(item))) return true;
   return p.continuation_authorized === true || p.current_task_complete === false || p.project_complete === false ||
     ['ready_pr', 'pr_ready', 'pr_merged', 'stage_complete', 'stage_completed', 'permission_probe_complete'].includes(p.event_type ?? p.event) ||
     !!(p.task_id && p.owner_thread_id && p.next_action);

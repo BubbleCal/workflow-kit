@@ -306,3 +306,25 @@ test('merged refresh closure rejects wrong task, source event, head, merge and n
     assert.equal(c.db.prepare('SELECT retired FROM lifecycle_prs WHERE pr_key=?').get(key).retired,0);c.close();
   }
 });
+
+const legacyAssessment = () => ({key:'assessment-ready',lane:'coordinator',kind:'event',payload:{event:'assessment_complete',assessment_complete:true,task_id:'T-assessment',thread_id:'assessment-owner',report:'/fixture/report.html',task_complete:false,resource_cleanup_complete:false,remaining_required:['Verify already-requested cleanup']}});
+test('legacy assessment thread identity requires urgent exact-task progress while preserving remaining cleanup',()=>{
+  const m=new Mailbox(':memory:',{now:()=>NOW});m.activateTransitions({source_message_id:'upgrade',actual_human_verified:true});const packet=legacyAssessment();
+  m.enqueue(packet);assert.equal(workPriority({...packet,created_at:NOW},NOW),1);const b=begin(m),immutable=structuredClone(b.snapshot);
+  assert.throws(()=>m.acknowledge(b.id,[packet.key]),/Durable successor/);
+  const accepted={id:'assessment-scope',authorization_ref:'original-assessment-request',expected_revision:0,complete:true,acceptance_verified:true,completion_evidence_ref:'report',stages:[{id:'assessment',task_id:'T-assessment',owner_thread_id:'assessment-owner',scope_key:'assessment',state:'complete',depends_on:[],completion_evidence_ref:'actual-report'}]};
+  const input={batch_id:b.id,event_key:packet.key,authorization_verified:true,evidence_ref:'actual-report-and-cleanup-record'};
+  assert.throws(()=>m.recordProgress({...input,goals:[accepted]}),/remaining/);
+  const goal={...accepted,complete:false,stages:[...accepted.stages,{id:'cleanup',task_id:'T-assessment',owner_thread_id:'assessment-owner',scope_key:'original-resource',state:'pending',step_id:'verify-existing-cleanup',action:'Confirm the already-requested deletion without repeating the assessment',depends_on:['assessment']}]};
+  assert.throws(()=>m.recordProgress({...input,goals:[{...goal,stages:goal.stages.map(s=>({...s,task_id:'another-task'}))}]}),/source task/);
+  assert.throws(()=>m.recordProgress({...input,goals:[{...goal,stages:goal.stages.map(s=>({...s,owner_thread_id:'another-owner'}))}]}),/owner/);
+  m.recordProgress({...input,goals:[goal]});assert.deepEqual(m.get(b.id).snapshot,immutable);assert.deepEqual(JSON.parse(m.db.prepare('SELECT payload FROM mail WHERE item_key=?').get(packet.key).payload),packet.payload);
+  assert.equal(m.progress.goals()[0].complete,false);assert.equal(m.progress.status().actions.length,1);m.finish(b.id);m.close();
+});
+
+test('generic thread targets and incomplete assessment declarations are not treated as legacy worker results',()=>{
+  const packet=legacyAssessment();for(const patch of [{event:'status'},{assessment_complete:false},{report:undefined},{thread_id:undefined}]){
+    const row={...packet,payload:{...packet.payload,...patch},created_at:NOW};assert.equal(workPriority(row,NOW),6);
+  }
+  const m=new Mailbox(':memory:',{now:()=>NOW});m.enqueue(packet);const b=begin(m);assert.equal(b.snapshot.transition_contract_version,1);assert.doesNotThrow(()=>m.acknowledge(b.id,[packet.key]));m.finish(b.id);m.close();
+});

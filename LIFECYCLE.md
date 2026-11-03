@@ -149,6 +149,26 @@ readiness as above. These must match the recorded task/owner and original grant.
 Dependency or reference PRs are not deliverables. Existing active workers receive
 the reporting contract only at the next otherwise-needed dispatch; no broadcast.
 
+## Existing completed-assessment envelopes
+
+For the existing kind=event, event=assessment_complete producer, the combination
+assessment_complete=true, nonempty task_id/thread_id and report or evidence_ref
+identifies an owned assessment when owner_thread_id is absent. Version-2 batches
+use that thread_id as the source owner without rewriting the immutable packet.
+Generic recipient/thread fields, incomplete assessments and missing evidence do
+not get this interpretation. Canonical owner fields retain their existing meaning;
+version-1 in-flight batch contracts remain unchanged.
+
+These results receive urgent owned-result priority and cannot ACK without actual
+source-task progress. At least one recorded stage must retain that source task
+and owner. Declared task_complete=false, resource_cleanup_complete=false or a
+nonempty remaining_required list prevents consuming the result as all-goals-done:
+persist the concrete remaining cleanup/delivery step or a verified wait. An
+assessment answer may be delivered while resource closure remains; do not rerun
+measurements or convert optional design recommendations into implementation.
+New producers should use kind=worker_result, owner_thread_id, evidence_ref and
+current_task_complete=false whenever actual task obligations remain.
+
 ## Verifiable waiting
 
 For a new or changed blocked stage in version 2, blocker.condition is mandatory.

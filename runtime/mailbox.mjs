@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, realpat
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dailyReviewEvent } from './daily-review.mjs';
-import { ProgressLedger, requiresProgress, findContinuationGaps, registeredContinuationCandidates } from './progress.mjs';
+import { ProgressLedger, requiresProgress, legacyAssessmentOwner, findContinuationGaps, registeredContinuationCandidates } from './progress.mjs';
 import { ContinuationWatchdog } from './watchdog.mjs';
 import { LifecycleLedger } from './lifecycle.mjs';
 import { WaitLedger } from './waits.mjs';
@@ -348,13 +348,18 @@ export class Mailbox {
       if (input.authorization_verified !== true) throw new Error('Verify the original goal authorization before recording successors');
       const item = batch.snapshot.items.find(x=>x.key===input.event_key);
       if (batch.snapshot.transition_contract_version >= 2) {
+        const legacyOwner = legacyAssessmentOwner(item), resultOwner = item.payload?.owner_thread_id ?? legacyOwner;
+        const assessmentHasRemaining = legacyOwner && (item.payload.task_complete === false ||
+          item.payload.resource_cleanup_complete === false || Array.isArray(item.payload.remaining_required) && item.payload.remaining_required.length > 0);
         if (item.payload?.event === 'wait_reconciliation' && !input.goals?.some(g=>g.id===item.payload.goal_id &&
           g.stages?.some(s=>s.id===item.payload.stage_id))) throw new Error('Wait disposition must cover the exact goal and stage');
-        if ((item.payload?.current_task_complete === false || item.payload?.project_complete === false) &&
+        if ((item.payload?.current_task_complete === false || item.payload?.project_complete === false || assessmentHasRemaining) &&
           input.goals?.every(g=>g.complete)) throw new Error('Source reports remaining work; preserve a successor or valid wait');
         if (item.payload?.task_id && requiresProgress(item,2) &&
           !input.goals?.some(g=>g.stages?.some(s=>s.task_id===item.payload.task_id)))
           throw new Error('Result disposition must cover the source task');
+        if (legacyOwner && !input.goals?.some(g=>g.stages?.some(s=>s.task_id===item.payload.task_id && s.owner_thread_id===legacyOwner)))
+          throw new Error('Assessment disposition must preserve its source owner binding');
         this.waits.validateGoals(input.goals,this.progress.goals(),item.payload?.event==='wait_reconciliation'?item.payload:undefined);
         const artifacts = input.artifacts ?? [];
         const ready = [item.payload?.event_type,item.payload?.event,item.payload?.outcome]
@@ -364,7 +369,7 @@ export class Mailbox {
           if (a.kind !== 'pr' || a.role !== 'deliverable') throw new Error('Explicit deliverable PR identity required');
           const stages = input.goals.flatMap(g=>g.stages).filter(s=>s.task_id===a.task_id && s.owner_thread_id===a.owner_thread_id);
           if (!stages.length || item.payload.task_id && item.payload.task_id!==a.task_id ||
-            item.payload.owner_thread_id && item.payload.owner_thread_id!==a.owner_thread_id)
+            resultOwner && resultOwner!==a.owner_thread_id)
             throw new Error('Deliverable must match the source task and owner');
           const goal = input.goals.find(g=>g.stages.includes(stages[0]));
           const tracked = this.lifecycleAccess(l=>l.track({repository:a.repository,pr_number:a.pr_number,task_id:a.task_id,

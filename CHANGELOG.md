@@ -1,5 +1,9 @@
 # Changes
 
+## 0.2.10
+
+Recognize the existing completed-assessment envelope using thread_id for its owner. Prioritize and require task/owner-bound progress without rewriting source payloads or dropping cleanup; preserve generic thread targets and version-1 contracts.
+
 ## 0.2.9
 
 Preserve verified merged facts beyond metadata expiry and allow exact-source same-PR refresh closure with fresh head/merge evidence and task-bound progress. Retire only that watch, preserving unfinished parents, immutable batches and external action receipts.
