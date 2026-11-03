@@ -265,3 +265,44 @@ test('stale or incomplete CI is unknown and a clean rerun does not resurrect an 
   ci.checks.push({kind:'status',id:'external-error',name:'external-check',head_sha:HEAD,status:'completed',conclusion:'error',url:'https://example.test/check'});
   c.lifecycle.observe(observation(NOW,{ci}));assert.equal(c.lifecycle.inspect(key).action,'triage_ci');c.close();
 });
+
+test('verified merged facts and their disposition identity survive cache age',()=>{
+  let now=NOW;const c=setup(()=>now);observe(c,now,{state:'merged',merged_at:new Date(now).toISOString(),merge_sha:'c'.repeat(40)});
+  const initial=c.lifecycle.reconcile()[0];
+  assert.throws(()=>c.lifecycle.observe(observation(now,{state:'merged',merged_at:'unknown',merge_sha:'short'})),/merge evidence/);
+  now+=24*3600000;
+  assert.equal(c.lifecycle.inspect(key).action,'decide_after_merge');assert.equal(c.lifecycle.reconcile()[0].key,initial.key);c.close();
+  for(const state of ['open','closed']){let at=NOW;const s=setup(()=>at);observe(s,at,{state});at+=21*60000;assert.equal(s.lifecycle.inspect(key).action,'refresh_pr');s.close();}
+});
+
+test('a fixed-batch refresh can close its newly verified merged PR without completing the parent',()=>{
+  let now=NOW;const c=setup(()=>now);observe(c);now+=21*60000;
+  const m=new Mailbox(':memory:',{now:()=>now,lifecycleAccess:fn=>fn(c.lifecycle)});m.activateTransitions({source_message_id:'upgrade',actual_human_verified:true});m.reconcileTransitions();
+  const b=begin(m),source=b.snapshot.items[0],before=structuredClone(b.snapshot);assert.equal(source.payload.action,'refresh_pr');
+  c.lifecycle.track({repository:repo,pr_number:number+1,task_id:'T-010',owner_thread_id:'owner',authorization_ref:'separate-PR-scope'});
+  sent(c);c.db.prepare("UPDATE actions SET state='uncertain' WHERE action_key='ready-url'").run();
+  observe(c,now,{state:'merged',merged_at:new Date(now).toISOString(),merge_sha:'c'.repeat(40)});m.reconcileTransitions();
+  const terminal=c.lifecycle.reconcile().find(x=>x.payload.pr_key===key);assert.equal(terminal.payload.action,'decide_after_merge');assert.equal(b.snapshot.items.some(i=>i.key===terminal.key),false);
+  const goal={id:'parent-delivery',authorization_ref:'original-human',expected_revision:0,complete:false,stages:[{id:'adopt',task_id:'T-010',owner_thread_id:'owner',scope_key:'original-consumer',state:'pending',step_id:'adopt-released-artifact',action:'Continue original adoption and acceptance',depends_on:[]}]};
+  assert.throws(()=>m.recordProgress({batch_id:b.id,event_key:terminal.key,goals:[goal],authorization_verified:true,evidence_ref:'merged-and-successor',ack:false}),/batch|source/i);
+  m.recordProgress({batch_id:b.id,event_key:source.key,goals:[goal],authorization_verified:true,evidence_ref:'actual-merge-and-successor',ack:false});
+  const resolution=c.lifecycle.resolve({key:source.payload.lifecycle_key,generation:source.payload.lifecycle_generation,disposition:'progress',expected_head_sha:HEAD,expected_merge_sha:'c'.repeat(40),evidence_ref:'current-PR-merge-proof',progress_resolution:{verified:m.progress.hasResolution(source.key),event_key:source.key,task_ids:['T-010'],task_complete:false}});
+  assert.equal(resolution.state,'resolved');assert.equal(c.lifecycle.inspect(key).state,'retired');
+  m.acknowledge(b.id,[source.key]);m.reconcileTransitions();
+  assert.equal(m.db.prepare('SELECT state FROM mail WHERE item_key=?').get(terminal.key).state,'superseded');
+  assert.deepEqual(m.get(b.id).snapshot,before);assert.equal(m.progress.goals()[0].complete,false);assert.equal(m.progress.unfinishedForOwner('owner'),true);
+  assert.equal(c.db.prepare("SELECT state FROM actions WHERE action_key='ready-url'").get().state,'uncertain');
+  assert.equal(c.db.prepare('SELECT retired FROM lifecycle_prs WHERE pr_key=?').get(`${repo}#${number+1}`).retired,0);m.finish(b.id);m.close();c.close();
+});
+
+test('merged refresh closure rejects wrong task, source event, head, merge and nonterminal scope',()=>{
+  for(const mode of ['task','event','head','merge','stale','open','release-route']){
+    let now=NOW;const c=setup(()=>now);observe(c);now+=21*60000;const source=c.lifecycle.reconcile()[0];
+    observe(c,now,{state:mode==='open'?'open':'merged',merged_at:new Date(now).toISOString(),merge_sha:'c'.repeat(40)});
+    if(mode==='release-route')c.lifecycle.dependencyPolicy=()=>({enabled:true,source_message_id:'actual-policy',routes:[{upstream_repository:'example/upstream',fork_repository:repo,consumer_repository:'example/consumer'}]});
+    c.lifecycle.reconcile();if(mode==='stale')now+=61000;
+    const input={key:source.payload.lifecycle_key,generation:1,disposition:'progress',expected_head_sha:mode==='head'?'d'.repeat(40):HEAD,expected_merge_sha:mode==='merge'?'e'.repeat(40):'c'.repeat(40),evidence_ref:'source-proof',progress_resolution:{verified:true,event_key:mode==='event'?'another-PR-source':source.key,task_ids:[mode==='task'?'another-task':'T-010'],task_complete:false}};
+    assert.throws(()=>c.lifecycle.resolve(input),/merged|task-bound|source|head|merge/i,mode);
+    assert.equal(c.db.prepare('SELECT retired FROM lifecycle_prs WHERE pr_key=?').get(key).retired,0);c.close();
+  }
+});

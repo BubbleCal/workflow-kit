@@ -8,6 +8,7 @@ const hash = v => createHash('sha256').update(stable(v)).digest('hex').slice(0, 
 const required = (v, name) => { if (typeof v !== 'string' || !v.trim()) throw new Error(`${name} is required`); };
 const fresh = (at, now, age = 20 * 60000) => Number.isFinite(Date.parse(at)) && Date.parse(at) <= now + 5000 && now - Date.parse(at) <= age;
 const revisionOf = ({ snapshot_ref, ...state }) => hash(state);
+const mergedFact = s => s?.state === 'merged' && Number.isFinite(Date.parse(s.merged_at)) && /^[a-f0-9]{40,64}$/.test(s.merge_sha ?? '');
 export const prKey = (repository, number) => `${repository}#${number}`;
 
 // This ledger determines the next obligation; existing control guards still
@@ -45,7 +46,7 @@ export class LifecycleLedger {
     if (!fresh(snapshot.checked_at, this.now(), 60000) || !snapshot.evidence_ref ||
       !/^[a-f0-9]{40,64}$/.test(snapshot.head_sha ?? '') || !['open','closed','merged'].includes(snapshot.state) ||
       typeof snapshot.draft !== 'boolean' || !Number.isFinite(Date.parse(snapshot.updated_at))) throw new Error('Fresh exact-head PR lifecycle snapshot required');
-    if (snapshot.state === 'merged' && (!snapshot.merged_at || !snapshot.merge_sha)) throw new Error('Merged state needs merge evidence');
+    if (snapshot.state === 'merged' && !mergedFact(snapshot)) throw new Error('Merged state needs exact merge evidence');
     const old = this.db.prepare('SELECT snapshot FROM lifecycle_prs WHERE pr_key=?').get(key);
     const previous = old.snapshot ? JSON.parse(old.snapshot) : null;
     if (previous && Date.parse(previous.checked_at) > Date.parse(snapshot.checked_at)) throw new Error('Out-of-order PR snapshot');
@@ -72,7 +73,7 @@ export class LifecycleLedger {
     const base = { pr_key: key, task_id: w.task_id, owner_thread_id: w.owner_id, authorization_ref: w.authorization_ref,
       head: s?.head_sha ?? null, artifact_revision:s?.state_revision ?? 0, snapshot_ref: s?.evidence_ref ?? null };
     const answer = (state, action, details = {}) => ({ ...base, state, action, ...details });
-    if (!s || !fresh(s.checked_at, this.now())) return answer('observation_due', 'refresh_pr');
+    if (!s || (s.state === 'merged' ? !mergedFact(s) : !fresh(s.checked_at, this.now()))) return answer('observation_due', 'refresh_pr');
     const releaseRoute=forkRoute(this.dependencyPolicy(),s.repository);
     if (releaseRoute) return answer(s.state==='closed'?'closed_unmerged':'release_route_required','reconcile_release_route',{release_route:releaseRoute});
     if (s.state === 'merged') return answer('merged', 'decide_after_merge', { merge_sha: s.merge_sha });
@@ -142,14 +143,26 @@ export class LifecycleLedger {
     }
     return output;
   }
-  resolve({ key, generation, disposition, evidence_ref, control_action_key, progress_resolution, wait }) {
+  resolve({ key, generation, disposition, evidence_ref, control_action_key, progress_resolution, wait, expected_head_sha, expected_merge_sha }) {
     required(evidence_ref, 'lifecycle resolution evidence');
     const row = this.db.prepare('SELECT * FROM lifecycle_intents WHERE intent_key=?').get(key);
     if (!row) throw new Error('Unknown lifecycle obligation');
     if (JSON.parse(row.payload).lifecycle_generation !== generation) throw new Error('Lifecycle generation changed');
-    if (['resolved','superseded'].includes(row.state)) return { resolved: true, state: row.state };
     const current = this.inspect(row.pr_key);
-    if (revisionOf(current) !== row.revision) {
+    const mergedRefresh = row.action === 'refresh_pr' && disposition === 'progress' &&
+      expected_merge_sha !== undefined && current.state !== 'retired';
+    if (row.state === 'resolved' || row.state === 'superseded' && !mergedRefresh) return { resolved: true, state: row.state };
+    if (mergedRefresh) {
+      const saved = this.db.prepare('SELECT snapshot FROM lifecycle_prs WHERE pr_key=?').get(row.pr_key);
+      const snapshot = saved?.snapshot ? JSON.parse(saved.snapshot) : null;
+      if (current.action !== 'decide_after_merge' || !mergedFact(snapshot) || !fresh(snapshot.checked_at,this.now(),60000) ||
+          expected_head_sha !== current.head || expected_merge_sha !== current.merge_sha)
+        throw new Error('Fresh same-PR merged head and merge SHA are required to close a refresh');
+      if (progress_resolution?.verified !== true || progress_resolution.event_key !== `${key}:${generation}` ||
+          !progress_resolution.task_ids?.includes(current.task_id))
+        throw new Error('Exact refresh-source task-bound progress disposition required');
+    }
+    if (!mergedRefresh && revisionOf(current) !== row.revision) {
       this.db.prepare("UPDATE lifecycle_intents SET state='superseded',resolved_at=?,resolution=? WHERE intent_key=?")
         .run(this.now(), stable({ evidence_ref, disposition: 'state_changed', generation }), key);
       return { resolved: true, state: 'superseded', next: current };
@@ -162,16 +175,18 @@ export class LifecycleLedger {
         p.expected_head_sha !== current.head || row.action !== 'deliver_review' || a.kind !== 'slack_pr' ||
         p.message !== `https://github.com/${row.pr_key.replace('#','/pull/')}`) throw new Error('Exact delivered PR receipt required');
     } else if (disposition === 'progress') {
-      if (!['resolve_closed','decide_after_merge','decide_feedback','obtain_readiness','repair_feedback','triage_ci','reconcile_delivery','deliver_local','reconcile_release_route'].includes(row.action) ||
+      if ((!mergedRefresh && !['resolve_closed','decide_after_merge','decide_feedback','obtain_readiness','repair_feedback','triage_ci','reconcile_delivery','deliver_local','reconcile_release_route'].includes(row.action)) ||
         progress_resolution?.verified !== true || !progress_resolution.task_ids?.includes(current.task_id))
         throw new Error('Actual task-bound progress disposition required');
       if (['repair_feedback','triage_ci'].includes(row.action) && progress_resolution.task_complete === true)
         throw new Error('Material feedback or CI failure needs a successor or verified wait, not task completion');
       if (row.action==='reconcile_release_route' && !releaseSuccessorVerified(progress_resolution.goals,current.task_id,current.release_route))
         throw new Error('Persist the released-upstream, automatic-sync, consumer-adoption and integrated-acceptance successor path');
-      if (['decide_after_merge','deliver_local','reconcile_release_route'].includes(row.action) || row.action === 'resolve_closed' && progress_resolution.task_complete === true)
+      if (mergedRefresh || ['decide_after_merge','deliver_local','reconcile_release_route'].includes(row.action) || row.action === 'resolve_closed' && progress_resolution.task_complete === true) {
         this.db.prepare('UPDATE lifecycle_prs SET retired=1 WHERE pr_key=?').run(row.pr_key);
-      else if (!['resolve_closed','triage_ci'].includes(row.action)) { state = 'waiting'; due = this.now() + 10 * 60000; }
+        this.db.prepare("UPDATE lifecycle_intents SET state='superseded',resolved_at=? WHERE pr_key=? AND intent_key<>? AND state IN ('pending','waiting')")
+          .run(this.now(),row.pr_key,key);
+      } else if (!['resolve_closed','triage_ci'].includes(row.action)) { state = 'waiting'; due = this.now() + 10 * 60000; }
     } else if (disposition === 'wait') {
       if (wait?.pr_key !== row.pr_key || wait?.head !== current.head) throw new Error('Wait must belong to this exact PR/head');
       const result = this.checkWait(wait);
@@ -180,7 +195,7 @@ export class LifecycleLedger {
       state = 'waiting'; due = Date.parse(wait.next_check_at);
     } else throw new Error('Receipt, progress or a verified wait is required');
     this.db.prepare('UPDATE lifecycle_intents SET state=?,due_at=?,resolved_at=?,resolution=? WHERE intent_key=?')
-      .run(state, due, this.now(), stable({ disposition, evidence_ref, control_action_key, generation, wait, wait_proof:waitProof, progress_resolution }), key);
+      .run(state, due, this.now(), stable({ disposition, evidence_ref, control_action_key, generation, wait, wait_proof:waitProof, progress_resolution, ...(mergedRefresh ? {expected_head_sha,expected_merge_sha,transition_from:'refresh_pr'} : {}) }), key);
     return { resolved: true, state, due_at: due };
   }
   checkWait(condition) {

@@ -33,9 +33,11 @@ checked_at and evidence_ref; merged also needs merged_at and merge_sha. A failed
 read is unknown, never closed or an empty feedback feed. The lightweight collector
 collects current-head individual check runs and commit statuses as observed CI,
 without inferring required-check policy or approval. Follow CI_FAILURES.md for
-partial failures, exact-job deduplication and legitimate package waits. State facts older than 20 minutes require
-refresh before any further lifecycle decision; existing external gates still
-require their own fresh checks immediately before an operation.
+partial failures, exact-job deduplication and legitimate package waits. Open and
+closed-unmerged state facts older than 20 minutes require refresh. A validated
+merged fact with exact merged_at and merge_sha is durable for post-merge scope
+disposition; cache age alone cannot supersede that obligation. Existing external
+gates still require their own fresh checks immediately before an operation.
 
 `feedback_ingest` now also consumes the collector's `pr` metadata and binds the
 full feedback read to the PR updated_at. Changed metadata requires a fresh feedback
@@ -98,6 +100,33 @@ Finally mailbox ACK/finish verifies the recorded lifecycle disposition. A stale
 wait cannot be acknowledged as still valid. Already resolved pending diagnostics
 are retired before admission; in-flight batches are preserved. Due rechecks do
 not change the generation while its previous source item is unacknowledged.
+
+## Close a merged PR from its current refresh item
+
+If this fixed batch contains refresh_pr, perform the actual same-PR read and
+lifecycle_observe normally. A resulting decide_after_merge item may fall outside
+the immutable batch; do not add it to the snapshot or fake its progress record.
+Instead record_progress(ack=false) for the ORIGINAL refresh event, covering its
+actual source task and the accepted completion or concrete remaining successors.
+Parent/project completion is not required to retire an already merged PR watch.
+
+Use control lifecycle_resolve with the original key/generation,
+disposition=progress, progress_event_key equal to that original key:generation,
+evidence_ref, and expected_head_sha plus expected_merge_sha from the verified
+merged read. The runtime requires that the current action is decide_after_merge,
+that the exact PR's merged snapshot was read within 60 seconds, and that the real
+progress event covers its task. Refresh again if the source read aged while
+recording progress; retain the exact head/merge binding. This explicit path can
+resolve an original refresh already superseded by that same observation.
+
+Wrong task/source/head/merge, unmerged state, stale proof or a governed mirror
+route cannot use this path. Other transition types keep their existing behavior.
+After acceptance, retire only this PR watch and supersede its remaining queued
+lifecycle intents. Existing mailbox payloads/batches, parent goals and control
+side-effect receipts remain unchanged. ACK the original event normally; ordinary
+pending-diagnostic reconciliation retires redundant queued same-PR notices.
+No new merge/ready/Slack/archive operation occurs, and uncertain external actions
+still require their own normal reconciliation.
 
 ## Every owned result has a next step
 

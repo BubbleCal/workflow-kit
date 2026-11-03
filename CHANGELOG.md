@@ -1,5 +1,9 @@
 # Changes
 
+## 0.2.9
+
+Preserve verified merged facts beyond metadata expiry and allow exact-source same-PR refresh closure with fresh head/merge evidence and task-bound progress. Retire only that watch, preserving unfinished parents, immutable batches and external action receipts.
+
 ## 0.2.8
 
 Reuse unresolved covering recovery records when the same idle turn has a smaller task set. Preserve immutable scope, new-task/new-turn detection and explicit dispositions; do not rewrite existing duplicates or in-flight work.

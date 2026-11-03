@@ -75,3 +75,5 @@ Recovery diagnostics may retire from a unique actual continuation for every affe
 Owned terminal results enter the urgent non-human operational tier immediately, without waiting thirty minutes for aging. Human input stays first, equal-priority rotation remains, and original progress/ACK/side-effect guards still apply. No concurrency or dispatch-count cap is introduced.
 
 On the same terminal owner turn, a newly observed strict task subset reuses an unresolved covering recovery with an unconsumed source and no current disposition. Preserve original scope/keys; new tasks/turns and explicit queued/blocked/protected/resolved cases remain independent. Existing duplicates are reconciled by the coordinator, not rewritten.
+
+Verified merged PR facts remain durable for post-merge disposition. The current same-PR refresh event can retire that watch after exact-event/task progress plus fresh expected head/merge-SHA validation under LIFECYCLE.md. Preserve fixed batches, unfinished parents, external action receipts and all merge/release guards.
