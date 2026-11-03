@@ -12,8 +12,8 @@ const poll = (now, owner = 'worker', patch = {}) => ({ checked_at: new Date(now)
 const select = (m, tasks = [task()]) => m.atomic(() => m.watchdog.select(registry(tasks)));
 const observe = (m, r, snapshots, coordinator) => m.atomic(() => m.watchdog.observe({ round_id: r.round_id, snapshots, coordinator_snapshot: coordinator }));
 function flush(m) { for (const item of m.watchdog.outbox()) m.enqueue(item); }
-function completedRound(m, at) {
-  m.db.prepare("INSERT INTO batches(id,lane,state,item_ids,signal_generation,intake_due,snapshot,created_at,finished_at) VALUES (?,'coordinator','finished','[]',0,0,'{}',?,?)").run('coordinator-'+at,at,at+1);
+function completedRound(m, at, keys = []) {
+  m.db.prepare("INSERT INTO batches(id,lane,state,item_ids,signal_generation,intake_due,snapshot,created_at,finished_at) VALUES (?,'coordinator','finished','[]',0,0,?,?,?)").run('coordinator-'+at,JSON.stringify({items:keys.map(key=>({key}))}),at,at+1);
 }
 
 test('an idle unfinished owner is recovered without any worker completion event, including after restart', () => {
@@ -176,4 +176,17 @@ test('a finished action without execution or accepted exact-stage evidence is no
   assert.equal(m.watchdog.status()[0].phase, 'queued');
   assert.equal(m.progress.unfinishedForOwner('worker'), true);
   m.close();
+});
+
+
+test('health distinguishes queue admission gaps from an unhandled offered recovery',()=>{
+  for(const admitted of [false,true]){
+    let now=NOW;const m=new Mailbox(':memory:',{now:()=>now});observe(m,select(m),[poll(now)]);
+    const recovery=m.watchdog.outbox()[0];flush(m);completedRound(m,NOW+1000,admitted?[recovery.key]:['unrelated-item']);
+    now+=300000;observe(m,select(m),[poll(now)],poll(now,COORDINATOR));
+    const health=m.watchdog.outbox().find(i=>i.lane==='maintenance');
+    assert.equal(health.payload.recovery_in_batch,admitted);
+    assert.equal(health.payload.health_reason,admitted?'recovery_unhandled':'queue_admission_gap');
+    assert.equal(health.payload.source_recovery_key,recovery.key);m.close();
+  }
 });

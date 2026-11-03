@@ -147,3 +147,25 @@ test('pausing admission leaves existing work intact and immutable keys prevent c
   assert.equal(m.reserve('coordinator', idle()).reason, 'lane_paused');
   m.pause('coordinator', true); assert.equal(m.reserve('coordinator', idle()).reserved, true); m.close();
 });
+
+test('unfinished batch entries rotate so an equal-priority recovery is not starved',()=>{
+  let now=NOW;const m=new Mailbox(':memory:',{now:()=>now});
+  m.activateTransitions({source_message_id:'actual-upgrade',actual_human_verified:true});
+  for(let i=0;i<21;i++)m.enqueue({key:'recovery-'+i,lane:'coordinator',kind:'recovery',payload:{event:'continuation_recovery'}});
+  const first=sent(m);m.begin(first.id);now+=1000;m.finish(first.id,{processed_keys:[]});
+  assert.equal(first.snapshot.items.some(i=>i.key==='recovery-20'),false);
+  m.enqueue(command('new-human'));
+  const second=sent(m);assert.equal(second.snapshot.items[0].key,'new-human');
+  assert.equal(second.snapshot.items[1].key,'recovery-20');
+  assert.equal(second.snapshot.items.length,20);
+  assert.equal(m.db.prepare("SELECT state FROM mail WHERE item_key='recovery-0'").get().state,'in_batch');
+  assert.deepEqual(m.get(first.id).snapshot,first.snapshot);
+  m.close();
+});
+
+test('released unsent reservations do not count as processing opportunities',()=>{
+  const m=new Mailbox(':memory:',{now:()=>NOW});m.activateTransitions({source_message_id:'upgrade',actual_human_verified:true});
+  for(let i=0;i<21;i++)m.enqueue({key:'retry-'+i,lane:'coordinator',kind:'recovery',payload:{event:'continuation_recovery'}});
+  const first=m.reserve('coordinator',idle()).batch;assert.equal(m.releaseReservation(first.id).released,true);
+  const next=m.reserve('coordinator',idle()).batch;assert.deepEqual(next.snapshot.items.map(i=>i.key),first.snapshot.items.map(i=>i.key));m.close();
+});

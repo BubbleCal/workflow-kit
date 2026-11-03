@@ -119,11 +119,14 @@ export class ContinuationWatchdog {
           .run(generation, key, JSON.stringify(payload), this.now(), caseKey);
         c = this.db.prepare('SELECT * FROM watchdog_cases WHERE case_key=?').get(caseKey);
       }
-      const opportunity = this.db.prepare("SELECT id FROM batches WHERE lane='coordinator' AND state='finished' AND created_at>=? AND finished_at<=? ORDER BY finished_at LIMIT 1").get(c.opportunity_after, this.now());
+      const opportunity = this.db.prepare("SELECT id,snapshot FROM batches WHERE lane='coordinator' AND state='finished' AND created_at>=? AND finished_at<=? ORDER BY finished_at LIMIT 1").get(c.opportunity_after, this.now());
       if (opportunity && fresh(coordinator_snapshot?.checked_at, this.now()) && idle(coordinator_snapshot)) {
+        const admitted = JSON.parse(opportunity.snapshot).items?.some(i => i.key === c.recovery_key) === true;
         const payload = { workflow_health: true, watchdog_case: caseKey, source_recovery_key: c.recovery_key,
           owner_thread_id: owner.thread_id, task_ids: owner.task_ids, eligible_coordinator_batch: opportunity.id,
-          text: 'A durable continuation recovery was still unhandled/unstarted after a subsequent eligible coordinator round. Inspect this case, source receipts and concrete blocker in the existing maintenance owner; repair the workflow without becoming a second task-state writer. Use coordinator mailbox for operational changes. Do not directly wake workers, bypass permissions, replay uncertain starts or add a scheduler. If human action is truly required, queue the precise blocker once.' };
+          recovery_in_batch: admitted, health_reason: admitted ? 'recovery_unhandled' : 'queue_admission_gap',
+          text: (admitted ? 'A recovery remained unhandled/unstarted after its completed coordinator batch.' :
+            'A queued recovery was not admitted to the completed coordinator batch. Inspect queue priority and retry rotation before attributing this to the owner.') + ' Inspect this case, source receipts and concrete blocker in the existing maintenance owner; repair the workflow without becoming a second task-state writer. Use coordinator mailbox for operational changes. Do not directly wake workers, bypass permissions, replay uncertain starts or add a scheduler. If human action is truly required, queue the precise blocker once.' };
         this.db.prepare("UPDATE watchdog_cases SET phase='escalated',escalation_payload=? WHERE case_key=?").run(JSON.stringify(payload), caseKey);
       }
       seen.push({ owner: owner.thread_id, case_key: caseKey });

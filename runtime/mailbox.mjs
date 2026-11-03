@@ -226,9 +226,19 @@ export class Mailbox {
       const s = this.db.prepare('SELECT * FROM lane_state WHERE lane=?').get(lane);
       if (!s.enabled) return { reserved: false, reason: 'lane_paused' };
       if (lane === 'maintenance') this.supersedeHealth(this.db.prepare("SELECT * FROM mail WHERE lane='maintenance' AND kind='workflow_recovery' AND state='pending'").all());
+      // Finishing an unprocessed batch must not put the same oldest entries at
+      // the front forever. Reuse durable snapshots; unsent reservations do not count.
+      const offered = lane === 'coordinator' && this.transitionVersion() >= 2 ? new Map(this.db.prepare(`
+        SELECT json_extract(i.value,'$.key') AS item_key,MAX(b.finished_at) AS offered_at
+        FROM batches b,json_each(b.snapshot,'$.items') i
+        JOIN mail m ON m.item_key=json_extract(i.value,'$.key')
+        WHERE b.lane='coordinator' AND b.state='finished' AND m.state='pending'
+        GROUP BY json_extract(i.value,'$.key')`).all().map(r=>[r.item_key,r.offered_at])) : new Map();
       const rows = lane === 'coordinator' && this.transitionVersion() >= 2 ?
         this.db.prepare("SELECT * FROM mail WHERE lane='coordinator' AND state='pending'").all()
-          .sort((a,b)=>workPriority(a,this.now())-workPriority(b,this.now()) || a.created_at-b.created_at || a.seq-b.seq).slice(0,20) :
+          .sort((a,b)=>workPriority(a,this.now())-workPriority(b,this.now()) ||
+            (a.kind === 'human_command' ? 0 : (offered.get(a.item_key) ?? a.created_at)-(offered.get(b.item_key) ?? b.created_at)) ||
+            a.created_at-b.created_at || a.seq-b.seq).slice(0,20) :
         this.db.prepare("SELECT * FROM mail WHERE lane=? AND state='pending' ORDER BY CASE WHEN lane='coordinator' AND kind IN ('recovery','human_command') THEN 0 ELSE 1 END,seq LIMIT ?").all(lane, lane === 'maintenance' ? 1 : lane === 'inbox' ? 5 : 20);
       const signalled = lane === 'coordinator' && s.generation > s.acknowledged_generation;
       if (!rows.length && !signalled) return { reserved: false, reason: 'nothing_due' };

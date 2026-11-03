@@ -64,7 +64,12 @@ never blind retries.
 If the same idle gap remains after a coordinator batch created after the recovery
 opportunity has finished, and the coordinator is idle, one workflow-health case
 goes to the existing maintenance lane. A busy coordinator or elapsed time alone
-does not count as that opportunity. Maintenance diagnoses the failure and queues
+does not count as that opportunity. The immutable payload records whether the
+exact recovery key was included in that batch: health_reason=queue_admission_gap
+means it was not offered; recovery_unhandled means it was offered but remained
+unhandled/unstarted. Do not blame an execution owner for queue starvation.
+Existing batch priority and retry rotation make room for aged recovery inputs.
+Maintenance diagnoses the failure and queues
 operational corrections; it does not become another registry writer. Human action
 is requested only for an actual irreducible blocker, once per meaningful change.
 

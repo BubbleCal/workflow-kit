@@ -1,5 +1,9 @@
 # Changes
 
+## 0.2.4
+
+Rotate unprocessed non-human inputs within equal aged priority using completed-batch history. Preserve human order, in-flight batches and receipts. Distinguish recovery queue admission gaps from offered-but-unhandled recovery in health evidence.
+
 ## 0.2.3
 
 Allow ordinary completed-task archival with fresh verified terminal notLoaded evidence. Reuse existing quiescence checks without waking the owner; preserve active/unknown refusal, whole-goal acceptance, pending obligations and unfinished-parent protection.

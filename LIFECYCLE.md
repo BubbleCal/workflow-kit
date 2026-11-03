@@ -159,7 +159,11 @@ are absent, replace owners or repeatedly wake an active worker to refresh status
 New coordinator batches prioritize actual human input, material feedback/closed-PR
 handling, review delivery/merge and stage results, then due waits/recovery and
 configuration, then intake/projection. Waiting items gain priority every 30
-minutes; human input remains first. The existing fixed input batch and soft work
+minutes; human input remains first and preserves its own order. Within an equal
+non-human priority, order by last completed-batch opportunity or original enqueue
+time. Returning an unprocessed prefix cannot indefinitely exclude the next
+waiting item. Unsent reservations do not count; historical finished snapshots
+provide durable rotation without rewriting events. The existing fixed input batch and soft work
 budget remain; neither is a concurrent engineering-task limit.
 
 Every existing plan checks all cached watched PRs, blocked goal predicates and
