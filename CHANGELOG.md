@@ -1,5 +1,9 @@
 # Changes
 
+## 0.1.9
+
+Apply explicit human coordinator model and effort changes at an idle batch boundary through supported native arguments. Preserve other roles and distinguish requested Fast mode from applied settings.
+
 ## 0.1.8
 
 Carry explicit execution model and effort preferences into native creation arguments while preserving immutable actions and existing chats. Keep unsupported Fast-tier requests distinct from applied native settings.

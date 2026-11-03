@@ -27,6 +27,38 @@ test('a busy coordinator receives no messages while repeated timer ticks coalesc
   assert.equal(b.reserved, true); m.close();
 });
 
+test('an explicit coordinator model request reaches the next idle delivery as supported native arguments', () => {
+  const m = new Mailbox(':memory:', { now: () => NOW });
+  const payload = { text: 'Use the requested model and effort', source_message_id: 'actual-human-model',
+    intent: 'coordinator_model_change', target_thread_id: COORDINATOR, user_model_request_verified: true,
+    native_model: { model: 'requested-model', thinking: 'xhigh', serviceTier: 'priority' } };
+  m.enqueue({ key: 'model-choice', lane: 'coordinator', kind: 'human_command', payload });
+  const busy = { ...idle(), thread: { id: COORDINATOR, status: { type: 'active' } } };
+  assert.equal(m.reserve('coordinator', busy).reserved, false);
+  const b = m.reserve('coordinator', idle()).batch;
+  m.setPrompt(b.id, 'fixed batch');
+  assert.equal(m.authorizeSend(b.id, busy).send, false);
+  const permit = m.authorizeSend(b.id, idle());
+  assert.equal(permit.model, 'requested-model');
+  assert.equal(permit.thinking, 'xhigh');
+  assert.equal(Object.hasOwn(permit, 'serviceTier'), false);
+  assert.equal(m.authorizeSend(b.id, idle()).send, false);
+  m.close();
+});
+
+test('ordinary events cannot alter a control model', () => {
+  for (const patch of [{ kind: 'event' }, { verified: false }, { target: 'another-owner' }]) {
+    const m = new Mailbox(':memory:', { now: () => NOW });
+    m.enqueue({ key: 'not-a-model-grant', lane: 'coordinator', kind: patch.kind ?? 'human_command',
+      payload: { source_message_id: 'source', intent: 'coordinator_model_change',
+        user_model_request_verified: patch.verified ?? true, target_thread_id: patch.target ?? COORDINATOR,
+        native_model: { model: 'other-model', thinking: 'xhigh' } } });
+    const b = m.reserve('coordinator', idle()).batch; m.setPrompt(b.id, 'fixed');
+    const permit = m.authorizeSend(b.id, idle());
+    assert.equal(Object.hasOwn(permit, 'model'), false); m.close();
+  }
+});
+
 test('input arriving during a run belongs only to the next fixed batch', () => {
   const m = new Mailbox(':memory:', { now: () => NOW });
   m.enqueue(command('a')); m.signal(); const b = sent(m); m.begin(b.id);

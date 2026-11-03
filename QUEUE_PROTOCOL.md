@@ -42,3 +42,11 @@ retain their own escalation keys; retiring an old alert does not close the task.
 Follow MODEL_SELECTION.md for explicit native model/effort selection on new
 execution chats; requested Fast-off is not an applied setting when the native
 creation interface does not expose a tier control.
+
+Explicit human coordinator model changes may carry native_model.model/thinking
+in a verified human_command with intent=coordinator_model_change. The target must
+be the bound coordinator and user_model_request_verified must reflect an actual
+human source read. After the ordinary idle checks, authorize_send returns only
+those two supported fields; the dispatcher passes them to the native send tool.
+Ordinary events and other lanes cannot change models. Fast/service tier is not
+a supported override; never claim it applied from the model choice.

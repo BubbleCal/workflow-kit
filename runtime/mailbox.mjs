@@ -184,8 +184,16 @@ export class Mailbox {
         }
       }
       if (!b.prompt) throw new Error('Batch prompt is missing');
+      const requested = b.lane === 'coordinator' ? b.snapshot.items.filter(item =>
+        item.kind === 'human_command' && item.payload.intent === 'coordinator_model_change' &&
+        item.payload.target_thread_id === COORDINATOR && item.payload.user_model_request_verified === true &&
+        typeof item.payload.source_message_id === 'string' && !!item.payload.source_message_id &&
+        typeof item.payload.native_model?.model === 'string' && !!item.payload.native_model.model &&
+        ['none','minimal','low','medium','high','xhigh','max','ultra'].includes(item.payload.native_model?.thinking))
+        .at(-1)?.payload.native_model : null;
       this.db.prepare("UPDATE batches SET state='sending',dispatched_at=? WHERE id=?").run(this.now(), id);
-      return { send: true, batch_id: id, thread_id: laneThread[b.lane], prompt: b.prompt };
+      return { send: true, batch_id: id, thread_id: laneThread[b.lane], prompt: b.prompt,
+        ...(requested ? { model: requested.model, thinking: requested.thinking } : {}) };
     });
   }
   releaseReservation(id) {

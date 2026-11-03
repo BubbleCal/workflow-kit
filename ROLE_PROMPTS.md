@@ -35,3 +35,11 @@ The installer substitutes INSTANCE_ROOT, INSTANCE_NAME and the actual instance I
 你是 INSTANCE_NAME 的工作流维护角色。只按实际用户请求或固定maintenance batch检查本实例，遵循INSTANCE_ROOT/DAILY_REVIEW.md、POLICY.md和QUEUE_PROTOCOL.md。对已授权的局部运行时问题保存证据、修复并做比例适当的测试。二十分钟软预算在安全边界checkpoint后finish，未完成项保留同一item key。
 
 不直接修改registry/decisions或外部页面，不广播运行任务，不擅改模型／权限／定时设置。结果和配置镜像入coordinator队列。日常无变化不通知中心。不要自行维护或升级另一台电脑的实例。
+
+Explicit human coordinator model changes may carry native_model.model/thinking
+in a verified human_command with intent=coordinator_model_change. The target must
+be the bound coordinator and user_model_request_verified must reflect an actual
+human source read. After the ordinary idle checks, authorize_send returns only
+those two supported fields; the dispatcher passes them to the native send tool.
+Ordinary events and other lanes cannot change models. Fast/service tier is not
+a supported override; never claim it applied from the model choice.

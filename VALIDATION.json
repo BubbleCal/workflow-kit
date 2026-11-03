@@ -1,15 +1,15 @@
 {
-  "version": "0.1.8",
-  "verified_at": "2026-11-03T08:47:42.309Z",
+  "version": "0.1.9",
+  "verified_at": "2026-11-03T09:18:39.717Z",
   "environment": {
     "platform": "darwin",
     "architecture": "arm64",
     "node": "v23.11.0"
   },
   "tests": {
-    "runtime": 120,
+    "runtime": 122,
     "portable_integration": 3,
-    "passed": 123,
+    "passed": 125,
     "failed": 0
   },
   "verified": [
@@ -28,7 +28,8 @@
     "Optional outcome page writes require exact bindings, deduplicated outcome keys, preserved user notes and a fresh claim; external delivery remains off by default",
     "Unavailable optional outcomes configuration does not affect the original decision page or unrelated workflow actions",
     "Resolved pending and reserved health alerts retire before generation rollover; sending work and later genuine escalation remain intact",
-    "Explicit native model/effort arguments reach claimed creation once; per-task choices and historical actions are preserved; unsupported Fast tier is not claimed applied"
+    "Explicit native model/effort arguments reach claimed creation once; per-task choices and historical actions are preserved; unsupported Fast tier is not claimed applied",
+    "Verified human coordinator model requests reach an idle batch delivery through only model/thinking; ordinary events cannot override a control model"
   ],
   "operational_data_exported": false,
   "credentials_exported": false,

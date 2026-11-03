@@ -15,3 +15,11 @@ unsupported tool arguments, edit app internal state, or bypass a native UI acces
 restriction. Preserve active tasks and surface one exact human setting step when
 the supported interface cannot apply the requested choice. Do not create test chats
 unless the user explicitly asks.
+
+Explicit human coordinator model changes may carry native_model.model/thinking
+in a verified human_command with intent=coordinator_model_change. The target must
+be the bound coordinator and user_model_request_verified must reflect an actual
+human source read. After the ordinary idle checks, authorize_send returns only
+those two supported fields; the dispatcher passes them to the native send tool.
+Ordinary events and other lanes cannot change models. Fast/service tier is not
+a supported override; never claim it applied from the model choice.
