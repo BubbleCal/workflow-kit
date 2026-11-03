@@ -91,3 +91,9 @@ product maturity/consumers, first-principles design including in-scope breaking
 changes, and minimal sufficient validation/fallbacks. It adds no preparation
 phase or blanket compatibility/approval gate. Existing live jobs are not broadcast
 new prompts; apply guidance at the next necessary dispatch.
+
+Resolved unsent health diagnostics are retired atomically before watchdog observation
+can reopen a due recovery generation. Preserve the old generation and disposition
+in superseded_health. This includes reserved-unsent batches, while sending, sent,
+uncertain and running batches remain untouched. New genuine missed generations
+retain their own escalation keys; retiring an old alert does not close the task.

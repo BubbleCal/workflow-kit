@@ -32,3 +32,9 @@ status. Scheduler recovery and actual engineering recovery are separate facts.
 ## Optional outcomes projection
 
 When explicitly configured and authorized, follow OUTCOMES.md to maintain a separate outcomes page from accepted evidence in existing coordinator rounds. Preserve the decision page, task acceptance and manual notes; do not add timers or reporting-only worker messages.
+
+Resolved unsent health diagnostics are retired atomically before watchdog observation
+can reopen a due recovery generation. Preserve the old generation and disposition
+in superseded_health. This includes reserved-unsent batches, while sending, sent,
+uncertain and running batches remain untouched. New genuine missed generations
+retain their own escalation keys; retiring an old alert does not close the task.

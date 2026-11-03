@@ -1,5 +1,9 @@
 # Changes
 
+## 0.1.7
+
+Retire resolved unsent health alerts before a due recheck replaces their generation disposition. Preserve in-flight batches and later genuine escalations.
+
 ## 0.1.6
 
 Add an optional, independently bound outcomes page with scoped create/update guards, duplicate checks and separate delivery, evidence and adoption fields. No live bindings are packaged.

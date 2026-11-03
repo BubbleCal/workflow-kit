@@ -122,6 +122,22 @@ export class Mailbox {
         .run(this.now(),row.item_key,row.state);
     }
   }
+  observeWatchdog(input) {
+    return this.atomic(() => {
+      // A due recheck replaces the case's current resolution. Retire unsent
+      // diagnostics while that generation's evidence is still available.
+      const rows = this.db.prepare(`SELECT m.* FROM mail m LEFT JOIN batches b ON b.id=m.batch_id
+        WHERE m.lane='maintenance' AND m.kind='workflow_recovery'
+          AND (m.state='pending' OR (m.state='in_batch' AND b.state='reserved'))`).all();
+      this.supersedeHealth(rows);
+      for (const id of new Set(rows.filter(r => r.state === 'in_batch').map(r => r.batch_id))) {
+        if (!this.db.prepare("SELECT 1 FROM mail WHERE batch_id=? AND state='in_batch'").get(id))
+          this.db.prepare("UPDATE batches SET state='superseded',finished_at=?,receipt=? WHERE id=? AND state='reserved'")
+            .run(this.now(), JSON.stringify({ reason: 'recovery_resolved_before_next_generation' }), id);
+      }
+      return this.watchdog.observe(input);
+    });
+  }
   reserve(lane, observation) {
     if (!laneThread[lane]) throw new Error(`Unknown lane: ${lane}`);
     if (!isIdle(observation, this.now()) || observation.thread.id !== laneThread[lane]) return { reserved: false, reason: 'target_busy_or_unknown' };
@@ -314,9 +330,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     else if (input.op === 'tick') result = mailbox.tick();
     else if (input.op === 'plan') {
       mailbox.tick(); result = { deliveries: [], skips: [] };
-      if (input.watchdog_round_id !== undefined) result.watchdog = mailbox.atomic(() => mailbox.watchdog.observe({ round_id: input.watchdog_round_id, snapshots: input.snapshots,
+      if (input.watchdog_round_id !== undefined) result.watchdog = mailbox.observeWatchdog({ round_id: input.watchdog_round_id, snapshots: input.snapshots,
         registry: JSON.parse(readFileSync(resolve(BASE, 'registry.json'), 'utf8')),
-        coordinator_snapshot: (input.snapshots ?? []).find(p => p.thread?.id === COORDINATOR) }));
+        coordinator_snapshot: (input.snapshots ?? []).find(p => p.thread?.id === COORDINATOR) });
       for (const item of mailbox.watchdog.outbox()) mailbox.enqueue(item);
       const schedulePath = resolve(BASE, 'daily-review/config.json');
       const review = existsSync(schedulePath) ? dailyReviewEvent(Date.now(), JSON.parse(readFileSync(schedulePath, 'utf8'))) : null;

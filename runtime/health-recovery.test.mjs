@@ -68,3 +68,49 @@ test('legacy health keys deduplicate and their retirement does not hide a later 
   const next=m.watchdog.outbox().find(x=>x.lane==='maintenance');assert.ok(next);assert.notEqual(next.key,old.key);m.enqueue(next);
   assert.equal(m.watchdog.outbox().filter(x=>x.lane==='maintenance').length,0);m.close();
 });
+
+for (const deliveryState of ['pending', 'reserved', 'sending']) {
+  test(`resolved ${deliveryState} health keeps its disposition across a due recovery generation`, () => {
+    let now = NOW;
+    const m = new Mailbox(':memory:', { now: () => now });
+    try {
+      const old = escalate(m, () => now += 300000);
+      let batch;
+      if (deliveryState !== 'pending') {
+        batch = m.reserve('maintenance', idle(now, MAINTENANCE)).batch;
+        m.setPrompt(batch.id, 'old immutable diagnostic');
+        if (deliveryState === 'sending') assert.equal(m.authorizeSend(batch.id, idle(now, MAINTENANCE)).send, true);
+      }
+      resolve(m, old, 'blocked', now);
+      const registry = { task_registry: { items: { T1: { id: 'T1', owner_thread_id: 'worker',
+        status: 'engineering_active', authorization_message_id: 'human' } } } };
+      now += 3600000;
+      let round = m.atomic(() => m.watchdog.select(registry));
+      const input = { round_id: round.round_id, snapshots: [idle(now, 'worker')], registry };
+      // Match the production path: observation can reopen the case before lane reservation.
+      m.observeWatchdog(input);
+      for (const item of m.watchdog.outbox()) m.enqueue(item);
+      const oldRow = m.db.prepare('SELECT state FROM mail WHERE item_key=?').get(old.key);
+      if (deliveryState === 'sending') {
+        assert.equal(oldRow.state, 'in_batch');
+        assert.equal(m.get(batch.id).state, 'sending');
+      } else {
+        assert.equal(oldRow.state, 'superseded');
+        assert.equal(m.status().superseded_health.find(x => x.item_key === old.key).recovery_key, old.payload.source_recovery_key);
+        if (batch) assert.equal(m.authorizeSend(batch.id, idle(now, MAINTENANCE)).send, false);
+        assert.equal(m.reserve('maintenance', idle(now, MAINTENANCE)).reserved, false);
+      }
+      const current = m.watchdog.status().find(x => x.case_key === old.payload.watchdog_case);
+      assert.equal(current.generation, 2);
+      m.db.prepare("INSERT INTO batches(id,lane,state,item_ids,signal_generation,intake_due,snapshot,created_at,finished_at) VALUES ('new-missed-round','coordinator','finished','[]',0,0,'{}',?,?)").run(now + 1, now + 2);
+      now += 300000;
+      round = m.atomic(() => m.watchdog.select(registry));
+      const nextInput = { round_id: round.round_id, snapshots: [idle(now, 'worker')], registry, coordinator_snapshot: idle(now, COORDINATOR) };
+      m.observeWatchdog(nextInput);
+      const next = m.watchdog.outbox().find(x => x.lane === 'maintenance');
+      assert.ok(next);
+      assert.notEqual(next.key, old.key);
+      assert.equal(next.payload.source_recovery_key, current.recovery_key);
+    } finally { m.close(); }
+  });
+}
