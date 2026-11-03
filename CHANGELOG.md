@@ -1,5 +1,9 @@
 # Changes
 
+## 0.1.6
+
+Add an optional, independently bound outcomes page with scoped create/update guards, duplicate checks and separate delivery, evidence and adoption fields. No live bindings are packaged.
+
 ## 0.1.5
 
 Allow ordinary continuation of an unloaded terminal owner with fresh matching native evidence while preserving job, hold, approval, permission and deduplication checks. Document shared scheduler/backend availability and supported recovery.

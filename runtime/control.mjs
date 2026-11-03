@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { Mailbox, COORDINATOR } from './mailbox.mjs';
 import { withEngineeringPrinciples } from './engineering-principles.mjs';
 import { ReviewFeedback, pullRequestIdentity } from './review-feedback.mjs';
+import { readOutcomeBindings, outcomeSyncAllowed } from './outcomes.mjs';
 import { isReviewDelivery, readReviewWindow, reviewWindowAt, withReviewWindowGuidance, REVIEW_WINDOW } from './review-window.mjs';
 
 export const INBOX = bindings.threads.inbox;
@@ -26,7 +27,7 @@ function scopeKey(kind, payload) {
   if (kind === 'assign_project') return `project-membership:${required(payload?.host_id, 'host_id')}:${required(payload?.thread_id, 'thread_id')}`;
   if (['dispatch', 'human_input', 'archive', 'unarchive'].includes(kind)) return `thread:${required(payload?.thread_id, 'payload.thread_id')}`;
   if (kind === 'notify') return `inbox:${INBOX}`;
-  if (kind === 'notion_sync') return `notion:${PAGE}`;
+  if (kind === 'notion_sync') return `notion:${payload?.data_source_id ?? required(payload?.page_id, 'payload.page_id')}`;
   if (kind === 'auth') return `browser:${required(payload?.host_id, 'payload.host_id')}`;
   if (kind === 'automation_update') return `automation:${required(payload?.automation_id, 'payload.automation_id')}`;
   return `pr:${required(kind === 'slack_pr' ? payload?.message : payload?.pr_url, 'PR URL')}`;
@@ -77,7 +78,7 @@ export function resolvePlacement({ projects, project_id, project_label, host_id,
 
 // These checks validate supplied evidence. The coordinator must obtain that
 // evidence from the owning tools; this is not a replacement for tool permissions.
-export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPACITY_LIMITS, reviewRule = REVIEW_WINDOW) {
+export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPACITY_LIMITS, reviewRule = REVIEW_WINDOW, outcomeBindings = kind === 'notion_sync' && payload?.page_id !== PAGE ? readOutcomeBindings() : null) {
   const reasons = instancePolicyReasons(kind, payload, e);
   const need = (condition, reason) => { if (!condition) reasons.push(reason); };
   // A current human instruction can start engineering directly. This only
@@ -275,7 +276,9 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
     need(e.other_login_owner === false, 'another_login_owner_or_unknown');
   }
   if (kind === 'notion_sync') {
-    need(payload?.page_id === PAGE, 'notion_destination_forbidden');
+    const legacy = payload?.page_id === PAGE && !payload?.data_source_id &&
+      (!payload?.operation || payload.operation === 'update_page');
+    need(legacy || outcomeSyncAllowed(payload, e, outcomeBindings), 'notion_destination_forbidden');
     need(e.content_changed === true && e.manual_content_preserved === true, 'no_safe_substantive_page_change');
   }
   if (kind === 'automation_update') {
@@ -290,11 +293,12 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
 }
 
 export class ControlStore {
-  constructor(path, { now = () => Date.now(), capacity = CAPACITY_LIMITS, progress = null, reviewRule = readReviewWindow } = {}) {
+  constructor(path, { now = () => Date.now(), capacity = CAPACITY_LIMITS, progress = null, reviewRule = readReviewWindow, outcomeBindings = readOutcomeBindings } = {}) {
     this.now = now;
     this.capacity = capacity;
     this.progress = progress;
     this.reviewRule = reviewRule;
+    this.outcomeBindings = outcomeBindings;
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;
@@ -378,7 +382,7 @@ export class ControlStore {
         return { prepared: false, key, state: old.state, reason: 'already_recorded' };
       }
       const rule = isReviewDelivery(kind) ? this.reviewRule() : REVIEW_WINDOW;
-      const result = assess(kind, input.payload, input.evidence, this.now(), this.capacity, rule);
+      const result = assess(kind, input.payload, input.evidence, this.now(), this.capacity, rule, kind === 'notion_sync' && input.payload?.page_id !== PAGE ? this.outcomeBindings() : null);
       const deferred = result.reasons.length === 1 && result.reasons[0] === 'review_delivery_blackout';
       if (!result.allowed && !deferred) return { prepared: false, key, ...result };
       const feedback = this.feedbackGate(kind,input.payload);
@@ -457,7 +461,7 @@ export class ControlStore {
         checkedEvidence = { ...checkedEvidence, dispatches_this_run: Number.isSafeInteger(evidence?.dispatches_this_run) && evidence.dispatches_this_run >= 0
           ? Math.max(evidence.dispatches_this_run, claimedInRun) : evidence?.dispatches_this_run };
       }
-      const result = assess(row.kind, payload, checkedEvidence, this.now(), this.capacity, isReviewDelivery(row.kind) ? this.reviewRule() : REVIEW_WINDOW);
+      const result = assess(row.kind, payload, checkedEvidence, this.now(), this.capacity, isReviewDelivery(row.kind) ? this.reviewRule() : REVIEW_WINDOW, row.kind === 'notion_sync' && payload.page_id !== PAGE ? this.outcomeBindings() : null);
       if (!result.allowed) return { claimed: false, ...result };
       const feedback = this.feedbackGate(row.kind,payload);
       if (!feedback.allowed) return {claimed:false,...feedback};

@@ -1,15 +1,15 @@
 {
-  "version": "0.1.5",
-  "verified_at": "2026-11-03T07:32:54.316Z",
+  "version": "0.1.6",
+  "verified_at": "2026-11-03T08:18:24.882Z",
   "environment": {
     "platform": "darwin",
     "architecture": "arm64",
     "node": "v23.11.0"
   },
   "tests": {
-    "runtime": 111,
+    "runtime": 114,
     "portable_integration": 3,
-    "passed": 114,
+    "passed": 117,
     "failed": 0
   },
   "verified": [
@@ -24,7 +24,9 @@
     "macOS symlinked temporary paths execute the CLI correctly",
     "Resolved unsent health events are superseded with durable receipts, while legacy keys, active batches and later recovery generations remain correct",
     "All-author feedback coverage, current-head semantic disposition, existing repair deduplication and final publication gates",
-    "Ordinary unloaded-owner continuation uses fresh matching native evidence and preserves job/hold/approval/permission/deduplication gates"
+    "Ordinary unloaded-owner continuation uses fresh matching native evidence and preserves job/hold/approval/permission/deduplication gates",
+    "Optional outcome page writes require exact bindings, deduplicated outcome keys, preserved user notes and a fresh claim; external delivery remains off by default",
+    "Unavailable optional outcomes configuration does not affect the original decision page or unrelated workflow actions"
   ],
   "operational_data_exported": false,
   "credentials_exported": false,
@@ -46,5 +48,6 @@
   "documentation_verified_at": "2026-11-03T00:27:14.174982+00:00",
   "dispatcher_default_minutes": 10,
   "review_feedback_guards_verified": true,
-  "unloaded_owner_recovery_verified": true
+  "unloaded_owner_recovery_verified": true,
+  "outcome_projection_guards_verified": true
 }

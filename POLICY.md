@@ -28,3 +28,7 @@ Follow LIVENESS_RECOVERY.md after a local app interruption. Ordinary dispatch ca
 resume a verified terminal unloaded owner under the same authorization, job,
 permission and ownership checks. Do not invent human input or relabel native
 status. Scheduler recovery and actual engineering recovery are separate facts.
+
+## Optional outcomes projection
+
+When explicitly configured and authorized, follow OUTCOMES.md to maintain a separate outcomes page from accepted evidence in existing coordinator rounds. Preserve the decision page, task acceptance and manual notes; do not add timers or reporting-only worker messages.

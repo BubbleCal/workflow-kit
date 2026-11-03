@@ -354,3 +354,7 @@ nonempty `interruption_evidence_ref` establishing no human stop or unresolved
 native approval. All existing job, queued-input, owner, scope, native-permission
 and deduplication checks still apply; unknown jobs are not absent jobs. This is
 not a human_input action, archive exception, permission probe or new task.
+
+## Optional outcomes projection
+
+When explicitly configured and authorized, follow ../OUTCOMES.md to maintain a separate outcomes page from accepted evidence in existing coordinator rounds. Preserve the decision page, task acceptance and manual notes; do not add timers or reporting-only worker messages.
