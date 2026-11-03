@@ -36,3 +36,10 @@ When explicitly configured and authorized, follow OUTCOMES.md to maintain a sepa
 Follow MODEL_SELECTION.md for explicit native model/effort selection on new
 execution chats; requested Fast-off is not an applied setting when the native
 creation interface does not expose a tier control.
+
+## Version-2 transitions
+
+Follow LIFECYCLE.md for actual PR-state obligations, owned-result disposition, typed
+wait evidence, operational priority with aging, and cached-state invariant checks
+on the existing dispatcher. Enable only at a verified batch boundary; existing
+work and external integration opt-ins remain unchanged.

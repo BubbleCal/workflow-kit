@@ -145,7 +145,7 @@ export class ContinuationWatchdog {
     }
     return result;
   }
-  resolve({ case_key, recovery_key, disposition, evidence_ref, continuation_key, new_turn_id, work_evidence_ref, reason, resume_condition, next_check_at, human_hold = false, registry }) {
+  resolve({ case_key, recovery_key, disposition, evidence_ref, continuation_key, new_turn_id, work_evidence_ref, reason, resume_condition, next_check_at, wait_condition, human_hold = false, registry }) {
     if (!evidence_ref) throw new Error('Watchdog resolution needs actual evidence');
     const c = this.db.prepare('SELECT * FROM watchdog_cases WHERE case_key=?').get(case_key);
     if (!c || c.recovery_key !== recovery_key) throw new Error('Watchdog recovery generation changed');
@@ -173,7 +173,7 @@ export class ContinuationWatchdog {
     } else throw new Error('Unknown watchdog disposition');
     this.db.prepare('UPDATE watchdog_cases SET phase=?,opportunity_after=?,next_check_at=?,resolution_key=?,resolution=? WHERE case_key=?')
       .run(phase, this.now(), next_check_at ? Date.parse(next_check_at) : null, recovery_key,
-        JSON.stringify({ disposition, evidence_ref, continuation_key, new_turn_id, work_evidence_ref, reason, resume_condition, human_hold }), case_key);
+        JSON.stringify({ disposition, evidence_ref, continuation_key, new_turn_id, work_evidence_ref, reason, resume_condition, human_hold, wait_condition }), case_key);
     return { case_key, phase, native_dispatch_performed: false };
   }
   canAck(caseKey, recoveryKey) { return this.db.prepare('SELECT resolution_key FROM watchdog_cases WHERE case_key=?').get(caseKey)?.resolution_key === recoveryKey; }

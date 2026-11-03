@@ -67,3 +67,10 @@ inline 4447591625 reports a JSONB append regression on 43f4a5bd1a58af454fe8a99cf
 The original owner already received a genuine user correction. Adopt that route
 with actual evidence; never send a second repair request merely to test this
 runtime. A current product fix is verified by its owner, not by this maintenance.
+
+## Version-2 transitions
+
+Follow LIFECYCLE.md for actual PR-state obligations, owned-result disposition, typed
+wait evidence, operational priority with aging, and cached-state invariant checks
+on the existing dispatcher. Enable only at a verified batch boundary; existing
+work and external integration opt-ins remain unchanged.

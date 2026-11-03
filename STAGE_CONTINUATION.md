@@ -78,3 +78,10 @@ native_approval_pending=false, while reporting the real approval_policy/sandbox.
 This changes no native tool permission and allows no VM, benchmark, product edit
 or terminal network action. Keep unavailable operations as separate blocked
 stages; do not claim Never/Full Access falsely.
+
+## Version-2 transitions
+
+Follow LIFECYCLE.md for actual PR-state obligations, owned-result disposition, typed
+wait evidence, operational priority with aging, and cached-state invariant checks
+on the existing dispatcher. Enable only at a verified batch boundary; existing
+work and external integration opt-ins remain unchanged.

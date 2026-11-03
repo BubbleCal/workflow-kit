@@ -50,3 +50,10 @@ human source read. After the ordinary idle checks, authorize_send returns only
 those two supported fields; the dispatcher passes them to the native send tool.
 Ordinary events and other lanes cannot change models. Fast/service tier is not
 a supported override; never claim it applied from the model choice.
+
+## Version-2 transitions
+
+Follow LIFECYCLE.md for actual PR-state obligations, owned-result disposition, typed
+wait evidence, operational priority with aging, and cached-state invariant checks
+on the existing dispatcher. Enable only at a verified batch boundary; existing
+work and external integration opt-ins remain unchanged.

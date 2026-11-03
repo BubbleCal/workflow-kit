@@ -1,5 +1,9 @@
 # Changes
 
+## 0.2.0
+
+Add durable PR lifecycle obligations, universal owned-result dispositions, typed expiring waits, action priority with aging, and cached invariant reconciliation. Activation preserves in-flight batch contracts; optional external delivery remains disabled by default.
+
 ## 0.1.9
 
 Apply explicit human coordinator model and effort changes at an idle batch boundary through supported native arguments. Preserve other roles and distinguish requested Fast mode from applied settings.

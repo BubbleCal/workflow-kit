@@ -1,15 +1,15 @@
 {
-  "version": "0.1.9",
-  "verified_at": "2026-11-03T09:18:39.717Z",
+  "version": "0.2.0",
+  "verified_at": "2026-11-03T13:56:24.742Z",
   "environment": {
     "platform": "darwin",
     "architecture": "arm64",
     "node": "v23.11.0"
   },
   "tests": {
-    "runtime": 122,
+    "runtime": 140,
     "portable_integration": 3,
-    "passed": 125,
+    "passed": 143,
     "failed": 0
   },
   "verified": [
@@ -29,7 +29,12 @@
     "Unavailable optional outcomes configuration does not affect the original decision page or unrelated workflow actions",
     "Resolved pending and reserved health alerts retire before generation rollover; sending work and later genuine escalation remain intact",
     "Explicit native model/effort arguments reach claimed creation once; per-task choices and historical actions are preserved; unsupported Fast tier is not claimed applied",
-    "Verified human coordinator model requests reach an idle batch delivery through only model/thinking; ordinary events cannot override a control model"
+    "Verified human coordinator model requests reach an idle batch delivery through only model/thinking; ordinary events cannot override a control model",
+    "Ready, material-feedback, closed and merged PR transitions produce durable obligations with source-task resolution gates",
+    "All owned terminal result names require a disposition in v2 batches; ready artifacts bind original task and owner",
+    "Typed dependency/job/access/human/PR waiting predicates expire or change; repeated pending waits coalesce",
+    "Operational actions are prioritized with aging, and cached stage/PR/wait contradictions are checked independently of native owner idleness",
+    "Cutover preserves existing batch contracts, jobs, original owners and disabled external delivery"
   ],
   "operational_data_exported": false,
   "credentials_exported": false,
@@ -45,7 +50,8 @@
     "Codex native setup and connections must be verified on the destination Mac",
     "No cross-machine task synchronization or automatic update service",
     "Role model choices inherit by default; no running model was changed",
-    "No native Fast-off setting or effective-tier verification is provided when the desktop tool lacks a service-tier parameter"
+    "No native Fast-off setting or effective-tier verification is provided when the desktop tool lacks a service-tier parameter",
+    "Semantic review and external source freshness still require actual owning-source reads; native scheduler availability remains outside the local ledger"
   ],
   "live_runtime_modified_by_packaging": false,
   "health_retirement_verified": true,

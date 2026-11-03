@@ -9,6 +9,7 @@ import { withEngineeringPrinciples } from './engineering-principles.mjs';
 import { ReviewFeedback, pullRequestIdentity } from './review-feedback.mjs';
 import { readOutcomeBindings, outcomeSyncAllowed } from './outcomes.mjs';
 import { readModelSelection, withCreationModel } from './model-selection.mjs';
+import { LifecycleLedger } from './lifecycle.mjs';
 import { isReviewDelivery, readReviewWindow, reviewWindowAt, withReviewWindowGuidance, REVIEW_WINDOW } from './review-window.mjs';
 
 export const INBOX = bindings.threads.inbox;
@@ -325,6 +326,13 @@ export class ControlStore {
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       INSERT OR IGNORE INTO settings VALUES ('processing', 'on');`);
     this.feedback = new ReviewFeedback(this.db,this.now);
+    this.lifecycle = new LifecycleLedger(this.db, { now: this.now, deliveryMode:bindings.delivery.slack_enabled?'slack':'local', unacknowledged:()=>{
+      const file=path === ':memory:' ? null : resolve(dirname(path),'mailbox.sqlite');
+      if (!file || !existsSync(file)) return new Set();
+      const m=new DatabaseSync(file,{readOnly:true});
+      try { return new Set(m.prepare("SELECT item_key FROM mail WHERE state IN ('pending','in_batch') AND json_extract(payload,'$.event')='pr_lifecycle_action'").all().map(x=>x.item_key)); }
+      finally { m.close(); }
+    } });
   }
   close() { this.db.close(); }
   atomic(fn) {
@@ -367,6 +375,8 @@ export class ControlStore {
   prepare(input) {
     const key = required(input.key, 'action key');
     const prior = this.db.prepare('SELECT payload FROM actions WHERE action_key=?').get(key);
+    if (['dispatch','create_thread'].includes(input.kind) && (!prior || JSON.parse(prior.payload).result_contract_version === 2))
+      input = { ...input, payload: { ...input.payload, result_contract_version:2 } };
     if (input.kind === 'create_thread') {
       const selection = prior ? JSON.parse(prior.payload).model_selection : this.modelSelection();
       input = { ...input, payload: withCreationModel(input.kind, input.payload, selection) };
@@ -673,15 +683,50 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       reconcile: () => control.reconcile(input), cancel: () => control.cancel(input),
       processing: () => control.processing(input.enabled), status: () => control.status(),
       review_window: () => reviewWindowAt(control.now(),control.reviewRule()),
-      feedback_ingest: () => control.atomic(()=>control.feedback.ingest(input.snapshot_file ? JSON.parse(readFileSync(input.snapshot_file,'utf8')) : input.snapshot)),
-      feedback_assess: () => control.atomic(()=>control.feedback.assess(input)),
+      feedback_ingest: () => control.atomic(()=>{
+        const snapshot = input.snapshot_file ? JSON.parse(readFileSync(input.snapshot_file,'utf8')) : input.snapshot;
+        const result = control.feedback.ingest(snapshot);
+        if (snapshot.pr) control.lifecycle.observe(snapshot.pr, { feedbackCollected: true });
+        return { ...result, lifecycle_outbox: control.lifecycle.reconcile() };
+      }),
+      feedback_assess: () => control.atomic(()=>({ ...control.feedback.assess(input), lifecycle_outbox: control.lifecycle.reconcile() })),
+      lifecycle_track: () => control.atomic(()=>control.lifecycle.track(input)),
+      lifecycle_observe: () => control.atomic(()=>{
+        const result = control.lifecycle.observe(input.snapshot_file ? JSON.parse(readFileSync(input.snapshot_file,'utf8')) : input.snapshot);
+        return { ...result, outbox: control.lifecycle.reconcile() };
+      }),
+      lifecycle_plan: () => control.atomic(()=>({ outbox: control.lifecycle.reconcile() })),
+      lifecycle_status: () => control.lifecycle.status(),
+      lifecycle_resolve: () => {
+        let progress_resolution;
+        if (input.disposition === 'progress') {
+          mailbox ??= new Mailbox(resolve(base,'mailbox.sqlite'));
+          if (input.progress_event_key !== `${input.key}:${input.generation}`) throw new Error('Progress must consume this exact lifecycle event');
+          const event = mailbox.db.prepare('SELECT * FROM progress_events WHERE event_key=?').get(input.progress_event_key ?? '');
+          if (!event) throw new Error('Record actual progress before resolving the lifecycle obligation');
+          const intent = control.db.prepare('SELECT payload FROM lifecycle_intents WHERE intent_key=?').get(input.key);
+          const task = intent && JSON.parse(intent.payload).task_id;
+          if (!mailbox.db.prepare('SELECT 1 FROM progress_event_tasks WHERE event_key=? AND task_id=?').get(input.progress_event_key,task))
+            throw new Error('Progress does not cover the PR task');
+          const taskStages = mailbox.progress.goals().flatMap(g=>g.stages).filter(s=>s.task_id===task);
+          progress_resolution = { verified:true, event_key:input.progress_event_key, task_ids:[task],
+            task_complete:taskStages.length>0 && taskStages.every(s=>s.state==='complete'), evidence_ref:event.evidence_ref };
+        }
+        return control.atomic(()=>control.lifecycle.resolve({ ...input, progress_resolution }));
+      },
       feedback_status: () => control.feedback.status(input.repository,input.pr_number),
       feedback_plan: () => control.feedback.plan(input),
       feedback_record_route: () => control.atomic(()=>control.feedback.recordRoute(input)),
       import_legacy: () => control.status(),
     };
     if (!operations[input.op]) throw new Error(`Unknown operation: ${input.op}`);
-    process.stdout.write(JSON.stringify(operations[input.op]()) + '\n');
+    const result = operations[input.op]();
+    const outbox = result?.lifecycle_outbox ?? (['lifecycle_observe','lifecycle_plan'].includes(input.op) ? result?.outbox : null);
+    if (outbox?.length) {
+      mailbox ??= new Mailbox(resolve(base,'mailbox.sqlite'));
+      if (mailbox.transitionVersion() >= 2) for (const item of outbox) mailbox.enqueue(item);
+    }
+    process.stdout.write(JSON.stringify(result) + '\n');
   } catch (error) {
     process.stderr.write(JSON.stringify({ error: error.message }) + '\n');
     process.exitCode = 1;

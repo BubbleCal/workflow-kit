@@ -358,3 +358,10 @@ not a human_input action, archive exception, permission probe or new task.
 ## Optional outcomes projection
 
 When explicitly configured and authorized, follow ../OUTCOMES.md to maintain a separate outcomes page from accepted evidence in existing coordinator rounds. Preserve the decision page, task acceptance and manual notes; do not add timers or reporting-only worker messages.
+
+## Version-2 transitions
+
+Follow ../LIFECYCLE.md for actual PR-state obligations, owned-result disposition, typed
+wait evidence, operational priority with aging, and cached-state invariant checks
+on the existing dispatcher. Enable only at a verified batch boundary; existing
+work and external integration opt-ins remain unchanged.

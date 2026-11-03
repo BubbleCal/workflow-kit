@@ -6,9 +6,12 @@ const digest = value => createHash('sha256').update(stable(value)).digest('hex')
 const required = (value, field) => { if (typeof value !== 'string' || !value.trim()) throw new Error(`${field} is required`); };
 const fresh = (at, now) => Number.isFinite(Date.parse(at)) && Date.parse(at) <= now + 5000 && now - Date.parse(at) <= 60000;
 
-export function requiresProgress(item) {
+export function requiresProgress(item, contractVersion = 1) {
+  if (item.kind === 'worker_result') return true;
   if (item.kind !== 'event') return false;
   const p = item.payload ?? {};
+  if (['pr_lifecycle_action','wait_reconciliation'].includes(p.event)) return false;
+  if (contractVersion >= 2 && p.task_id && p.owner_thread_id) return true;
   return p.continuation_authorized === true || p.current_task_complete === false || p.project_complete === false ||
     ['ready_pr', 'pr_ready', 'pr_merged', 'stage_complete', 'stage_completed', 'permission_probe_complete'].includes(p.event_type ?? p.event) ||
     !!(p.task_id && p.owner_thread_id && p.next_action);
@@ -46,6 +49,7 @@ export class ProgressLedger {
     this.db = db; this.now = now;
     db.exec(`CREATE TABLE IF NOT EXISTS progress_goals (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, data TEXT NOT NULL, updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS progress_events (event_key TEXT PRIMARY KEY, digest TEXT NOT NULL, evidence_ref TEXT NOT NULL, recorded_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS progress_event_tasks (event_key TEXT NOT NULL, task_id TEXT NOT NULL, PRIMARY KEY(event_key,task_id));
       CREATE TABLE IF NOT EXISTS continuation_actions (action_key TEXT PRIMARY KEY, goal_id TEXT NOT NULL, stage_id TEXT NOT NULL,
         owner_thread_id TEXT NOT NULL, scope_key TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending',
         preflight_turn TEXT, actual_turn TEXT, receipt TEXT, updated_at INTEGER NOT NULL);`);
@@ -85,6 +89,8 @@ export class ProgressLedger {
         .run(goal.id, goal.expected_revision + 1, stable(goal), this.now());
     }
     this.db.prepare('INSERT INTO progress_events VALUES (?,?,?,?)').run(event_key, hash, evidence_ref, this.now());
+    for (const task of new Set(goals.flatMap(g=>g.stages.map(s=>s.task_id))))
+      this.db.prepare('INSERT OR IGNORE INTO progress_event_tasks VALUES (?,?)').run(event_key,task);
     return { recorded: true, event_key, goals: goals.map(g => ({ id: g.id, revision: g.expected_revision + 1 })) };
   }
   hasResolution(key) { return !!this.db.prepare('SELECT 1 FROM progress_events WHERE event_key=?').get(key); }

@@ -14,3 +14,5 @@
 8. 核验完毕后设置本实例 registry.setup_complete=true，再用支持的原生工具将这条触发器设为 ACTIVE 并回读。保存 observations/native-setup.json，包含 instance_id、dispatcher_thread_id、实际 automation ID、automation_status、native_readback_verified、真实 readback evidence_ref，再运行 doctor。后续 registry/decisions 归后台协调唯一写入；安装者不成为第二个运行时 writer。向用户给出本实例决策中心链接和缺失的可选集成，不把默认关闭的集成报成故障。
 
 新项目随后可以逐项启用外部能力。修改 instance.json 时，需取得对应项目的实际授权，核验 repositories、github_login 和频道／审批人／页面；不能从安装包、其他实例或例子中继承授权。
+
+安装或升级时，在实例绑定与验证完成后按 LIFECYCLE.md 登记当前交付物并启用阶段合同 v2，再启用原触发器。启用使用这次实际用户请求的来源编号；保留在途旧批次，不复制其他实例的任务、页面或凭据。

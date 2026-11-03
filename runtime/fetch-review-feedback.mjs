@@ -26,10 +26,16 @@ const failures=feeds.filter(x=>x.status==='rejected');if(failures.length)throw n
 const [reviews,reviewComments,issueComments,threadPages]=feeds.map(x=>x.value);
 const finalPage=threadPages.at(-1)?.data?.repository?.pullRequest?.reviewThreads;
 if(!finalPage||finalPage.pageInfo.hasNextPage)throw new Error('Review-thread pagination is incomplete');
-const after=await api([root]);if(before.head.sha!==after.head.sha)throw new Error('PR head changed during collection; discard snapshot and retry at the next safe boundary');
+const after=await api([root]);
+if(before.head.sha!==after.head.sha || ['state','draft','merged','updated_at'].some(k=>before[k]!==after[k]))
+  throw new Error('PR state or feedback changed during collection; discard snapshot and retry at the next safe boundary');
 const snapshot={repository,pr_number:number,head_sha:after.head.sha,head_before:before.head.sha,head_after:after.head.sha,
   checked_at:new Date().toISOString(),evidence_ref:resolve(output),collector:'gh REST all pages plus GraphQL thread state; read-only',
   complete:{reviews:true,review_comments:true,issue_comments:true,review_threads:true},reviews:reviews.flat(),review_comments:reviewComments.flat(),issue_comments:issueComments.flat(),
   review_threads:threadPages.flatMap(p=>p.data.repository.pullRequest.reviewThreads.nodes)};
+snapshot.pr = { repository, pr_number:number, head_sha:after.head.sha, state:after.merged?'merged':after.state,
+  draft:after.draft, updated_at:after.updated_at, merged_at:after.merged_at,
+  merge_sha:after.merged?after.merge_commit_sha:null, checked_at:snapshot.checked_at, evidence_ref:snapshot.evidence_ref,
+  approval_state:'unknown', checks_state:'unknown' };
 writeFileSync(output,JSON.stringify(snapshot,null,2)+'\n',{mode:0o600});
 process.stdout.write(JSON.stringify({snapshot_file:resolve(output),head:snapshot.head_sha,counts:{reviews:snapshot.reviews.length,inline:snapshot.review_comments.length,issue:snapshot.issue_comments.length,threads:snapshot.review_threads.length},checked_at:snapshot.checked_at})+'\n');

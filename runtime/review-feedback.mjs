@@ -85,7 +85,7 @@ export class ReviewFeedback {
     if(route)return {eligible:false,reason:'already_routed',route};
     if(implementation_authorized!==true||!authorization_ref)return {eligible:false,reason:'original_implementation_authorization_required',item_keys:keys};
     const o=observation;
-    if(!o||o.thread_id!==owner_thread_id||!fresh(o.checked_at,this.now())||o.status!=='idle'||!['completed','failed','interrupted'].includes(o.turn_status)||!o.turn_id||o.pending_dispatch!==false||o.queued_input!==false||o.background_job_running!==false||o.hold!==false||o.existing_driver!==false)
+    if(!o||o.thread_id!==owner_thread_id||!fresh(o.checked_at,this.now())||!['idle','notLoaded'].includes(o.status)||!['completed','failed','interrupted'].includes(o.turn_status)||!o.turn_id||o.pending_dispatch!==false||o.queued_input!==false||o.background_job_running!==false||o.hold!==false||o.existing_driver!==false)
       return {eligible:false,reason:'preserve_active_queued_or_unverified_owner',item_keys:keys};
     return {eligible:true,key,repository,pr_number,head,owner_thread_id,task_id,item_keys:keys,authorization_ref,requires_ordinary_control_dispatch:true};
   }
