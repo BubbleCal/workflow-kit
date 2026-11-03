@@ -1,5 +1,5 @@
 {
-  "version": "0.1.2",
+  "version": "0.1.3",
   "source": "local workflow runtime snapshot",
   "source_files": {
     "runtime/control.mjs": "22f185fd9a656a0706524c07a339085ad3728951f42e0fb09acc302eb03bdb6e",

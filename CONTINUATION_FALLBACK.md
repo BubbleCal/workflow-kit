@@ -3,10 +3,10 @@
 This protocol adds bounded recovery to
 the existing stage-continuation repair. It uses no new scheduler or worker owner.
 
-The five-minute trigger calls watchdog_targets. A durable cursor selects at most
+The ten-minute trigger calls watchdog_targets. A durable cursor selects at most
 four accepted, unfinished owners per pass, combining registry candidates with
 registered goal stages. This bounds inspection work, not engineering concurrency.
-Repeated selection in the same five-minute slot is idempotent. The trigger reads
+Five-minute slots are persistence identities independent of the ten-minute trigger. Repeated selection in the same slot is idempotent. The trigger reads
 only compact native status/latest-turn snapshots for those owners, alongside the
 three control/maintenance snapshots, and passes watchdog_round_id to mailbox plan.
 Up to two slots revisit unresolved recovery cases; the remaining sweep advances

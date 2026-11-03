@@ -29,7 +29,7 @@ try {
     const registry={schema_version:1,instance_id:config.instance_id,policy_version:'portable-0.1.0',setup_complete:false,timezone:prefs.timezone,
       scope:config.scope,capacity:{automatic_limit:null,max_new_heavy_concurrency:null,max_dispatches_per_run:null},
       task_registry:{items:{}},threads:[],outbox:[],discovery:{enabled:true,project_ids:[],source:'only verified chats in this instance project'},
-      queue_transport:{mode:'fixed_batch_mailbox',dispatcher_interval_minutes:5},sources:{},delivery_items:{}};
+      queue_transport:{mode:'fixed_batch_mailbox',dispatcher_interval_minutes:10},sources:{},delivery_items:{}};
     atomic(join(root,'registry.json'),registry);atomic(join(root,'decisions.json'),{schema_version:1,next_id:1,items:[]});
     atomic(join(root,'pr-review-window.json'),{timezone:prefs.timezone,blocked_start_inclusive:prefs.review_blackout.start_inclusive,blocked_end_exclusive:prefs.review_blackout.end_exclusive});
     const localDate=new Date(Date.now()+8*3600000).toISOString().slice(0,10);
@@ -77,7 +77,7 @@ try {
   } else if(command==='test') {
     await import('./tools/test.mjs');
   } else {
-    output({version:'0.1.2',commands:['init --name <name> --project-root <directory>','bind --file <verified-bindings.json>','doctor','test'],
+    output({version:'0.1.3',commands:['init --name <name> --project-root <directory>','bind --file <verified-bindings.json>','doctor','test'],
       native_setup:'START-HERE.md',model_selection:'instance.json models; inherit by default, explicit role overrides only after user selection'});
     if(command)process.exitCode=2;
   }

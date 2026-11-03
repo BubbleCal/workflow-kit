@@ -1,5 +1,9 @@
 # Changes
 
+## 0.1.3
+
+Use a ten-minute dispatcher by default for new instances. Preserve the five-minute coordinator work budget and stable watchdog identity buckets. Existing native schedules are not changed by pulling source updates.
+
 ## 0.1.2
 
 Add a complete copy-ready installation prompt directly to README. Make it the canonical installation-request entry point and retain START-HERE as the detailed procedure. Runtime behavior is unchanged.

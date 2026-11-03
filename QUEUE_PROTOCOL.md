@@ -2,7 +2,7 @@
 
 Resolve all role IDs from instance.json. Paths are relative to this installation directory. Invoke the relevant runtime/*.mjs with a JSON object on stdin. Never interpolate unsanitized content into shell code.
 
-Only the dispatcher delivers automatic messages to coordinator, inbox and maintenance. It runs one existing five-minute heartbeat. The deterministic mailbox coalesces reconciliation every fifteen minutes, represents source intake with intake_due, and admits the daily 05:00 maintenance request. Busy roles receive no automatic messages; new inputs remain durably queued.
+Only the dispatcher delivers automatic messages to coordinator, inbox and maintenance. It runs one existing ten-minute heartbeat. The deterministic mailbox coalesces reconciliation with a fifteen-minute minimum, handled on the next actual trigger (normally twenty minutes while otherwise idle), represents source intake with intake_due, and admits the daily 05:00 maintenance request. Busy roles receive no automatic messages; new inputs remain durably queued.
 
 Dispatcher sequence: watchdog_targets; compact native snapshots for at most four returned owners plus three lanes; annotate checked_at at actual retrieval time; mailbox plan with watchdog_round_id. For each returned delivery, take a fresh single-target idle snapshot, call authorize_send, and send the exact persisted prompt only if send=true. Record delivery immediately. Unknown outcomes remain uncertain for destination reconciliation. End the turn without waiting on workers or reading project/source systems.
 

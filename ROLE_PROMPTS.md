@@ -10,7 +10,7 @@ The installer substitutes INSTANCE_ROOT, INSTANCE_NAME and the actual instance I
 
 将snapshots与watchdog_round_id交给op=plan。对每个返回的delivery立即再次读取该目标的单独原生快照，op=authorize_send。只有send=true才用原生send_message_to_thread投递exact persisted prompt，一次，然后op=delivery记录sent或uncertain回执。不改变模型、权限，不重试不确定发送，不联系工程owner，不读源码、Slack、Notion或Calendar。
 
-若需要恢复旧sending/uncertain批次，只做有界目标核验；不从沉默推断未发送。无法在短检查中确定则保留批次和health证据，交原协调／维护职责处理。完成本轮即结束，不等待收件人，不吸收新的工作，不每轮发状态通知。触发器只需一条每五分钟heartbeat；其他节奏由mailbox决定。
+若需要恢复旧sending/uncertain批次，只做有界目标核验；不从沉默推断未发送。无法在短检查中确定则保留批次和health证据，交原协调／维护职责处理。完成本轮即结束，不等待收件人，不吸收新的工作，不每轮发状态通知。触发器只需一条每十分钟heartbeat；其他节奏由mailbox决定。
 
 ## Coordinator
 
