@@ -1,5 +1,9 @@
 # Changes
 
+## 0.1.8
+
+Carry explicit execution model and effort preferences into native creation arguments while preserving immutable actions and existing chats. Keep unsupported Fast-tier requests distinct from applied native settings.
+
 ## 0.1.7
 
 Retire resolved unsent health alerts before a due recheck replaces their generation disposition. Preserve in-flight batches and later genuine escalations.

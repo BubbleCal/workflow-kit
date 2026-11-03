@@ -38,3 +38,7 @@ can reopen a due recovery generation. Preserve the old generation and dispositio
 in superseded_health. This includes reserved-unsent batches, while sending, sent,
 uncertain and running batches remain untouched. New genuine missed generations
 retain their own escalation keys; retiring an old alert does not close the task.
+
+Follow MODEL_SELECTION.md for explicit native model/effort selection on new
+execution chats; requested Fast-off is not an applied setting when the native
+creation interface does not expose a tier control.

@@ -1,8 +1,8 @@
 {
-  "version": "0.1.7",
+  "version": "0.1.8",
   "source": "local workflow runtime snapshot",
   "source_files": {
-    "runtime/control.mjs": "17abe0de25e7f51170d13f7a7a0a33d9edc859cc3808832d1d3d53512522157d",
+    "runtime/control.mjs": "e9635ca65f30361d8aeef649847f5bf454d1d8e8124fdaa142f33d82f343a46d",
     "runtime/mailbox.mjs": "36e236a5cc761cb3c588da261ff3ec92e69d03b9e96661e30b4f2992a739ee8c",
     "runtime/progress.mjs": "98771a59e4cbbc9fe7e754028d102aaeef32b33b531314aefb810315cf35a539",
     "runtime/watchdog.mjs": "f0f05b63a423c1de60b932f489a828a3834e6255bd3f91e24469153285a12bf0",
@@ -11,7 +11,8 @@
     "runtime/engineering-principles.mjs": "6e77338e2d3ec9fe8a8e878ae37ce2ba7788c5f4c06fca74d74a2f73377e4570",
     "runtime/review-feedback.mjs": "9f41d59153343678a2b55dabcc36a76f09844f21bb48d56696655ff2d6144612",
     "runtime/fetch-review-feedback.mjs": "614279e2fd744a9c2f3096af3c49ec04303cafec92781821670cbe784517afc9",
-    "runtime/outcomes.mjs": "78e553fbb78a1433b6b4c7b3a739062602b74334e0c8b4ea0a104d77d7e017c2"
+    "runtime/outcomes.mjs": "78e553fbb78a1433b6b4c7b3a739062602b74334e0c8b4ea0a104d77d7e017c2",
+    "runtime/model-selection.mjs": "cde3b8be50882361e9676b86c18170052691ab31f71f1a3c01139037072e70a4"
   },
   "state_included": false,
   "credentials_included": false

@@ -8,6 +8,7 @@ import { Mailbox, COORDINATOR } from './mailbox.mjs';
 import { withEngineeringPrinciples } from './engineering-principles.mjs';
 import { ReviewFeedback, pullRequestIdentity } from './review-feedback.mjs';
 import { readOutcomeBindings, outcomeSyncAllowed } from './outcomes.mjs';
+import { readModelSelection, withCreationModel } from './model-selection.mjs';
 import { isReviewDelivery, readReviewWindow, reviewWindowAt, withReviewWindowGuidance, REVIEW_WINDOW } from './review-window.mjs';
 
 export const INBOX = bindings.threads.inbox;
@@ -293,12 +294,13 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
 }
 
 export class ControlStore {
-  constructor(path, { now = () => Date.now(), capacity = CAPACITY_LIMITS, progress = null, reviewRule = readReviewWindow, outcomeBindings = readOutcomeBindings } = {}) {
+  constructor(path, { now = () => Date.now(), capacity = CAPACITY_LIMITS, progress = null, reviewRule = readReviewWindow, outcomeBindings = readOutcomeBindings, modelSelection = readModelSelection } = {}) {
     this.now = now;
     this.capacity = capacity;
     this.progress = progress;
     this.reviewRule = reviewRule;
     this.outcomeBindings = outcomeBindings;
+    this.modelSelection = modelSelection;
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;
@@ -365,6 +367,10 @@ export class ControlStore {
   prepare(input) {
     const key = required(input.key, 'action key');
     const prior = this.db.prepare('SELECT payload FROM actions WHERE action_key=?').get(key);
+    if (input.kind === 'create_thread') {
+      const selection = prior ? JSON.parse(prior.payload).model_selection : this.modelSelection();
+      input = { ...input, payload: withCreationModel(input.kind, input.payload, selection) };
+    }
     if (!prior || JSON.parse(prior.payload).engineering_guidance_version === 1)
       input = { ...input, payload: withEngineeringPrinciples(input.kind, input.payload) };
     if (!prior || JSON.parse(prior.payload).review_window_guidance_version === 1)

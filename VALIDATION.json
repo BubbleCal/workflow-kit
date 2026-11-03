@@ -1,15 +1,15 @@
 {
-  "version": "0.1.7",
-  "verified_at": "2026-11-03T08:31:44.971Z",
+  "version": "0.1.8",
+  "verified_at": "2026-11-03T08:47:42.309Z",
   "environment": {
     "platform": "darwin",
     "architecture": "arm64",
     "node": "v23.11.0"
   },
   "tests": {
-    "runtime": 117,
+    "runtime": 120,
     "portable_integration": 3,
-    "passed": 120,
+    "passed": 123,
     "failed": 0
   },
   "verified": [
@@ -27,7 +27,8 @@
     "Ordinary unloaded-owner continuation uses fresh matching native evidence and preserves job/hold/approval/permission/deduplication gates",
     "Optional outcome page writes require exact bindings, deduplicated outcome keys, preserved user notes and a fresh claim; external delivery remains off by default",
     "Unavailable optional outcomes configuration does not affect the original decision page or unrelated workflow actions",
-    "Resolved pending and reserved health alerts retire before generation rollover; sending work and later genuine escalation remain intact"
+    "Resolved pending and reserved health alerts retire before generation rollover; sending work and later genuine escalation remain intact",
+    "Explicit native model/effort arguments reach claimed creation once; per-task choices and historical actions are preserved; unsupported Fast tier is not claimed applied"
   ],
   "operational_data_exported": false,
   "credentials_exported": false,
@@ -42,7 +43,8 @@
   "limits": [
     "Codex native setup and connections must be verified on the destination Mac",
     "No cross-machine task synchronization or automatic update service",
-    "Role model choices inherit by default; no running model was changed"
+    "Role model choices inherit by default; no running model was changed",
+    "No native Fast-off setting or effective-tier verification is provided when the desktop tool lacks a service-tier parameter"
   ],
   "live_runtime_modified_by_packaging": false,
   "health_retirement_verified": true,

@@ -32,3 +32,7 @@ status. Scheduler recovery and actual engineering recovery are separate facts.
 ## Optional outcomes projection
 
 When explicitly configured and authorized, follow OUTCOMES.md to maintain a separate outcomes page from accepted evidence in existing coordinator rounds. Preserve the decision page, task acceptance and manual notes; do not add timers or reporting-only worker messages.
+
+Follow MODEL_SELECTION.md for explicit native model/effort selection on new
+execution chats; requested Fast-off is not an applied setting when the native
+creation interface does not expose a tier control.

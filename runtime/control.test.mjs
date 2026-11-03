@@ -62,6 +62,27 @@ test('engineering guidance reaches the claimed prompt once without changing huma
   assert.equal(a.payload.prompt.includes('[workflow-engineering-principles:v1]'), false); s.close();
 });
 
+test('creation persists native model choices while historical actions retain their original configuration', () => {
+  let preference = null;
+  const s = new ControlStore(':memory:', { now: () => NOW, modelSelection: () => preference });
+  const historical = createAction('historical-model', 'historical-task');
+  assert.equal(s.prepare(historical).prepared, true);
+  preference = { source_message_id: 'actual-model-choice', model: 'selected-model', thinking: 'xhigh', fast: false, service_tier_control_supported: false };
+  assert.equal(s.prepare(historical).reason, 'already_recorded');
+  assert.equal(s.claim({ key: historical.key, owner: 'coordinator', evidence: historical.evidence }).payload.native.model, undefined);
+  const current = createAction('selected-model', 'new-task');
+  assert.equal(s.prepare(current).prepared, true);
+  preference = { ...preference, model: 'later-choice' };
+  assert.equal(s.prepare(current).reason, 'already_recorded');
+  const claim = s.claim({ key: current.key, owner: 'coordinator', evidence: current.evidence });
+  assert.equal(claim.claimed, true);
+  assert.equal(claim.payload.native.model, 'selected-model');
+  assert.equal(claim.payload.native.thinking, 'xhigh');
+  assert.equal(Object.hasOwn(claim.payload.native, 'serviceTier'), false);
+  assert.equal(claim.payload.model_selection.service_tier_control_supported, false);
+  s.close();
+});
+
 test('dispatch never wakes active, queued, uncertain, or background-running work', () => {
   for (const patch of [{ thread_status: 'active' }, { queued_input: true }, { queued_input: undefined },
     { underlying_job_running: true }, { pending_dispatch: true }, { existing_driver_owns_step: true },
