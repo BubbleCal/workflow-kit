@@ -1,15 +1,15 @@
 {
-  "version": "0.2.11",
-  "verified_at": "2026-11-03T20:07:50.312183+00:00",
+  "version": "0.2.12",
+  "verified_at": "2026-11-03T20:55:14.349289+00:00",
   "environment": {
     "platform": "darwin",
     "architecture": "arm64",
     "node": "v23.11.0"
   },
   "tests": {
-    "runtime": 174,
+    "runtime": 177,
     "portable_integration": 3,
-    "passed": 177,
+    "passed": 180,
     "failed": 0
   },
   "verified": [
@@ -45,7 +45,8 @@
     "Same-owner/same-turn strict task subsets reuse unhandled covering recovery without changing payloads or creating a second escalation; new tasks/turns and blocked/queued dispositions remain independently actionable",
     "Verified merged facts do not expire into refresh loops; exact original refresh-event/task progress plus fresh head/merge proof retires only that PR watch, preserving immutable batches, other PRs, unfinished parents and uncertain control receipts",
     "Known completed assessments using legacy thread_id receive urgent result treatment and require source task/owner progress while preserving remaining cleanup; generic recipient fields, immutable payloads and version-1 contracts remain unchanged",
-    "An unrelated unfinished goal cannot replace remaining obligations on the source assessment task"
+    "An unrelated unfinished goal cannot replace remaining obligations on the source assessment task",
+    "Each new v2 batch admits one canonical result or known completed legacy assessment immediately after humans despite a larger aged diagnostic backlog; result retry rotation and other queue capacity remain, while v1 batches and source-task ACK guards are unchanged"
   ],
   "operational_data_exported": false,
   "credentials_exported": false,

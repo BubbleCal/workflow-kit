@@ -237,3 +237,16 @@ resolving that obligation. This does not enable Slack, merging, Notion, or a new
 notification channel. Original task acceptance remains separate.
 
 Owned terminal results enter the urgent non-human operational tier immediately, without waiting thirty minutes for aging. Human input stays first, equal-priority rotation remains, and original progress/ACK/side-effect guards still apply. No concurrency or dispatch-count cap is introduced.
+
+## Bounded completion admission
+
+For new version-2 coordinator batches, reserve the first non-human position for
+one canonical worker_result or explicitly completed legacy assessment when one
+is pending. Choose it using existing retry rotation, so a repeatedly unfinished
+result cannot monopolize that position. Human commands retain their order and
+precedence; all remaining positions retain ordinary priority, aging and rotation.
+This prevents a full aged diagnostic backlog from excluding fresh results.
+It does not guarantee acceptance: inspect evidence and record source-task
+completion or concrete successors before ACK. Follow this initial result
+acceptance before broad recovery scans. Keep existing batch size, soft budget,
+in-flight snapshots, native idle checks and task concurrency unchanged.

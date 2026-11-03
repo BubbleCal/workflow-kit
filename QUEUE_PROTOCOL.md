@@ -79,3 +79,16 @@ On the same terminal owner turn, a newly observed strict task subset reuses an u
 Verified merged PR facts remain durable for post-merge disposition. The current same-PR refresh event can retire that watch after exact-event/task progress plus fresh expected head/merge-SHA validation under LIFECYCLE.md. Preserve fixed batches, unfinished parents, external action receipts and all merge/release guards.
 
 The known assessment_complete envelope may use thread_id as source owner only when canonical owner is absent and explicit completion/task/report evidence is present. Version-2 batches require task/owner-bound progress and preserve declared remaining cleanup. Keep immutable payloads; generic thread targets are not owners. See LIFECYCLE.md.
+
+## Bounded completion admission
+
+For new version-2 coordinator batches, reserve the first non-human position for
+one canonical worker_result or explicitly completed legacy assessment when one
+is pending. Choose it using existing retry rotation, so a repeatedly unfinished
+result cannot monopolize that position. Human commands retain their order and
+precedence; all remaining positions retain ordinary priority, aging and rotation.
+This prevents a full aged diagnostic backlog from excluding fresh results.
+It does not guarantee acceptance: inspect evidence and record source-task
+completion or concrete successors before ACK. Follow this initial result
+acceptance before broad recovery scans. Keep existing batch size, soft budget,
+in-flight snapshots, native idle checks and task concurrency unchanged.

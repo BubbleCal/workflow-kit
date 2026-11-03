@@ -170,13 +170,54 @@ test('released unsent reservations do not count as processing opportunities',()=
   const next=m.reserve('coordinator',idle()).batch;assert.deepEqual(next.snapshot.items.map(i=>i.key),first.snapshot.items.map(i=>i.key));m.close();
 });
 
-test('a completed worker result enters the next batch ahead of already offered aged diagnostics',()=>{
+test('a completed worker result enters the next batch despite a larger aged diagnostic backlog',()=>{
   let now=NOW-4*3600000;const m=new Mailbox(':memory:',{now:()=>now});m.activateTransitions({source_message_id:'upgrade',actual_human_verified:true});
-  for(let i=0;i<20;i++)m.enqueue({key:'old-gap-'+i,lane:'coordinator',kind:'event',payload:{event:'stage_reconciliation',task_id:'old-'+i,owner_thread_id:'worker-'+i}});
+  for(let i=0;i<40;i++)m.enqueue({key:'old-gap-'+i,lane:'coordinator',kind:'event',payload:{event:'stage_reconciliation',task_id:'old-'+i,owner_thread_id:'worker-'+i}});
   now=NOW-1000;const first=sent(m);m.begin(first.id);
   now=NOW-500;m.enqueue({key:'actual-deliverable',lane:'coordinator',kind:'worker_result',payload:{task_id:'T-new',owner_thread_id:'original-owner',evidence_ref:'actual-ready-artifact'}});
   now=NOW;m.finish(first.id,{processed_keys:[]});m.enqueue(command('current-human'));
   const next=sent(m);assert.equal(next.snapshot.items[0].key,'current-human');assert.equal(next.snapshot.items[1].key,'actual-deliverable');
   m.begin(next.id);assert.throws(()=>m.acknowledge(next.id,['actual-deliverable']),/Durable successor/);
   assert.equal(m.db.prepare("SELECT COUNT(*) AS n FROM mail WHERE item_key='actual-deliverable'").get().n,1);m.close();
+});
+
+test('one result opportunity preserves diagnostic capacity and rotates unfinished results',()=>{
+  let now=NOW-4*3600000;const m=new Mailbox(':memory:',{now:()=>now});
+  m.activateTransitions({source_message_id:'upgrade',actual_human_verified:true});
+  for(let i=0;i<30;i++)m.enqueue({key:'aged-'+i,lane:'coordinator',kind:'recovery',payload:{event:'continuation_recovery'}});
+  now=NOW;
+  for(let i=0;i<3;i++)m.enqueue({key:'result-'+i,lane:'coordinator',kind:'worker_result',payload:{task_id:'T-'+i,owner_thread_id:'owner-'+i,evidence_ref:'result-proof-'+i}});
+  const first=sent(m);m.begin(first.id);
+  assert.equal(first.snapshot.items[0].key,'result-0');
+  assert.equal(first.snapshot.items.filter(i=>i.kind==='recovery').length,19);
+  now+=1000;m.finish(first.id,{processed_keys:[]});
+  const next=sent(m);
+  assert.equal(next.snapshot.items[0].key,'result-1');
+  assert.ok(next.snapshot.items.some(i=>i.key==='aged-19'));
+  assert.deepEqual(m.get(first.id).snapshot,first.snapshot);m.close();
+});
+
+test('the result opportunity recognizes completed legacy assessments but not reconciliation targets',()=>{
+  let now=NOW-4*3600000;const m=new Mailbox(':memory:',{now:()=>now});
+  m.activateTransitions({source_message_id:'upgrade',actual_human_verified:true});
+  for(let i=0;i<25;i++)m.enqueue({key:'diagnostic-'+i,lane:'coordinator',kind:'event',payload:{event:'stage_reconciliation',task_id:'T-'+i,owner_thread_id:'owner',report:'diagnostic-proof'}});
+  now=NOW;
+  m.enqueue({key:'recipient-only',lane:'coordinator',kind:'event',payload:{event:'assessment_complete',task_id:'T-other',thread_id:'recipient',report:'report'}});
+  m.enqueue({key:'legacy-result',lane:'coordinator',kind:'event',payload:{event:'assessment_complete',assessment_complete:true,task_id:'T-assessment',thread_id:'original-owner',report:'assessment-proof'}});
+  const b=sent(m);m.begin(b.id);
+  assert.equal(b.snapshot.items[0].key,'legacy-result');
+  assert.equal(b.snapshot.items.some(i=>i.key==='recipient-only'),false);
+  assert.throws(()=>m.acknowledge(b.id,['legacy-result']),/Durable successor/);m.close();
+});
+
+test('result admission does not displace human commands or change version-one batches',()=>{
+  for(const version of [1,2]) {
+    const m=new Mailbox(':memory:',{now:()=>NOW});
+    if(version===2)m.activateTransitions({source_message_id:'upgrade',actual_human_verified:true});
+    for(let i=0;i<21;i++)m.enqueue(version===2?command('human-'+i):{key:'old-'+i,lane:'coordinator',kind:'event',payload:{event:'old-event'}});
+    m.enqueue({key:'new-result',lane:'coordinator',kind:'worker_result',payload:{task_id:'T-result',owner_thread_id:'owner',evidence_ref:'proof'}});
+    const b=m.reserve('coordinator',idle()).batch;
+    assert.equal(b.snapshot.items.some(i=>i.key==='new-result'),false);
+    assert.deepEqual(b.snapshot.items.map(i=>i.key),Array.from({length:20},(_,i)=>(version===2?'human-':'old-')+i));m.close();
+  }
 });
