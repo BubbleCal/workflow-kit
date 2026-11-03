@@ -1,5 +1,9 @@
 # Changes
 
+## 0.2.3
+
+Allow ordinary completed-task archival with fresh verified terminal notLoaded evidence. Reuse existing quiescence checks without waking the owner; preserve active/unknown refusal, whole-goal acceptance, pending obligations and unfinished-parent protection.
+
 ## 0.2.2
 
 Accept retained designated approval with fresh GitHub acceptance and applicable-rule evidence. Preserve real review identity/commit, complete material-feedback checks, required CI and conditional-head merge. Revoked approval, stale evidence and unsatisfied current-push requirements remain blocked.

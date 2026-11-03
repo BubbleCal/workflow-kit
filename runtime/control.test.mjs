@@ -612,3 +612,49 @@ test('an actual current-head approval satisfies fresh-push rules without the ret
   e.approval_verification.rules.branch_rules=[{type:'pull_request',parameters:{dismiss_stale_reviews_on_push:true,require_last_push_approval:true}}];
   assert.equal(assess('merge',{pr_url:e.pr_url,expected_head_sha:head},e,NOW).allowed,true);
 });
+
+function unloadedArchiveEvidence() {
+  return { ...dispatchEvidence(),thread_status:'notLoaded',thread_archived:false,
+    task_complete:true,completion_evidence_saved:true,pending_decision:false,pending_cleanup:false,pending_delivery:false,
+    control_or_service_chat:false,important_result_delivered:true,native_approval_pending:false,native_permissions_unchanged:true,
+    native_thread_snapshot:{checked_at:common().verified_at,thread:{id:'worker-1',status:{type:'notLoaded'}},latestTurn:{id:'turn-1',status:'completed'}} };
+}
+
+test('completed unloaded owners can be archived without starting another turn',()=>{
+  const c=new ControlStore(':memory:',{now:()=>NOW}),e=unloadedArchiveEvidence();
+  const a={key:'archive-unloaded',kind:'archive',task_id:'T-001',payload:{thread_id:'worker-1'},evidence:e};
+  assert.equal(c.prepare(a).prepared,true);
+  const claim=c.claim({key:a.key,owner:'coordinator',evidence:e});assert.equal(claim.claimed,true);
+  assert.deepEqual(claim.payload,{thread_id:'worker-1'});
+  assert.equal(c.db.prepare("SELECT COUNT(*) AS n FROM actions WHERE kind IN ('dispatch','human_input','create_thread')").get().n,0);
+  c.settle({key:a.key,attempt_id:claim.attempt_id,outcome:'sent',evidence_ref:'native-archive-receipt'});
+  assert.equal(c.claim({key:a.key,owner:'coordinator',evidence:e}).claimed,false);c.close();
+});
+
+test('unloaded archive preserves live-work, approval, identity and whole-task completion gates',()=>{
+  const changes=[
+    e=>e.thread_archived=true,e=>delete e.thread_archived,e=>delete e.native_thread_snapshot,
+    e=>e.thread_status='active',e=>e.queued_input=true,e=>e.pending_dispatch=true,e=>e.underlying_job_running=true,
+    e=>delete e.underlying_job_running,e=>e.native_approval_pending=true,e=>e.native_permissions_unchanged=false,
+    e=>e.stopped=true,e=>e.task_complete=false,e=>e.completion_evidence_saved=false,e=>e.important_result_delivered=false,
+    e=>e.pending_decision=true,e=>e.pending_cleanup=true,e=>e.pending_delivery=true,e=>e.control_or_service_chat=true,
+    e=>e.owner_thread_id='other-owner',e=>e.expected_turn_id='other-turn',
+    e=>e.native_thread_snapshot.thread.id='other-owner',e=>e.native_thread_snapshot.thread.status.type='active',
+    e=>e.native_thread_snapshot.thread.status.activeFlags=['waitingOnApproval'],
+    e=>e.native_thread_snapshot.latestTurn.id='new-turn',e=>e.native_thread_snapshot.latestTurn.status='inProgress',
+    e=>e.native_thread_snapshot.checked_at=new Date(NOW-61000).toISOString(),
+    e=>e.native_thread_snapshot.latestTurn.status='interrupted',
+  ];
+  for(const change of changes){const e=unloadedArchiveEvidence();change(e);assert.equal(assess('archive',{thread_id:'worker-1'},e,NOW).allowed,false,String(change));}
+  const e=unloadedArchiveEvidence();e.owner_thread_id=INBOX;e.native_thread_snapshot.thread.id=INBOX;
+  assert.equal(assess('archive',{thread_id:INBOX},e,NOW).allowed,false);
+});
+
+test('archive claim rechecks an unloaded owner becoming busy after preparation',()=>{
+  const c=new ControlStore(':memory:',{now:()=>NOW}),e=unloadedArchiveEvidence();
+  const a={key:'archive-then-active',kind:'archive',task_id:'T-001',payload:{thread_id:'worker-1'},evidence:e};
+  assert.equal(c.prepare(a).prepared,true);
+  const changed=structuredClone(e);changed.native_thread_snapshot.latestTurn={id:'next-turn',status:'inProgress'};
+  assert.equal(c.claim({key:a.key,owner:'coordinator',evidence:changed}).claimed,false);
+  assert.equal(c.db.prepare('SELECT state FROM actions WHERE action_key=?').get(a.key).state,'prepared');c.close();
+});

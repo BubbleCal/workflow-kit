@@ -269,7 +269,7 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
       need(e.checkpoint_saved === true && /^[a-f0-9]{64}$/.test(payload.checkpoint_sha256 ?? '') && payload.checkpoint_sha256 === e.checkpoint_sha256, 'replacement_checkpoint_not_verified');
       need(e.resources_preserved === true && e.preserved_jobs_handoff_verified === true && e.task_remains_incomplete === true, 'replacement_obligations_not_preserved');
     } else {
-      idle();
+      idle(true);
       need(e.task_complete === true && e.completion_evidence_saved === true, 'task_not_fully_complete');
       need(e.pending_decision === false && e.pending_cleanup === false && e.pending_delivery === false, 'unfinished_task_obligation');
       need(e.important_result_delivered === true, 'result_delivery_not_verified');

@@ -49,3 +49,5 @@ Manual mirror PRs are not a substitute for published upstream and verified
 automatic synchronization. Keep this optional policy scoped to its own instance.
 
 Follow MERGE_APPROVAL.md for current approval validity. A push alone does not dismiss a review. Retained approval on an older commit needs fresh GitHub acceptance and applicable-rule evidence; preserve its real review ID and commit. Current-head conditional merge, full feedback, required CI and all external authorization gates remain.
+
+Completed-task archival accepts a verified terminal notLoaded owner under LIVENESS_RECOVERY.md, without waking it. Preserve actual status, native identity/freshness, whole-goal acceptance and all job, approval, delivery and cleanup checks. Only the coordinator archives and records the native receipt.

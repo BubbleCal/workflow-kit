@@ -51,3 +51,23 @@ Human-only MFA remains a real blocker. A healthy remote job is observed rather
 than restarted. Once evidence permits continuation, send once to the original
 owner, verify the new turn performs work, and record the durable disposition.
 
+
+## Archive a completed unloaded owner
+
+Ordinary completed-task archival accepts the same verified terminal notLoaded
+snapshot as continuation, with the opposite task predicate: the entire task must
+be complete. Preserve the real native status, exact thread/turn identity and
+fresh checked_at. Verify thread_archived=false, no queued input, pending dispatch,
+native approval or live/unknown underlying job, and unchanged native permissions.
+An interrupted turn still requires actual interruption reconciliation. Require
+saved acceptance evidence, completed result delivery and no pending decision,
+delivery or resource cleanup. The control ledger still refuses archival while
+any registered goal owned by that chat has unfinished stages.
+
+Prepare and claim recheck these facts; a later active/new turn or stale snapshot
+blocks the archive. This does not grant execution permissions or change the
+explicit-owner-replacement path. Keep control/service exclusions. Only the
+coordinator calls the existing native archive tool, then saves its receipt and
+readback; do not send the worker an archive or acknowledgement message. A
+subsequent native idle snapshot may use the ordinary path without relabeling.
+

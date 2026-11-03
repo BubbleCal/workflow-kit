@@ -63,3 +63,5 @@ Manual mirror PRs are not a substitute for published upstream and verified
 automatic synchronization. Keep this optional policy scoped to its own instance.
 
 For merge approval follow MERGE_APPROVAL.md. When the review commit differs from current head, use fresh retained-approval evidence instead of assuming dismissal or rewriting the review commit. Only the existing coordinator merges after ordinary feedback, CI and conditional-head checks. Preserve prior receipts and uncertain attempts.
+
+For fully completed unloaded owners, use the existing guarded archive path with truthful fresh terminal evidence as described in LIVENESS_RECOVERY.md. Do not wake a worker merely to archive it. Preserve unfinished-parent protection and native readback.

@@ -1,8 +1,8 @@
 {
-  "version": "0.2.2",
+  "version": "0.2.3",
   "source": "local workflow runtime snapshot",
   "source_files": {
-    "runtime/control.mjs": "3cd6f55b9a3569cdbc11cf0e0c7c1aaee309fa0eff9cc92def8bd43c4226a77b",
+    "runtime/control.mjs": "dc6f36fa3ea07ce4ae4d4e86107455ec3b2f9e1d48c28839517da6557f8a44d6",
     "runtime/mailbox.mjs": "f28305c5e2ce83368c4124255c889708a8390d8aaf258b60eb0a3504c4993b6d",
     "runtime/progress.mjs": "85fcd1f52dc277157a5552e2eea328acfb25f24ad859805bc14244b25108873a",
     "runtime/watchdog.mjs": "6b2dd4e02385beb3115f147d50805d0d9c6dd57a40354ac865fa8644af6b67b4",

@@ -355,7 +355,10 @@ Interrupted turns additionally require `interruption_reconciled=true` and a
 nonempty `interruption_evidence_ref` establishing no human stop or unresolved
 native approval. All existing job, queued-input, owner, scope, native-permission
 and deduplication checks still apply; unknown jobs are not absent jobs. This is
-not a human_input action, archive exception, permission probe or new task.
+not a human_input action, permission probe or new task. Ordinary completed-task
+archive reuses this native quiescence check, while still requiring whole-task
+acceptance, delivery/cleanup closure and no unfinished parent goals. See
+LIVENESS_RECOVERY.md; do not wake a completed owner merely to archive it.
 
 ## Optional outcomes projection
 

@@ -74,8 +74,14 @@ test('parent acceptance cannot discard remaining stages or archive their owner',
   const e = { verified_at: new Date(NOW).toISOString(), scope_authorized: true, authorization_ref: 'human', policy_version: 'v', current_policy_version: 'v', stopped: false,
     thread_status: 'idle', queued_input: false, pending_dispatch: false, underlying_job_running: false, expected_turn_id: 'x', actual_turn_id: 'x',
     owner_thread_id: 'worker', control_or_service_chat: false, task_complete: true, completion_evidence_saved: true, pending_decision: false, pending_cleanup: false, pending_delivery: false, important_result_delivered: true };
-  c.prepare({ key: 'archive-child', kind: 'archive', task_id: 'merged', payload: { thread_id: 'worker' }, evidence: e });
-  assert.equal(c.claim({ key: 'archive-child', owner: 'coordinator', evidence: e }).reason, 'owner_has_unfinished_goal_stages'); c.close(); m.close();
+  for (const status of ['idle','notLoaded']) {
+    const evidence={...e,thread_status:status,thread_archived:false,native_approval_pending:false,native_permissions_unchanged:true,
+      native_thread_snapshot:{checked_at:e.verified_at,thread:{id:'worker',status:{type:status}},latestTurn:{id:'x',status:'completed'}}};
+    const key='archive-child-'+status;
+    assert.equal(c.prepare({key,kind:'archive',task_id:'merged',payload:{thread_id:'worker'},evidence}).prepared,true);
+    assert.equal(c.claim({key,owner:'coordinator',evidence}).reason,'owner_has_unfinished_goal_stages');
+  }
+  c.close(); m.close();
 });
 
 test('legacy idle incomplete goals are surfaced without restarting running work', () => {
