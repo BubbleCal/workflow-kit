@@ -1,5 +1,11 @@
 # Changes
 
+## 0.6.1
+
+- Add configurable automatic-maintenance intervals, grouped pending inputs and stable per-slot report keys.
+- Enforce the interval when work is reserved, sent and begun; preserve running work and already accepted receipts.
+
+
 ## 0.6.0
 
 - Keep independent task contracts while coalescing a shared owner into one durable native queue message.

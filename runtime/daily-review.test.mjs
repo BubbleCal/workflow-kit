@@ -10,6 +10,46 @@ const config = { enabled: true, timezone: 'Asia/Shanghai', time: '05:00', first_
 const at = value => Date.parse(value);
 const idle = (now, id = MAINTENANCE, turn = 'old-turn') => ({ checked_at: new Date(now).toISOString(), thread: { id, status: { type: 'idle' } }, latestTurn: { id: turn, status: 'completed' } });
 
+const periodic={enabled:true,timezone:'Asia/Shanghai',interval_minutes:120,first_due_at:'2026-11-05T06:30:00+08:00',authorization_ref:'actual-human-two-hour-request'};
+test('two-hour reviews use distinct fixed windows and coalesce missed slots',()=>{
+  const first=at(periodic.first_due_at);assert.equal(dailyReviewEvent(first-1,periodic),null);
+  const event=dailyReviewEvent(first,periodic);assert.equal(event.payload.report_key,'2026-11-05-maintenance-0630');
+  assert.equal(at(event.payload.window_end)-at(event.payload.window_start),7200000);
+  assert.deepEqual(dailyReviewEvent(first+7199999,periodic),event);
+  const later=dailyReviewEvent(first+7*3600000,periodic);assert.equal(at(later.payload.due_at),first+6*3600000);
+  assert.notEqual(later.key,event.key);assert.throws(()=>dailyReviewEvent(first,{...periodic,first_due_at:'2026-11-05T06:30:00'}),/explicit first due/);
+});
+
+test('new maintenance inputs wait two hours and are grouped without blocking other lanes',()=>{
+  let now=at(periodic.first_due_at)-1;const m=new Mailbox(':memory:',{now:()=>now,maintenanceConfig:()=>periodic});try{
+    for(const key of ['manual','recovery'])m.enqueue({key,lane:'maintenance',kind:'daily_review',payload:{manual_request:true}});
+    assert.equal(m.reserveQueuedLane('maintenance').reason,'maintenance_interval');now++;
+    const batch=m.reserveQueuedLane('maintenance').batch;assert.equal(batch.snapshot.items.length,2);m.setPrompt(batch.id,'scheduled work');m.authorizeQueueSend(batch.id);m.delivery(batch.id,{outcome:'sent',receipt:{queue_id:'original'}});m.begin(batch.id);
+    now+=60000;assert.equal(m.begin(batch.id).begun,true);m.finish(batch.id,{processed_keys:['manual','recovery']});
+    m.enqueue({key:'new-maintenance',lane:'maintenance',kind:'daily_review',payload:{manual_request:true}});
+    assert.equal(m.reserveQueuedLane('maintenance').reason,'maintenance_interval');
+    m.enqueue({key:'ordinary-progress',lane:'coordinator',kind:'configuration',payload:{}});assert.equal(m.reserveQueuedLane('coordinator').reserved,true);
+    now=at(periodic.first_due_at)+7200000;assert.equal(m.reserveQueuedLane('maintenance').reserved,true);
+  }finally{m.close();}
+});
+
+test('an already queued old batch defers work and preserves its accepted receipt',()=>{
+  let now=at(periodic.first_due_at)-60000,settings=null;const dir=mkdtempSync(join(tmpdir(),'maintenance-cadence-')),path=join(dir,'mailbox.sqlite');let m=new Mailbox(path,{now:()=>now,maintenanceConfig:()=>settings});try{
+    m.enqueue({key:'old-input',lane:'maintenance',kind:'daily_review',payload:{manual_request:true}});const b=m.reserveQueuedLane('maintenance').batch;m.setPrompt(b.id,'old batch');m.authorizeQueueSend(b.id);m.delivery(b.id,{outcome:'sent',receipt:{queue_id:'kept'}});
+    settings=periodic;const result=m.begin(b.id);assert.equal(result.begun,false);assert.equal(result.deferred,true);assert.equal(m.get(b.id).started_at,null);assert.equal(m.get(b.id).receipt.queue_id,'kept');
+    assert.equal(m.begin(b.id).reason,'already_deferred_by_cadence');m.delivery(b.id,{outcome:'sent',receipt:{late_ack:true}});assert.equal(m.get(b.id).state,'deferred');assert.equal(m.get(b.id).receipt.queue_id,'kept');
+    m.close();m=new Mailbox(path,{now:()=>now,maintenanceConfig:()=>settings});assert.equal(m.reserveQueuedLane('maintenance').reserved,false);now=at(periodic.first_due_at);
+    const next=m.reserveQueuedLane('maintenance').batch;assert.notEqual(next.id,b.id);assert.equal(next.snapshot.items[0].key,'old-input');
+  }finally{m.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('a cadence change before sending releases only the unsent reservation',()=>{
+  const now=at(periodic.first_due_at)-1;let settings=null;const m=new Mailbox(':memory:',{now:()=>now,maintenanceConfig:()=>settings});try{
+    m.enqueue({key:'unsent',lane:'maintenance',kind:'daily_review',payload:{manual_request:true}});const b=m.reserveQueuedLane('maintenance').batch;m.setPrompt(b.id,'old batch');settings=periodic;
+    assert.equal(m.authorizeQueueSend(b.id).send,false);assert.equal(m.get(b.id).state,'deferred');assert.equal(m.get(b.id).receipt.native_message_consumed,false);
+  }finally{m.close();}
+});
+
 test('daily review starts at Beijing 05:00 with a fixed preceding 24-hour window', () => {
   assert.equal(dailyReviewEvent(at('2026-11-02T20:59:59Z'), config), null);
   const event = dailyReviewEvent(at('2026-11-02T21:00:00Z'), config);

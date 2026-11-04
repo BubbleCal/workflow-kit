@@ -1,14 +1,14 @@
 {
-  "version": "0.6.0",
+  "version": "0.6.1",
   "source": "workflow-kit repository source",
-  "upstream_base_commit": "d1a67f91492d9340f07da4d87966f7ecf4fa3d52",
+  "upstream_base_commit": "d4b7c1149bdf86ded55f14a686058f915a65bc83",
   "source_files": {
-    "package.json": "b45e854da814dff834e54a0901c6e1c55ef1ca7870f4b4e551ddb07325743bc8",
+    "package.json": "0984d32245922b22366d749dfb5020f7f75157dc81aedf1d2b16056a1c76c589",
     "runtime/ci-state.mjs": "8f00790daaa150c53f93c36ea0cabbcebd9bc2c0e571c478328a68db7444de58",
     "runtime/control.mjs": "b38f52fae8ab93aab1164b6c8d9425ccb5f00d432d70af7a38fe44e5ff1ba7e5",
     "runtime/control.test.mjs": "213594f09a34f5d5d0b8e3428fa5dc26ec6e9c2a3e62a7c2010001e54959a03e",
-    "runtime/daily-review.mjs": "514188d51266c9d36692e4d9832bc37b33c810209444437c6103be33c1bf418c",
-    "runtime/daily-review.test.mjs": "80bc7b652cdc1e6f63bc6bced4388a3045931232c337e1d0d51c1864bb186ec0",
+    "runtime/daily-review.mjs": "3274a51c122eb3caafb5a0da7f7917994a4af7bbd8d60c847406f1d745864ec4",
+    "runtime/daily-review.test.mjs": "355e5a407aae6f6f2fcda1d03630fc654ad25a00d120ad068f3d0c699fa215a7",
     "runtime/dependency-provenance.mjs": "fbaaded67eeca3a2ee62250e813d07d0667deef534d5b4d46e2ecab55060d320",
     "runtime/dependency-provenance.test.mjs": "0e56fd2c97a00f0156b9c1064ce50dfbdc114809648b53afe8d4874bb2a2c9b6",
     "runtime/desktop-loader.mjs": "dc96fb8e5c9b367444c1b55ac67b6f7ea2677b296c959a21cba1d830c972dee1",
@@ -28,7 +28,7 @@
     "runtime/instance.mjs": "42c1de68c62294a14217c752f6294e3bcdeccbaadac1452f563fa49acc5b83e1",
     "runtime/lifecycle.mjs": "e64e05f43839ee60895c76fd50fa1e2b43c8af36b1b1fd50f2590f501ed17033",
     "runtime/lifecycle.test.mjs": "a2c86dbbab10d42506f0d71413ad24f71dab77ead7d40a4e12f669e851d595d2",
-    "runtime/mailbox.mjs": "15d9c3652d9d74d76f14d51d4de758bf6566dc8de8ec267f8c631961bd5554cf",
+    "runtime/mailbox.mjs": "dd413c170bf5e3db770901a6eb7b30aaf596c3289b7a69193df6edefb00ebc22",
     "runtime/mailbox.test.mjs": "467bdaff0bb66ed7c798265a9bb5b10b711440b3040010dc03a05060c1fa7e8c",
     "runtime/merge-approval.mjs": "026c58dc40ec63a93130221b8c830647e4bc256bbd97bd8dc73f2c2f839b7b22",
     "runtime/model-selection.mjs": "12329dcd44cf2763ed2b2ae531fa5be8c3aa8f5d3742000c378d7487c51c543f",
@@ -77,7 +77,7 @@
     "tests/portable.test.mjs": "513838d290a5bbe84db403034c4b3b6a079aa2b859b1f81aa156a6da935648b9",
     "tools/release-manifest.mjs": "a702baee455f135631bc6d9f49a21a2cbb1beec140c93a9bf205a56f822ea9c0",
     "tools/test.mjs": "e3111ce13bb59434081b6de6f4526fcb4227c4e3e70d48b64803d1007f918c4a",
-    "workflow.mjs": "2b9cd1636b3b110574c20aabaabfc8c69912adaf9dac22c49446359b5a833fa1"
+    "workflow.mjs": "0b9d1b796195b25f28a820ffdc3d68c303e1a4842fcd13588ca7c3ee4c14dc83"
   },
   "operational_data_exported": false,
   "credentials_exported": false

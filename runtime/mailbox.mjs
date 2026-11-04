@@ -8,7 +8,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dailyReviewEvent } from './daily-review.mjs';
+import { dailyReviewEvent, maintenanceSchedule } from './daily-review.mjs';
 import { ProgressLedger, requiresProgress, legacyAssessmentOwner, findContinuationGaps, registeredContinuationCandidates } from './progress.mjs';
 import { ContinuationWatchdog } from './watchdog.mjs';
 import { LifecycleLedger } from './lifecycle.mjs';
@@ -44,8 +44,12 @@ export function isIdle(snapshot, now = Date.now()) {
 }
 
 export class Mailbox {
-  constructor(path, { now = () => Date.now(), lifecycleAccess, taskRegistry = () => readTaskRegistry(path) } = {}) {
+  constructor(path, { now = () => Date.now(), lifecycleAccess, taskRegistry = () => readTaskRegistry(path), maintenanceConfig } = {}) {
     this.now = now;
+    this.maintenanceConfig=maintenanceConfig??(()=>{
+      const file=resolve(dirname(path),'daily-review/config.json');
+      return path!==':memory:'&&existsSync(file)?JSON.parse(readFileSync(file,'utf8')):null;
+    });
     this.reactiveOwners = () => reactiveOwners(path);
     this.taskRegistry = taskRegistry;
     this.lifecycleAccess = lifecycleAccess ?? (fn => {
@@ -239,6 +243,8 @@ export class Mailbox {
     return this.atomic(() => {
       const current = this.db.prepare("SELECT id,state FROM batches WHERE lane=? AND state IN ('reserved','sending','sent','uncertain','running')").get(lane);
       if (current) return { reserved: false, reason: 'batch_in_flight', batch: current };
+      const cadence=lane==='maintenance'?this.maintenanceCadence():null;
+      if(cadence&&this.now()<cadence.eligible_at)return {reserved:false,reason:'maintenance_interval',eligible_at:new Date(cadence.eligible_at).toISOString()};
       const s = this.db.prepare('SELECT * FROM lane_state WHERE lane=?').get(lane);
       if (!s.enabled) return { reserved: false, reason: 'lane_paused' };
       if (lane === 'maintenance') this.supersedeHealth(this.db.prepare("SELECT * FROM mail WHERE lane='maintenance' AND kind='workflow_recovery' AND state='pending'").all());
@@ -267,7 +273,7 @@ export class Mailbox {
             a.created_at-b.created_at || a.seq-b.seq) :
         this.db.prepare("SELECT * FROM mail WHERE lane=? AND state='pending' ORDER BY CASE WHEN lane='coordinator' AND kind IN ('recovery','human_command') THEN 0 ELSE 1 END,seq").all(lane)
           .filter(row => (lane!=='coordinator'||legacyInput(row)) && (!task_ids || task_ids.has(JSON.parse(row.payload)?.task_id)))
-          .slice(0,lane === 'maintenance' ? 1 : lane === 'inbox' ? 5 : 20);
+          .slice(0,lane === 'maintenance' ? cadence?20:1 : lane === 'inbox' ? 5 : 20);
       if (lane === 'coordinator' && this.transitionVersion() >= 2) {
         // Aging can fill a whole batch with diagnostics. Give one actual result
         // an early opportunity; retain human precedence and rotation for the rest.
@@ -290,6 +296,7 @@ export class Mailbox {
       const id = randomUUID();
       const intakeDue = lane === 'coordinator' && this.now() - s.last_intake >= 3600000;
       const snapshot = { id, lane, run_id: id, transition_contract_version:this.transitionVersion(), created_at: new Date(this.now()).toISOString(),
+        ...(cadence?{maintenance_interval_minutes:cadence.interval/60000}:{}),
         ...(native_queue?{delivery_transport:'native_queue'}:{}),
         signal_generation: s.generation, intake_due: intakeDue, budget_minutes: lane === 'maintenance' ? 20 : 5,
         items: rows.map(r => ({ key: r.item_key, kind: r.kind, payload: JSON.parse(r.payload), seq: r.seq })) };
@@ -338,6 +345,15 @@ export class Mailbox {
     }
     return this.reserve(lane,null,{native_queue:true});
   }
+  maintenanceCadence() {
+    const schedule=maintenanceSchedule(this.maintenanceConfig());if(!schedule)return null;
+    const last=this.db.prepare("SELECT MAX(started_at) AS at FROM batches WHERE lane='maintenance'").get().at;
+    return {...schedule,eligible_at:Math.max(schedule.first,last===null?0:last+schedule.interval)};
+  }
+  deferMaintenanceInside(batch,eligible,consumed) {
+    this.db.prepare("UPDATE batches SET state='deferred',finished_at=?,receipt=? WHERE id=?").run(this.now(),JSON.stringify({...batch.receipt,deferred_by_cadence:true,native_message_consumed:consumed,eligible_at:eligible}),batch.id);
+    this.db.prepare("UPDATE mail SET state='pending',batch_id=NULL WHERE batch_id=? AND state='in_batch'").run(batch.id);
+  }
   admitSchedules(configs={}) {
     const daily=dailyReviewEvent(this.now(),configs.daily_review);
     return daily?{daily_review:this.enqueue(daily)}:{};
@@ -348,6 +364,11 @@ export class Mailbox {
       if(!b||!laneThread[b.lane]||b.snapshot.delivery_transport!=='native_queue'||b.state!=='reserved'||!b.prompt)
         return {send:false,reason:'native_queue_batch_required'};
       if(!this.db.prepare('SELECT enabled FROM lane_state WHERE lane=?').get(b.lane).enabled)return {send:false,reason:'lane_paused'};
+      const cadence=b.lane==='maintenance'?this.maintenanceCadence():null;
+      if(cadence&&this.now()<cadence.eligible_at){
+        const eligible=new Date(cadence.eligible_at).toISOString();this.deferMaintenanceInside(b,eligible,false);
+        return {send:false,reason:'maintenance_interval',eligible_at:eligible};
+      }
       this.db.prepare("UPDATE batches SET state='sending',dispatched_at=? WHERE id=?").run(this.now(),id);
       return {send:true,transport:'native_queue',prompt:b.prompt};
     });
@@ -357,6 +378,11 @@ export class Mailbox {
       const b = this.get(id); if (!b) throw new Error('Unknown batch');
       if(b.snapshot.delivery_transport==='native_queue')return {send:false,reason:'native_queue_transport_only'};
       if (b.state !== 'reserved') return { send: false, reason: b.state };
+      const cadence=b.lane==='maintenance'?this.maintenanceCadence():null;
+      if(cadence&&this.now()<cadence.eligible_at){
+        const eligible=new Date(cadence.eligible_at).toISOString();this.deferMaintenanceInside(b,eligible,false);
+        return {send:false,reason:'maintenance_interval',eligible_at:eligible};
+      }
       if (!isIdle(observation, this.now()) || observation.thread.id !== laneThread[b.lane] || observation.latestTurn.id !== b.preflight_turn) {
         return { send: false, reason: 'target_changed_or_busy' };
       }
@@ -395,8 +421,9 @@ export class Mailbox {
     if (!['sent', 'uncertain', 'not_sent'].includes(outcome)) throw new Error('Invalid delivery outcome');
     return this.atomic(() => {
       const b = this.get(id);
-      if (!b || !['sending', 'uncertain', 'running', 'finished'].includes(b.state)) throw new Error('Batch is not awaiting delivery');
-      if (['running','finished'].includes(b.state)) {
+      const deferredConsumed=b?.state==='deferred'&&b.receipt?.deferred_by_cadence===true&&b.receipt?.native_message_consumed===true;
+      if (!b || !['sending', 'uncertain', 'running', 'finished'].includes(b.state)&&!deferredConsumed) throw new Error('Batch is not awaiting delivery');
+      if (['running','finished'].includes(b.state)||deferredConsumed) {
         if (outcome === 'not_sent') throw new Error('Worker consumption contradicts non-delivery');
         this.db.prepare('UPDATE batches SET receipt=?,turn_id=COALESCE(?,turn_id) WHERE id=?').run(JSON.stringify({ ...b.receipt, transport: receipt }), turn_id, id);
         return { batch_id: id, state: b.state, consumed_before_transport_ack: true };
@@ -413,7 +440,14 @@ export class Mailbox {
     return this.atomic(() => {
       const b = this.get(id); if (!b) throw new Error('Unknown batch');
       if (b.state === 'finished') return { begun: false, reason: 'already_finished' };
+      if(b.state==='deferred'&&b.receipt?.deferred_by_cadence)return {begun:false,reason:'already_deferred_by_cadence',next:'End without auditing or finish; the same input is pending for its next eligible window.'};
       if (!['sending', 'sent', 'uncertain', 'running'].includes(b.state)) throw new Error(`Cannot begin ${b.state} batch`);
+      const cadence=b.lane==='maintenance'&&b.state!=='running'?this.maintenanceCadence():null;
+      if(cadence&&this.now()<cadence.eligible_at){
+        const eligible=new Date(cadence.eligible_at).toISOString();
+        this.deferMaintenanceInside(b,eligible,true);
+        return {begun:false,deferred:true,reason:'maintenance_interval',eligible_at:eligible,next:'End without auditing or finish. Preserve the existing input and receipt; it will be batched at the next eligible window.'};
+      }
       this.db.prepare("UPDATE batches SET state='running',started_at=COALESCE(started_at,?) WHERE id=?").run(this.now(), id);
       return { begun: true, batch: this.get(id), deadline: new Date((b.started_at ?? this.now()) + b.snapshot.budget_minutes * 60000).toISOString(),
         ...(b.lane === 'coordinator' ? { continuation_candidates: this.progress.plan().waiting } : {}) };
@@ -550,7 +584,7 @@ export function renderPrompt(batch, batchFile, decisionState) {
   const begin = JSON.stringify({ op: 'begin', batch_id: batch.id });
   const finish = JSON.stringify({ op: 'finish', batch_id: batch.id });
   const cli = `向 node ${shellQuote(INSTANCE_ROOT + '/runtime/mailbox.mjs')} 的 stdin 传JSON（不是CLI子命令）`;
-  const maintenancePurpose = batch.snapshot.items.some(x => x.kind === 'workflow_recovery') ? '本批工作流健康恢复' : batch.snapshot.items.some(x => x.payload.manual_request === true) ? '本批即时维护请求' : '每日工作流审视与改进';
+  const maintenancePurpose = batch.snapshot.maintenance_interval_minutes ? '本轮周期工作流维护' : batch.snapshot.items.some(x => x.kind === 'workflow_recovery') ? '本批工作流健康恢复' : batch.snapshot.items.some(x => x.payload.manual_request === true) ? '本批即时维护请求' : '每日工作流审视与改进';
   if (batch.lane === 'maintenance') return `${marker}\n执行用户已授权的${maintenancePurpose}，范围以批次payload中的实际请求为准。先读 ${INSTANCE_ROOT}/DAILY_REVIEW.md、POLICY.md、QUEUE_PROTOCOL.md，再${cli}：${begin}。固定日期/窗口及项目key见 ${batchFile}。复用同日checkpoint，不重复扫描或重做已验证改动；检查真实瓶颈并落实范围内的修复与验证，不能只写建议。维护轮软预算20分钟，安全边界保存checkpoint后finish：完成审视及可做修复才在processed_keys中确认本项，未完则processed_keys=[]让队列续接；因真实决策阻塞时保存问题和待决条件后确认本次审视，避免无进展循环。不直接写registry/decisions/Notion；配置镜像和通知入队给后台。重要完成/真实决策才进入中心，日常无变化或微小维护不通知。不直接发消息给控制/工程对话，不中断运行任务，不改模型/权限/用户通信边界，不恢复5/10数量上限。`;
   if (batch.lane === 'inbox') {
     const decisions = decisionState ?? readDecisionState();

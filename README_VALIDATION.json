@@ -1,6 +1,6 @@
 {
-  "version": "0.6.0",
-  "verified_at": "2026-11-04T19:58:27.448982+00:00",
+  "version": "0.6.1",
+  "verified_at": "2026-11-04T20:44:26.968359+00:00",
   "entry_point": "REACTIVE.md",
   "native_evidence_summary": "NATIVE_QUEUE_VALIDATION.md",
   "native_desktop_idle_and_busy_verified": true,

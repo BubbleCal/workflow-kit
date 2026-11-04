@@ -205,3 +205,8 @@ reaches the original execution owner. Keep standalone cron sources standalone.
 A source turn must register every actual schedule marker it receives; publication
 is deduplicated per source/day. Use the native heartbeat current_time_iso for the
 occurrence and report cutoff when present, even if consumption crosses midnight.
+
+Automatic maintenance can be paced independently of engineering and control
+progress with daily-review/config.json interval_minutes and first_due_at. The
+interval is enforced at reservation, send authorization and actual begin, including
+messages queued before a schedule change. No native automation needs to be added.
