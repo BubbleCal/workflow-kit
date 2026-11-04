@@ -148,3 +148,12 @@ prepare, claim, final-send and lifecycle waiting; old04:00–12:00 timing is
 historical. Opening the window does not waive CI/Gatekeeper/feedback or merge
 gates. Old deferred records become eligible under the current saved window,
 while claimed/uncertain/sent receipts remain protected. No new schedule.
+
+## Explicit Gatekeeper risk approval
+
+Follow TASK_OWNERSHIP_AND_PR_GATES.md. Recognize the observed exact COMMENTED
+header `⚠️ **Gate recommendation: approve with a non-blocking risk.**` as an
+explicit approval alongside the plain approve header. Preserve its risk text
+and current-head semantic assessment. This does not waive unresolved findings,
+required human decisions, CI, Xuanwo approval, repository rules or expected-head
+merge guards, and does not authorize generic positive comments.

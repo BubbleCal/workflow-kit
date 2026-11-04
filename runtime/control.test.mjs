@@ -609,6 +609,31 @@ test('retained approval still requires feedback disposition and a fresh approval
 });
 
 
+test('risk approval never bypasses semantic feedback at prepare, claim or final review delivery',()=>{
+  const c=new ControlStore(':memory:',{now:()=>NOW}),e={...prEvidence(),already_announced:false};
+  e.gatekeeper.reviews[0].body='⚠️ **Gate recommendation: approve with a non-blocking risk.**\nPlatform execution could not be independently verified.';
+  const a={key:'risk-approved-delivery',kind:'slack_pr',task_id:'T-001',payload:{channel_id:CHANNEL,message:e.pr_url,expected_head_sha:head},evidence:e};
+  const source={repository:e.pr_url.split('/').slice(3,5).join('/'),pr_number:Number(e.pr_url.split('/').at(-1)),head_sha:head,head_before:head,head_after:head,
+    checked_at:common().verified_at,evidence_ref:'complete-current-source',complete:{reviews:true,review_comments:true,issue_comments:true,review_threads:true},
+    reviews:e.gatekeeper.reviews,review_comments:[],issue_comments:[],review_threads:[]};
+  const assessItem=(id,disposition)=>{const f=c.feedback.status(source.repository,source.pr_number).items.find(x=>x.id===id);
+    return c.feedback.assess({repository:source.repository,pr_number:source.pr_number,head,decisions:[{key:f.key,digest:f.digest,disposition,
+      reason:'Inspected current code and source-bound validation',evidence_ref:'semantic-review-proof',validation_ref:disposition==='addressed'?'actual-current-fix-tests':undefined,current_code_relevance_verified:true}]});};
+  c.feedback.ingest(source);
+  assert.deepEqual(c.prepare(a).reasons,['review_feedback_unassessed']);
+  assessItem('1','informational');assert.equal(c.prepare(a).prepared,true);
+  source.issue_comments.push({id:'later-finding',user:{login:'human-reviewer'},body:'This still loses data.'});c.feedback.ingest(source);
+  assert.equal(c.claim({key:a.key,owner:'coordinator',evidence:e}).claimed,false);
+  assessItem('later-finding','actionable');assert.deepEqual(c.claim({key:a.key,owner:'coordinator',evidence:e}).reasons,['material_review_feedback_open']);
+  assessItem('later-finding','addressed');const claim=c.claim({key:a.key,owner:'coordinator',evidence:e});assert.equal(claim.claimed,true);
+  const authorize=()=>c.authorizeReviewSend({key:a.key,attempt_id:claim.attempt_id,owner:'coordinator',evidence:e,operation_not_started:true});
+  source.review_comments.push({id:'inline-finding',user:{login:'human-reviewer'},body:'The current implementation needs a scope decision.',commit_id:head});c.feedback.ingest(source);
+  assert.deepEqual(authorize().reasons,['review_feedback_unassessed']);
+  assessItem('inline-finding','needs_scope_decision');assert.deepEqual(authorize().reasons,['material_review_feedback_open']);
+  assessItem('inline-finding','addressed');assert.equal(authorize().send,true);
+  assert.equal(authorize().send,false);c.close();
+});
+
 test('an actual current-head approval satisfies fresh-push rules without the retained-review exception',()=>{
   const e=retainedApprovalEvidence();e.approved_head_sha=head;e.approval_verification.reviews[0].commit_id=head;
   e.approval_verification.rules.branch_protection={dismissesStaleReviews:true,requireLastPushApproval:true};

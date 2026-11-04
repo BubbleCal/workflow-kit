@@ -1,4 +1,8 @@
 const fresh = (at, now, age) => Number.isFinite(Date.parse(at)) && Date.parse(at) <= now + 5000 && now - Date.parse(at) <= age;
+const approvalHeaders = new Set([
+  '✅ **Gate recommendation: approve.**',
+  '⚠️ **Gate recommendation: approve with a non-blocking risk.**',
+]);
 
 // CI applicability is an explicit source-backed selection. The gate never
 // turns a missing/skipped check or a generic green summary into CI success.
@@ -29,10 +33,10 @@ export function reviewStageReasons(kind, payload, evidence, now, age = 60000) {
   }
   reviews.sort((a,b) => Date.parse(b.submitted_at)-Date.parse(a.submitted_at) || String(b.id).localeCompare(String(a.id)));
   const last = reviews[0];
-  // The observed app uses COMMENTED reviews with this explicit verdict header.
+  // Only observed, explicit approval headers qualify, including non-blocking risk.
   // Full review/inline semantics are still independently enforced by FeedbackLedger.
   const approved = last?.state === 'APPROVED' || last?.state === 'COMMENTED' &&
-    String(last.body ?? '').trim().split('\n')[0].trim() === '✅ **Gate recommendation: approve.**';
+    approvalHeaders.has(String(last.body ?? '').trim().split('\n')[0].trim());
   if (!last || last.commit_id !== head || !approved) reasons.push('current_head_Gatekeeper_approval_required');
   return reasons;
 }

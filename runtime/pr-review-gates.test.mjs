@@ -20,14 +20,32 @@ test('pending, failed, unexpectedly skipped or missing ordinary CI cannot pass',
 });
 test('delivery requires an actual current-head Gatekeeper approval, including COMMENTED protocol',()=>{
   assert.deepEqual(reviewStageReasons('slack_pr',payload,proof(),NOW),[]);
+  const risk=proof();risk.gatekeeper.reviews[0].body='⚠️ **Gate recommendation: approve with a non-blocking risk.**\nThe reviewer could not independently exercise this platform.';
+  assert.deepEqual(reviewStageReasons('slack_pr',payload,risk,NOW),[]);
   for(const patch of [{body:'❌ **Gate recommendation: request changes.**'},{state:'DISMISSED'},{commit_id:'b'.repeat(40)},{body:'Looks green'}]) {
-    const e=proof();Object.assign(e.gatekeeper.reviews[0],patch);assert.ok(reviewStageReasons('slack_pr',payload,e,NOW).includes('current_head_Gatekeeper_approval_required'));
+    for(const base of [proof(),risk]) {
+      const e=structuredClone(base);Object.assign(e.gatekeeper.reviews[0],patch);assert.ok(reviewStageReasons('slack_pr',payload,e,NOW).includes('current_head_Gatekeeper_approval_required'));
+    }
   }
   const e=proof();delete e.gatekeeper;assert.ok(reviewStageReasons('slack_pr',payload,e,NOW).length);
+});
+test('only the exact observed risk approval header is supported, not quotes or conditional language',()=>{
+  for(const body of ['⚠️ **Gate recommendation: approve with a blocking risk.**','⚠️ **Gate recommendation: approve after fixing the risk.**',
+    '> ⚠️ **Gate recommendation: approve with a non-blocking risk.**','Review pending\n⚠️ **Gate recommendation: approve with a non-blocking risk.**',
+    '⚠️ **Gate recommendation: approve with a non-blocking risk.** except for the required fix']) {
+    const e=proof();e.gatekeeper.reviews[0].body=body;assert.ok(reviewStageReasons('slack_pr',payload,e,NOW).includes('current_head_Gatekeeper_approval_required'));
+  }
 });
 test('new-head, stale evidence and a later negative review invalidate delivery',()=>{
   assert.ok(reviewStageReasons('slack_pr',{...payload,expected_head_sha:'b'.repeat(40)},proof(),NOW).length);
   assert.ok(reviewStageReasons('slack_pr',payload,proof(),NOW+61000).length);
-  const e=proof();e.gatekeeper.reviews.push({...e.gatekeeper.reviews[0],id:2,submitted_at:new Date(NOW).toISOString(),body:'❌ **Gate recommendation: request changes.**'});
-  assert.ok(reviewStageReasons('slack_pr',payload,e,NOW).length);
+  for(const header of ['✅ **Gate recommendation: approve.**','⚠️ **Gate recommendation: approve with a non-blocking risk.**']) {
+    const e=proof();e.gatekeeper.reviews[0].body=header;
+    assert.ok(reviewStageReasons('slack_pr',{...payload,expected_head_sha:'b'.repeat(40)},e,NOW).length);
+    assert.ok(reviewStageReasons('slack_pr',payload,e,NOW+61000).length);
+    e.gatekeeper.head_after='b'.repeat(40);assert.ok(reviewStageReasons('slack_pr',payload,e,NOW).length);e.gatekeeper.head_after=head;
+    e.gatekeeper.reviews.push({...e.gatekeeper.reviews[0],id:2,submitted_at:new Date(NOW).toISOString(),body:'❌ **Gate recommendation: request changes.**'});
+    assert.ok(reviewStageReasons('slack_pr',payload,e,NOW).length);
+    e.gatekeeper.reviews[1].body='No verdict yet';assert.ok(reviewStageReasons('slack_pr',payload,e,NOW).length);
+  }
 });

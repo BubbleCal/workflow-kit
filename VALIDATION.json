@@ -1,15 +1,15 @@
 {
-  "version": "0.2.18",
-  "verified_at": "2026-11-04T05:55:00.025698+00:00",
+  "version": "0.2.19",
+  "verified_at": "2026-11-04T06:13:43.790445+00:00",
   "environment": {
     "platform": "darwin",
     "architecture": "arm64",
     "node": "v23.11.0"
   },
   "tests": {
-    "runtime": 199,
+    "runtime": 201,
     "portable_integration": 3,
-    "passed": 202,
+    "passed": 204,
     "failed": 0
   },
   "verified": [
@@ -52,7 +52,8 @@
     "Task-only decision display and private deterministic question identity retain old D aliases and actual answers; T/context/unique-option routing preserves ambiguity, user text and authority; actual queue rendering/dedup keeps old messages and receipts immutable and rejects unrelated key collisions",
     "Actual ready and URL-send gates require source-backed applicable CI and current-head verified Gatekeeper verdicts; first ready has no circular Gatekeeper prerequisite, pending/failure/new-head feedback and blackout remain guarded. Native creation identity prevents unrelated chat reuse; explicit scoped checkpoint handoff preserves healthy jobs without archiving unrelated unfinished chats.",
     "Saved Asia/Shanghai03:00inclusive/10:00exclusive window drives ready/URL/lifecycle boundaries; previous-day UTC conversion and old deferred eligibility verified, old action-guidance bytes and uncertain/send receipts preserved",
-    "Protected result-slot rotation uses only prior first-non-human opportunities; unprocessed tail results retain eligibility, newer arrivals cannot reset it, and human order, ordinary rotation, immutable batches and progress-before-ACK remain protected."
+    "Protected result-slot rotation uses only prior first-non-human opportunities; unprocessed tail results retain eligibility, newer arrivals cannot reset it, and human order, ordinary rotation, immutable batches and progress-before-ACK remain protected.",
+    "Exact non-blocking-risk Gatekeeper approval is recognized without accepting quoted/conditional/unknown verdicts. Old-head, stale, changed-head, dismissed and later negative/unknown reviews block. Full semantic feedback blocks prepare/claim/final send until explicitly assessed and resolved; CI and ordinary merge guards remain."
   ],
   "operational_data_exported": false,
   "credentials_exported": false,
@@ -79,11 +80,11 @@
   "unloaded_owner_recovery_verified": true,
   "outcome_projection_guards_verified": true,
   "baseline_full_suite": {
-    "version": "0.2.18",
-    "runtime": 199,
+    "version": "0.2.19",
+    "runtime": 201,
     "portable_integration": 3,
-    "passed": 202,
+    "passed": 204,
     "failed": 0
   },
-  "validation_scope": "Full portable core and integration suite; live suite 212 passed. Original batch-tail fairness failure reproduced before fix and real historical queue replayed in isolated in-memory ledgers."
+  "validation_scope": "Full portable core and integration suite (204 passed), live suite (214 passed), followed by the live source-derived fixture check after correcting the portable test repository reference. Exact observed risk verdict reproduced before fix and replayed without CI proof or external effects."
 }

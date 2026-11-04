@@ -1,5 +1,9 @@
 # Changes
 
+## 0.2.19
+
+Recognize the observed exact Gatekeeper approval-with-non-blocking-risk header. Preserve full semantic feedback at prepare, claim and final delivery, latest current-head verdict, CI and normal merge gates. Unknown, conditional, quoted, dismissed or negative verdicts still block.
+
 ## 0.2.18
 
 Rotate the protected result slot by prior first-non-human opportunities. An unprocessed batch-tail result keeps its original eligibility instead of repeatedly losing to newer arrivals. Preserve human precedence, ordinary diagnostic rotation, immutable batches and progress-before-ACK guards.

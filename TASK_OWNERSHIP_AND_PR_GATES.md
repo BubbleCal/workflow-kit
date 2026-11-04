@@ -49,12 +49,19 @@ For URL delivery, also supply gatekeeper with matching PR/head-before/head-after
 checked_at, evidence_ref, semantic_assessment_ref, reviews_complete=true, complete
 raw reviews, and identity={kind:github_app,login,app_id,verified:true,evidence_ref}.
 Verify the real repository app/trigger surface first. The currently observed
-GitHub apps emit COMMENTED reviews with the explicit first-line verdict
-`✅ **Gate recommendation: approve.**`; this is a supported structured verdict,
-not a generic positive-comment heuristic. An actual APPROVED review is also
-supported. The latest matching app review must apply to the exact current head;
-negative/dismissed/missing/unrecognized verdicts block. Full semantic feedback
-assessment remains mandatory independently of this verdict header.
+GitHub apps emit COMMENTED reviews with either observed approval header:
+`✅ **Gate recommendation: approve.**` or
+`⚠️ **Gate recommendation: approve with a non-blocking risk.**`.
+Only these exact first-line strings qualify; quoted, conditional, unknown or
+negative text does not. An actual APPROVED review is also supported. The latest
+matching app review must apply to the exact current head; dismissed, missing,
+newer negative or unrecognized verdicts block. This recognizes an explicit
+approval, not a waiver of its body or any inline/issue findings. Before delivery,
+the coordinator must assess the full current-head feedback, preserve the stated
+risk and validation limits, and resolve valid changes or real scope decisions.
+The independent FeedbackLedger gate applies at prepare, claim and final send;
+unassessed, actionable or decision-required feedback still blocks. Existing CI,
+Xuanwo approval, repository rules and conditional-head merge remain separate.
 
 Operation proof must be fresh within60seconds. Lifecycle observation persists the
 same applicable_ci/gatekeeper fields and creates verify_review_ci or
