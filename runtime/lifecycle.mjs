@@ -77,6 +77,11 @@ export class LifecycleLedger {
     const base = { pr_key: key, task_id: w.task_id, owner_thread_id: w.owner_id, authorization_ref: w.authorization_ref,
       head: s?.head_sha ?? null, artifact_revision:s?.state_revision ?? 0, snapshot_ref: s?.evidence_ref ?? null };
     const answer = (state, action, details = {}) => ({ ...base, state, action, ...details });
+    const task = this.scopeRegistry()?.task_registry?.items?.[w.task_id];
+    // A watched review target is not an authored deliverable. Findings remain
+    // in the feedback ledger and the review driver owns meaningful refreshes.
+    if ((task?.role ?? task?.kind) === 'review' && task.owner_thread_id === w.owner_id)
+      return answer('review_target', null);
     if (!s || (s.state === 'merged' ? !mergedFact(s) : !fresh(s.checked_at, this.now()))) return answer('observation_due', 'refresh_pr');
     const releaseRoute=forkRoute(this.dependencyPolicy(),s.repository);
     if (releaseRoute) return answer(s.state==='closed'?'closed_unmerged':'release_route_required','reconcile_release_route',{release_route:releaseRoute});
@@ -136,9 +141,10 @@ export class LifecycleLedger {
     if (ciHandled) return answer('ci_disposition_recorded',null,{failure_version:failureVersion,delivery_receipt:sent.action_key});
     return answer('review_delivered', 'check_merge', { delivery_receipt: sent.action_key });
   }
-  reconcile() {
+  reconcile({ pr_key: onlyKey } = {}) {
     const output = [];
     for (const { pr_key } of this.db.prepare('SELECT pr_key FROM lifecycle_prs WHERE retired=0 ORDER BY updated_at').all()) {
+      if (onlyKey && pr_key !== onlyKey) continue;
       const next = this.inspect(pr_key);
       const revision = revisionOf(next), key = `lifecycle:${pr_key}:${revision}`;
       this.db.prepare("UPDATE lifecycle_intents SET state='superseded',resolved_at=? WHERE pr_key=? AND revision<>? AND state IN ('pending','waiting')")

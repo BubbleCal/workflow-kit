@@ -272,3 +272,27 @@ repeat on each poll. A new head/state transition or ready action retains its
 own disposition. Existing CI triage, full-feedback gates and uncertain sends
 remain prior checks. The watch/parent goal stay open; a later ready/Slack/merge
 operation still needs its ordinary actual authorization and delivery guards.
+
+## Read-only review targets and native CI handoffs
+
+A watch whose trusted task role (or native task kind) is exactly `review`, with
+its original matching owner, is a review target rather than an authored PR.
+Lifecycle inspection returns `review_target` with no author action, even after
+its snapshot expires. Reconciliation supersedes old author obligations but
+retains the watch, findings, review reports and meaningful-update review driver.
+Use `lifecycle_plan` with `pr_key` to reconcile only that watch.
+
+When a native owner consumed a `triage_ci` source outside the coordinator batch,
+`record_progress` accepts `handoff_event_key` naming an actual configuration item
+in the current coordinator batch. Keep `event_key` equal to the original exact
+lifecycle key plus generation, `ack:false`, and `evidence_ref` equal to the
+handoff evidence. Both `native_ci_triage_result` and
+`resolve_exact_completed_ci_triage_notice` handoffs must bind task, original
+owner, repository, PR, head and runtime context/plan. The original mail must be
+`reactive` and its exact native event must have been handled by that recorded
+owner decision. The runtime stores the source/handoff/decision linkage without
+changing batch membership or replaying the source. Preserve current goal
+revisions and unfinished source-task acceptance. Then use normal exact-generation
+`lifecycle_resolve(disposition:progress)` and separately acknowledge the admitted
+handoff. An old handoff cannot close a newer head/failure episode. This records
+triage, never passing CI, merge readiness or whole-task completion.

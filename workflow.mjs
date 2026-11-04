@@ -86,7 +86,7 @@ try {
   } else if(command==='test') {
     await import('./tools/test.mjs');
   } else {
-    output({version:'0.6.1',commands:['init --name <name> --project-root <directory>','bind --file <verified-bindings.json>','doctor','test','task list|builtin|op','sources list|op','discovery status|op','migrate --file <verified-migration.json>','runtime init|status|probe|queue-verify|bind-inbox|op|run|service'],
+    output({version:'0.6.2',commands:['init --name <name> --project-root <directory>','bind --file <verified-bindings.json>','doctor','test','task list|builtin|op','sources list|op','discovery status|op','migrate --file <verified-migration.json>','runtime init|status|probe|queue-verify|bind-inbox|op|run|service'],
       native_setup:'START-HERE.md',model_selection:'instance.json models; inherit by default, explicit role overrides only after user selection'});
     if(command)process.exitCode=2;
   }

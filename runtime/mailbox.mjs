@@ -1,3 +1,4 @@
+import { bindLifecycleHandoff } from './lifecycle-handoff.mjs';
 import { ImmediateTriggers } from './immediate-trigger.mjs';
 import { readTaskRegistry } from './task-ownership.mjs';
 import { reactiveOwners, mailTaskIds, nativeControlRuntime } from './reactive-ownership.mjs';
@@ -72,6 +73,7 @@ export class Mailbox {
         lane TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL, digest TEXT NOT NULL,
         state TEXT NOT NULL DEFAULT 'pending', batch_id TEXT, created_at INTEGER NOT NULL,
         completed_at INTEGER);
+      CREATE TABLE IF NOT EXISTS progress_handoffs (source_event_key TEXT PRIMARY KEY, binding TEXT NOT NULL, recorded_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS batches (
         id TEXT PRIMARY KEY, lane TEXT NOT NULL, state TEXT NOT NULL, item_ids TEXT NOT NULL,
         signal_generation INTEGER NOT NULL, intake_due INTEGER NOT NULL,
@@ -471,10 +473,20 @@ export class Mailbox {
   recordProgress(input) {
     return this.atomic(() => {
       const batch = this.get(input.batch_id);
-      if (!batch || batch.lane !== 'coordinator' || !['sent','running'].includes(batch.state) || !batch.snapshot.items.some(x => x.key === input.event_key))
+      if (!batch || batch.lane !== 'coordinator' || !['sent','running'].includes(batch.state))
         throw new Error('Progress must consume an event from the current coordinator batch');
       if (input.authorization_verified !== true) throw new Error('Verify the original goal authorization before recording successors');
-      const item = batch.snapshot.items.find(x=>x.key===input.event_key);
+      let item = batch.snapshot.items.find(x=>x.key===input.event_key), handoffBinding;
+      if (input.handoff_event_key) {
+        const handoff=batch.snapshot.items.find(x=>x.key===input.handoff_event_key);
+        const source=this.db.prepare('SELECT item_key,state,kind,payload FROM mail WHERE item_key=?').get(input.event_key);
+        if (!handoff || !source) throw new Error('Progress handoff must be in the current coordinator batch');
+        item={key:source.item_key,state:source.state,kind:source.kind,payload:JSON.parse(source.payload)};
+        handoffBinding=this.lifecycleAccess(l=>bindLifecycleHandoff({source:item,handoff,input,db:l.db,registry:this.taskRegistry()}));
+        if (!handoffBinding) throw new Error('Native CI handoff evidence unavailable');
+        const previous=this.db.prepare('SELECT binding FROM progress_handoffs WHERE source_event_key=?').get(input.event_key);
+        if(previous && stable({...JSON.parse(previous.binding),batch_id:undefined})!==stable({...handoffBinding,batch_id:undefined})) throw new Error('Progress handoff replay changed binding');
+      } else if (!item) throw new Error('Progress must consume an event from the current coordinator batch');
       if (batch.snapshot.transition_contract_version >= 2) {
         const legacyOwner = legacyAssessmentOwner(item), resultOwner = item.payload?.owner_thread_id ?? legacyOwner;
         const assessmentHasRemaining = legacyOwner && (item.payload.task_complete === false ||
@@ -508,6 +520,7 @@ export class Mailbox {
         }
       }
       const result = this.progress.record(input);
+      if(handoffBinding) this.db.prepare('INSERT OR IGNORE INTO progress_handoffs VALUES (?,?,?)').run(input.event_key,stable(handoffBinding),this.now());
       if (item.payload?.event === 'wait_reconciliation') this.waits.resolve({event_key:input.event_key,
         goal:this.progress.goals().find(g=>g.id===item.payload.goal_id),stage_id:item.payload.stage_id,evidence_ref:input.evidence_ref});
       if (input.ack !== false) {

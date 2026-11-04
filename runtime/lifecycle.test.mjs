@@ -361,3 +361,20 @@ test('generic thread targets and incomplete assessment declarations are not trea
   }
   const m=new Mailbox(':memory:',{now:()=>NOW});m.enqueue(packet);const b=begin(m);assert.equal(b.snapshot.transition_contract_version,1);assert.doesNotThrow(()=>m.acknowledge(b.id,[packet.key]));m.finish(b.id);m.close();
 });
+
+test('read-only review targets preserve findings without author delivery obligations',()=>{
+  const c=setup();observe(c,NOW,{},[{id:19,body:'Fix the incorrect result',state:'COMMENTED',user:{login:'reviewer'},commit_id:HEAD}]);
+  const before=c.lifecycle.reconcile()[0];
+  const feedbackBefore=c.db.prepare('SELECT * FROM feedback_items').all();
+  c.lifecycle.scopeRegistry=()=>({task_registry:{items:{'T-010':{role:'review',owner_thread_id:'owner'}}}});
+  assert.equal(c.lifecycle.inspect(key).state,'review_target');
+  assert.deepEqual(c.lifecycle.reconcile(),[]);
+  assert.equal(c.db.prepare('SELECT state FROM lifecycle_intents WHERE intent_key=?').get(before.payload.lifecycle_key).state,'superseded');
+  assert.deepEqual(c.db.prepare('SELECT * FROM feedback_items').all(),feedbackBefore);
+  c.lifecycle.scopeRegistry=()=>({task_registry:{items:{'T-010':{role:'review',owner_thread_id:'other'}}}});
+  assert.notEqual(c.lifecycle.inspect(key).action,null);
+  c.lifecycle.scopeRegistry=()=>({task_registry:{items:{'T-010':{kind:'review',owner_thread_id:'owner'}}}});
+  c.lifecycle.now=()=>NOW+86400000;assert.equal(c.lifecycle.inspect(key).action,null);
+  c.lifecycle.scopeRegistry=()=>({task_registry:{items:{'T-010':{role:'implementation',owner_thread_id:'owner'}}}});
+  assert.notEqual(c.lifecycle.inspect(key).action,null);c.close();
+});

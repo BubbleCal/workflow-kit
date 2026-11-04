@@ -822,7 +822,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
         const result = control.lifecycle.observe(input.snapshot_file ? JSON.parse(readFileSync(input.snapshot_file,'utf8')) : input.snapshot);
         return { ...result, outbox: control.lifecycle.reconcile() };
       }),
-      lifecycle_plan: () => control.atomic(()=>({ outbox: control.lifecycle.reconcile() })),
+      lifecycle_plan: () => control.atomic(()=>({ outbox: control.lifecycle.reconcile({pr_key:input.pr_key}) })),
       lifecycle_status: () => control.lifecycle.status(),
       lifecycle_resolve: () => {
         let progress_resolution;

@@ -1,5 +1,11 @@
 # Changes
 
+## 0.6.2
+
+- Keep read-only PR review targets outside authored-delivery lifecycle actions while retaining findings and review refresh ownership.
+- Bind native CI triage handoffs to exact consumed lifecycle sources without changing immutable batches or replaying work.
+- Preserve source-task acceptance and reject mismatched heads, owners, native decisions and automatic source acknowledgement.
+
 ## 0.6.1
 
 - Add configurable automatic-maintenance intervals, grouped pending inputs and stable per-slot report keys.
