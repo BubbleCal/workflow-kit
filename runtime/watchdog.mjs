@@ -20,6 +20,7 @@ export class ContinuationWatchdog {
         resolution_key TEXT, resolution TEXT);`);
   }
   protection(registry, taskId, ownerId) {
+    if(this.reactiveOwners?.().has(taskId)) return 'reactive_runtime_owns_task';
     const controls = [registry.setup_thread_id, registry.coordinator_thread_id, registry.hub_thread_id,
       registry.decision_inbox_thread_id, registry.queue_transport?.dispatcher_thread_id,
       registry.queue_transport?.maintenance_owner_thread_id, registry.meeting_prep?.worker_thread_id];

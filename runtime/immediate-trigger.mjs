@@ -18,6 +18,7 @@ export class ImmediateTriggers {
     if(mail.lane!=='coordinator'||mail.kind!=='human_command'||proof?.actual_human_message_verified!==true||proof.source_actor_verified!==true)
       throw new Error('Immediate invocation requires admitted authenticated human action');
     const p=typeof mail.payload==='string'?JSON.parse(mail.payload):mail.payload;
+    if(this.reactiveOwners?.().has(p.task_id))return null;
     if(!p.source_message_id||p.source_message_id!==proof.source_message_id||!p.authorization_ref||!p.text)
       throw new Error('Immediate invocation must bind its admitted source');
     const data={source_id:p.source_message_id,source_thread_id:p.source_thread_id,task_id:p.task_id,text:p.text,
@@ -61,6 +62,7 @@ export class ImmediateTriggers {
         return {send:false,reason:'existing_service_action_identity_mismatch'};
     }
     if(old && ['claimed','uncertain'].includes(old.state))return {send:false,reason:'reconcile_uncertain_native_invocation',key:row.action_key,transport_state:old.state};
+    if(this.reactiveOwners?.().has(d.task_id))return {send:false,reason:'reactive_runtime_owns_task',key:row.action_key};
     if(old?.state==='sent')return {send:false,reason:'already_invoked',key:row.action_key,receipt:JSON.parse(old.receipt??'{}')};
     if(old&&!['prepared','deferred'].includes(old.state))return {send:false,reason:'preserve_existing_invocation_state',transport_state:old.state};
     if(row.covered_seq>=row.max_seq)return {send:false,reason:'already_observed',coverage:JSON.parse(row.coverage??'{}')};

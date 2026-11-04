@@ -116,6 +116,7 @@ export class ProgressLedger {
   plan(observations = []) {
     const eligible = [], waiting = [];
     for (const g of this.goals().filter(g => !g.complete)) for (const s of g.stages.filter(s => s.state === 'running')) {
+      if(this.reactiveOwners?.().has(s.task_id))continue;
       const o = observations.find(o => o.thread_id === s.owner_thread_id);
       const excluded=this.scopeExclusion(g,s);
       const ended = !excluded && o && fresh(o.checked_at, this.now()) && ['idle','notLoaded'].includes(o.status) && ['completed','failed','interrupted'].includes(o.turn_status) && o.background_job_running === false;
@@ -126,7 +127,8 @@ export class ProgressLedger {
       const key = continuationKey(goal, s), action = this.db.prepare('SELECT * FROM continuation_actions WHERE action_key=?').get(key);
       const o = observations.find(o => o.thread_id === s.owner_thread_id);
       let reason;
-      if (this.scopeExclusion(goal,s)) reason = 'scope_excluded_by_actual_user';
+      if (this.reactiveOwners?.().has(s.task_id)) reason = 'reactive_runtime_owns_task';
+      else if (this.scopeExclusion(goal,s)) reason = 'scope_excluded_by_actual_user';
       else if (!action || action.state !== 'pending') reason = action?.state === 'running' && o && fresh(o.checked_at, this.now()) && ['idle','notLoaded'].includes(o.status) && o.background_job_running === false ? 'ended_owner_needs_result_reconciliation' : action?.state ?? 'missing_action';
       else if (s.depends_on.some(id => goal.stages.find(x => x.id === id).state !== 'complete')) reason = 'dependency';
       else if (!o || !fresh(o.checked_at, this.now())) reason = 'fresh_owner_observation_required';

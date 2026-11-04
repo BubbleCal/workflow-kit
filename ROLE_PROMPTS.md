@@ -1,5 +1,7 @@
 # Native role templates
 
+For an adopted active task, use the owner protocol in REACTIVE.md. The main inbox may investigate and answer directly, while original execution owners retain write ownership. Its previous queue-only restriction remains for legacy task routing. Upgrade the existing role instructions in place during an authorized reactive installation; do not create extra control chats. Runtime-generated event wakes are source evidence, not new human authority.
+
 The installer substitutes INSTANCE_ROOT, INSTANCE_NAME and the actual instance ID from instance.json. Read native schemas before supplying model or reasoning overrides. Null role values inherit the user's selected configuration. These templates do not authorize installation by themselves.
 
 ## Dispatcher

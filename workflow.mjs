@@ -13,7 +13,10 @@ const output = value => process.stdout.write(JSON.stringify(value,null,2)+'\n');
 const configPath=join(root,'instance.json');
 
 try {
-  if (command === 'init') {
+  if (command === 'runtime') {
+    const { runtimeMain } = await import('./runtime/reactive-cli.mjs');
+    await runtimeMain(args,{root,output});
+  } else if (command === 'init') {
     const name=option('name'),projectRoot=option('project-root');
     if(!name?.trim()||!projectRoot)throw new Error('Usage: node workflow.mjs init --name <name> --project-root <existing-directory>');
     if(existsSync(configPath)||existsSync(join(root,'registry.json'))||existsSync(join(root,'mailbox.sqlite'))||existsSync(join(root,'control.sqlite')))
@@ -77,7 +80,7 @@ try {
   } else if(command==='test') {
     await import('./tools/test.mjs');
   } else {
-    output({version:'0.1.4',commands:['init --name <name> --project-root <directory>','bind --file <verified-bindings.json>','doctor','test'],
+    output({version:'0.3.0',commands:['init --name <name> --project-root <directory>','bind --file <verified-bindings.json>','doctor','test','runtime init|status|probe|op|run|service'],
       native_setup:'START-HERE.md',model_selection:'instance.json models; inherit by default, explicit role overrides only after user selection'});
     if(command)process.exitCode=2;
   }

@@ -1,5 +1,13 @@
 # Changes
 
+## 0.3.0
+
+Add an opt-in reactive runtime for existing instances: durable source events, bounded coalescing, direct owner wakeups, per-task shadow/active/paused/legacy modes, native Codex RPC observation, GitHub polling, immediate inbox delivery and a macOS service entry point. Existing tasks stay on their current driver until explicit cutover.
+
+Separate authorized goal contracts from replaceable implementation plans. Preserve superseded plans and action receipts; invalidate waits and stale action contexts when facts change. Keep original owners, native model/permission settings, complete semantic feedback, CI, review windows and merge guards. Shared scope locks and uncertain-send reconciliation prevent a second driver from replaying work.
+
+Include event/plan/driver regression coverage, a subprocess RPC fixture and portable CLI integration. Real deployment latency and target-host desktop interoperation require verification; no measured performance benefit is claimed. See REACTIVE.md for migration and limitations.
+
 ## 0.2.22
 
 Connect authenticated human admission to durable immediate dispatcher intents, guarded native call preparation/claim and existing transport receipts. Coalesce busy service work, persist actual plan coverage watermarks, retain late inputs and uncertain sends, and preserve pure-answer/machine exclusions and all engineering ownership rules.

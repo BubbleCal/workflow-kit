@@ -1,5 +1,6 @@
 import { ImmediateTriggers } from './immediate-trigger.mjs';
 import { readTaskRegistry } from './task-ownership.mjs';
+import { reactiveOwners, mailTaskIds } from './reactive-ownership.mjs';
 import { stageScopeExclusion } from './scope-exclusions.mjs';
 import { bindings, INSTANCE_ROOT, requireBindings, shellQuote } from './instance.mjs';
 import { DatabaseSync } from 'node:sqlite';
@@ -45,6 +46,7 @@ export function isIdle(snapshot, now = Date.now()) {
 export class Mailbox {
   constructor(path, { now = () => Date.now(), lifecycleAccess, taskRegistry = () => readTaskRegistry(path) } = {}) {
     this.now = now;
+    this.reactiveOwners = () => reactiveOwners(path);
     this.taskRegistry = taskRegistry;
     this.lifecycleAccess = lifecycleAccess ?? (fn => {
       if (path === ':memory:') return null;
@@ -86,7 +88,9 @@ export class Mailbox {
     this.db.exec(`CREATE TABLE IF NOT EXISTS transition_settings (id INTEGER PRIMARY KEY, version INTEGER NOT NULL, source_message_id TEXT);
       INSERT OR IGNORE INTO transition_settings VALUES (1,1,NULL);`);
     this.immediate = new ImmediateTriggers(this.db,{now:this.now,registry:this.taskRegistry});
+    this.immediate.reactiveOwners = this.reactiveOwners;
     this.progress = new ProgressLedger(this.db, this.now, {scopeExclusion:(g,s)=>stageScopeExclusion(this.taskRegistry(),g,s)});
+    this.progress.reactiveOwners = this.reactiveOwners;
     this.waits = new WaitLedger(this.db,{now:this.now,scopeExclusion:(g,s)=>stageScopeExclusion(this.taskRegistry(),g,s),checkPr:condition=>
       this.lifecycleAccess(l=>l.checkWait(condition)) ?? {valid:false,reason:'PR_source_unavailable'},checkHuman:data=>{
       if (path === ':memory:') return null;
@@ -101,6 +105,7 @@ export class Mailbox {
       return !!task && (task.hold === true || typeof task.hold==='string' && !!task.hold.trim() || /implementation_hold|human_hold/.test(task.status??''));
     }});
     this.watchdog = new ContinuationWatchdog(this.db, this.progress, this.now, condition => this.waits.check(condition));
+    this.watchdog.reactiveOwners = this.reactiveOwners;
   }
   close() { this.db.close(); }
   transitionVersion() { return this.db.prepare('SELECT version FROM transition_settings WHERE id=1').get().version; }
@@ -112,6 +117,7 @@ export class Mailbox {
   }
   reconcileTransitions(registry) {
     if (this.transitionVersion() < 2) return { enabled:false };
+    const reactive = this.reactiveOwners();
     const lifecycle = this.lifecycleAccess(l=> {
       l.db.exec('BEGIN IMMEDIATE');
       try { const out = l.reconcile(); l.db.exec('COMMIT'); return out; }
@@ -129,7 +135,7 @@ export class Mailbox {
         lane:'coordinator',kind:'event',payload:{event:'stage_reconciliation',task_id:task.id,owner_thread_id:task.owner_thread_id,
           authorization_ref:source,text:'Accepted unfinished task has no remaining recorded stage. Reconcile original acceptance and persist its concrete successor/real wait or evidenced completion. This is not permission to restart a worker.'}});
     }
-    for (const item of [...lifecycle,...waits,...gaps]) this.enqueue(item);
+    for (const item of [...lifecycle,...waits,...gaps]) if(!reactive.has(item.payload?.task_id)) this.enqueue(item);
     this.atomic(()=>{
       for (const row of this.db.prepare("SELECT * FROM mail WHERE state='pending' AND json_extract(payload,'$.event')='pr_lifecycle_action'").all()) {
         const p=JSON.parse(row.payload);
@@ -225,7 +231,7 @@ export class Mailbox {
       return this.watchdog.observe(input);
     });
   }
-  reserve(lane, observation) {
+  reserve(lane, observation, { task_ids = null } = {}) {
     if (!laneThread[lane]) throw new Error(`Unknown lane: ${lane}`);
     if (!isIdle(observation, this.now()) || observation.thread.id !== laneThread[lane]) return { reserved: false, reason: 'target_busy_or_unknown' };
     return this.atomic(() => {
@@ -249,12 +255,17 @@ export class Mailbox {
         GROUP BY json_extract(i.value,'$.key')`).all() : [];
       const offered = new Map(opportunities.map(r=>[r.item_key,r.offered_at]));
       const earlyOffered = new Map(opportunities.map(r=>[r.item_key,r.early_at]));
+      const reactive = this.reactiveOwners();
+      const legacyInput = row => {const ids=mailTaskIds(JSON.parse(row.payload));return !ids.length||!ids.every(id=>reactive.has(id));};
       const rows = lane === 'coordinator' && this.transitionVersion() >= 2 ?
         this.db.prepare("SELECT * FROM mail WHERE lane='coordinator' AND state='pending'").all()
+          .filter(legacyInput)
           .sort((a,b)=>workPriority(a,this.now())-workPriority(b,this.now()) ||
             (a.kind === 'human_command' ? 0 : (offered.get(a.item_key) ?? a.created_at)-(offered.get(b.item_key) ?? b.created_at)) ||
             a.created_at-b.created_at || a.seq-b.seq) :
-        this.db.prepare("SELECT * FROM mail WHERE lane=? AND state='pending' ORDER BY CASE WHEN lane='coordinator' AND kind IN ('recovery','human_command') THEN 0 ELSE 1 END,seq LIMIT ?").all(lane, lane === 'maintenance' ? 1 : lane === 'inbox' ? 5 : 20);
+        this.db.prepare("SELECT * FROM mail WHERE lane=? AND state='pending' ORDER BY CASE WHEN lane='coordinator' AND kind IN ('recovery','human_command') THEN 0 ELSE 1 END,seq").all(lane)
+          .filter(row => (lane!=='coordinator'||legacyInput(row)) && (!task_ids || task_ids.has(JSON.parse(row.payload)?.task_id)))
+          .slice(0,lane === 'maintenance' ? 1 : lane === 'inbox' ? 5 : 20);
       if (lane === 'coordinator' && this.transitionVersion() >= 2) {
         // Aging can fill a whole batch with diagnostics. Give one actual result
         // an early opportunity; retain human precedence and rotation for the rest.

@@ -24,7 +24,7 @@ export function requireBindings() {
 
 export function instancePolicyReasons(kind, payload, evidence) {
   const reasons = [];
-  const projectAction = ['dispatch','create_thread','assign_project','archive','unarchive'].includes(kind) ||
+  const projectAction = ['task_wake','dispatch','create_thread','assign_project','archive','unarchive'].includes(kind) ||
     kind === 'human_input' && payload?.thread_id !== bindings.threads.coordinator;
   if (projectAction && bindings.scope.project_id) {
     if (evidence.operation_project_verified !== true || evidence.operation_project_id !== bindings.scope.project_id)

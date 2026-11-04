@@ -59,3 +59,32 @@ test('default instance refuses external delivery and enforces native project evi
     const doctor=run(dir,'workflow.mjs',['doctor']);assert.equal(doctor.json.local_ready,true);assert.equal(doctor.json.native_setup_recorded,false);
   }finally{rmSync(root,{recursive:true,force:true});}
 });
+
+test('reactive CLI adopts in shadow, verifies the native adapter, wakes once and preserves instance settings',()=>{
+  const root=setup();try{
+    const dir=init(root,'one');bind(dir,'one');
+    const before=readFileSync(join(dir,'instance.json'),'utf8'),registry=JSON.parse(readFileSync(join(dir,'registry.json'),'utf8'));
+    registry.task_registry.items['T-001']={owner_thread_id:'owner',canonical_key:'test-contract'};
+    writeFileSync(join(dir,'registry.json'),JSON.stringify(registry));
+    assert.equal(run(dir,'workflow.mjs',['runtime','init']).status,0);
+    const configuration=JSON.parse(readFileSync(join(dir,'runtime.json'),'utf8'));
+    const workspace=realpathSync(join(root,'project one'));
+    configuration.adapter.command=[process.execPath,join(dir,'runtime/test-fixtures/app-server.mjs'),workspace,'normal','project-one'];
+    writeFileSync(join(dir,'runtime.json'),JSON.stringify(configuration));
+    const adopted=run(dir,'workflow.mjs',['runtime','op'],{op:'adopt',task_id:'T-001',owner_thread_id:'owner',source_message_id:'fixture-user',actual_human_verified:true,
+      contract:{objective:'Complete the fixture task',canonical_key:'test-contract',project_id:'project-one',workspace,
+        authorization_ref:'fixture-original',requirements:[{id:'r1',text:'Verify the result'}],constraints:[],job_sources:['native'],pull_requests:[]}});
+    assert.equal(adopted.status,0,adopted.stderr);assert.equal(adopted.json.task.mode,'shadow');
+    assert.equal(run(dir,'workflow.mjs',['runtime','probe','--task','T-001']).json.observation.queued_input,false);
+    const activated=run(dir,'workflow.mjs',['runtime','op'],{op:'mode',task_id:'T-001',mode:'active',source_message_id:'fixture-activate',actual_human_verified:true});
+    assert.equal(activated.status,0,JSON.stringify(activated));
+    const once=spawnSync(process.execPath,[join(dir,'workflow.mjs'),'runtime','run','--once'],{cwd:dir,encoding:'utf8'});
+    assert.equal(once.status,0,once.stderr);
+    const status=run(dir,'workflow.mjs',['runtime','status']);assert.equal(status.json.wakes.length,1);assert.equal(status.json.wakes[0].state,'sent');
+    const again=spawnSync(process.execPath,[join(dir,'workflow.mjs'),'runtime','run','--once'],{cwd:dir,encoding:'utf8'});assert.equal(again.status,0,again.stderr);
+    const requests=readFileSync(join(workspace,'requests.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+    assert.equal(requests.filter(r=>r.method==='turn/start').length,1);
+    assert.equal(readFileSync(join(dir,'instance.json'),'utf8'),before);
+    assert.equal(run(dir,'workflow.mjs',['runtime','op'],{op:'mode',task_id:'T-001',mode:'paused',source_message_id:'fixture-pause',actual_human_verified:true}).json.mode,'paused');
+  }finally{rmSync(root,{recursive:true,force:true});}
+});

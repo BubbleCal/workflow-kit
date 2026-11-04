@@ -22,6 +22,8 @@ export class ReviewFeedback {
     if (!/^[\w.-]+\/[\w.-]+$/.test(repository??'') || !Number.isSafeInteger(pr_number) || pr_number<1 || !/^[a-f0-9]{40,64}$/.test(head_sha??'')) throw new Error('Exact repository, PR and head are required');
     if (!fresh(checked_at,this.now()) || snapshot.head_before!==head_sha || snapshot.head_after!==head_sha) throw new Error('Fresh consistent-head feedback snapshot required');
     required(evidence_ref,'complete source evidence');
+    const previous=this.db.prepare('SELECT checked_at FROM feedback_snapshots WHERE repository=? AND pr_number=?').get(repository,pr_number);
+    if(previous && Date.parse(previous.checked_at)>Date.parse(checked_at))throw new Error('Out-of-order feedback snapshot; preserve newer evidence');
     for(const feed of ['reviews','review_comments','issue_comments','review_threads'])
       if(snapshot.complete?.[feed]!==true || !Array.isArray(snapshot[feed]))throw new Error(`Complete all-author ${feed} pagination is required`);
     const roots=new Map(snapshot.review_threads.flatMap(t=>(t.comments?.nodes??t.comments??[]).map(c=>[String(c.databaseId??c.database_id??c.id),t])));

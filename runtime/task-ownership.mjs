@@ -8,7 +8,7 @@ export function readTaskRegistry(databasePath) {
   return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : { task_registry: { items: {} } };
 }
 export function ownershipReasons(kind, taskId, payload, evidence, registry, db, actionKey) {
-  if (!registry || !['dispatch', 'human_input'].includes(kind)) return [];
+  if (!registry || !['task_wake', 'dispatch', 'human_input'].includes(kind)) return [];
   const dispatcher = registry.queue_transport?.dispatcher_thread_id;
   if (kind === 'human_input' && payload.thread_id === dispatcher && payload.intent === 'invoke_dispatcher') {
     const rule = registry.queue_transport?.immediate_human_trigger;

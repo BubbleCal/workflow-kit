@@ -1,11 +1,9 @@
 {
-  "version": "0.1.4",
-  "verified_at": "2026-11-03T00:27:14.175396+00:00",
-  "same_install_prompt_in_live_and_portable_readmes": true,
-  "required_entry_points_exist": true,
-  "runtime_behavior_unchanged": false,
-  "runtime_tests_reused_from": "0.1.1",
-  "runtime_tests_rerun": false,
-  "native_setup_or_schedule_changes": false,
-  "change_scope": "PR feedback intake, semantic disposition and publication guards with existing owner routing"
+  "version": "0.3.0",
+  "verified_at": "2026-11-04T13:45:22Z",
+  "entry_point": "REACTIVE.md",
+  "portable_runtime_cli_tested": true,
+  "legacy_setup_preserved": true,
+  "native_shared_host_execution_verified": false,
+  "live_setup_or_schedule_changes": false
 }

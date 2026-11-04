@@ -1,0 +1,21 @@
+{
+  "op": "adopt",
+  "task_id": "T-001",
+  "owner_thread_id": "<verified original execution thread>",
+  "source_message_id": "<actual user migration instruction>",
+  "actual_human_verified": true,
+  "contract": {
+    "canonical_key": "<existing registry canonical_key>",
+    "project_id": "<verified native project id>",
+    "workspace": "/absolute/path/to/original/worktree",
+    "authorization_ref": "<original task authorization evidence>",
+    "objective": "Reduce query latency while preserving results",
+    "requirements": [
+      {"id": "correctness", "text": "Preserve the existing query result contract"},
+      {"id": "performance", "text": "Meet the latency target stated in the actual task"}
+    ],
+    "constraints": ["Preserve the actual user scope and project conventions"],
+    "job_sources": ["native"],
+    "pull_requests": [{"repository": "example/service", "pr_number": 1}]
+  }
+}

@@ -20,3 +20,4 @@ node_modules/
 *.log
 outcomes/
 dependency-policy.json
+runtime.json

@@ -1,5 +1,7 @@
 # Fixed batches and quiet coordination
 
+This is the legacy transport. REACTIVE.md applies to explicitly migrated tasks: the program delivers their event wakes directly, and active/paused task inputs are excluded from legacy admission. Historical batches and receipts retain this protocol; do not run both drivers for one task. The runtime can also deliver those tasks' existing inbox batches immediately through the same reserve/authorize/receipt contract.
+
 Resolve all role IDs from instance.json. Paths are relative to this installation directory. Invoke the relevant runtime/*.mjs with a JSON object on stdin. Never interpolate unsanitized content into shell code.
 
 Only the dispatcher delivers automatic messages to coordinator, inbox and maintenance. It runs one existing ten-minute heartbeat. The deterministic mailbox coalesces reconciliation with a fifteen-minute minimum, handled on the next actual trigger (normally twenty minutes while otherwise idle), represents source intake with intake_due, and admits the daily 05:00 maintenance request. Busy roles receive no automatic messages; new inputs remain durably queued.

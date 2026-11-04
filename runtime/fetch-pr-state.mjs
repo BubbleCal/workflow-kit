@@ -36,6 +36,7 @@ if (pr.head.sha!==head || ['state','draft','merged','updated_at'].some(k=>pr[k]!
 const snapshot = { repository, pr_number:number, state:pr.merged?'merged':pr.state, draft:pr.draft,
   head_sha:head, updated_at:pr.updated_at, merged_at:pr.merged_at, merge_sha:pr.merged?pr.merge_commit_sha:null,
   approval_state:'unknown', checks_state:'unknown', checked_at:new Date().toISOString(), evidence_ref:resolve(output),
+  requested_reviewers:(pr.requested_reviewers??[]).map(r=>r.login).filter(Boolean),
   ...(checks ? {ci:{head_sha:head,checked_at:ciAt,evidence_ref:resolve(output),complete:true,scope:'observed',required_policy:'not_evaluated',
     checks:[...checks.map(c=>({kind:'check_run',id:String(c.id),name:c.name,head_sha:c.head_sha,status:c.status,
       conclusion:c.conclusion,completed_at:c.completed_at,url:c.html_url,app_id:c.app?.id,suite_id:c.check_suite?.id})),

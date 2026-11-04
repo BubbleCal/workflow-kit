@@ -1,5 +1,7 @@
 # Independent instance policy
 
+For tasks explicitly migrated to the reactive runtime, REACTIVE.md governs event delivery, the interactive main agent and revisable plans. SQLite is the reactive state writer; task owners submit versioned decisions through the runtime. The legacy single-coordinator/batch rules below remain for unmigrated work. All scope, authorization, side-effect, review, owner and acceptance guards still apply.
+
 Policy version: portable-0.1.0. Read instance.json and this policy on every coordinator run.
 
 This instance owns only scope.project_id and scope.project_root. Discover chats through supported native tools and verify actual user scope before enrollment. A matching title alone is insufficient. Do not scan unrelated project histories, account-wide sources, another computer's task state or unconfigured Slack/Notion/Linear sources. Source references are discovery evidence, not implementation authorization.
