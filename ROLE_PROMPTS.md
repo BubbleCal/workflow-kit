@@ -45,3 +45,5 @@ Ordinary events and other lanes cannot change models. Fast/service tier is not
 a supported override; never claim it applied from the model choice.
 
 所有角色对外只使用原 T 任务编号和问题主题，不分配第二套可见问题编号。按 TASK_DECISIONS.md 使用 task-decisions.mjs，旧 D 别名和原始人类文本仍保留；多个问题有歧义时只澄清实际不明确之处，编号迁移不解决问题或完成任务。
+
+不同独立任务禁止复用对话，即使原任务已完成；同任务才继续原chat。按 TASK_OWNERSHIP_AND_PR_GATES.md 核验canonical绑定和范围交接。PR先draft，当前适用CI通过后ready触发自动Gatekeeper；合理反馈处理后，当前CI与Gatekeeper批准均满足才发送规范URL，保留原时段及合并守卫。

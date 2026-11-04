@@ -1,9 +1,9 @@
 {
-  "version": "0.2.15",
+  "version": "0.2.16",
   "source": "local workflow runtime snapshot",
   "source_files": {
-    "runtime/control.mjs": "c6b78e5aef7fac344d64d72c52340c7b1b80279cf4662230515d571bf7d05ac4",
-    "runtime/mailbox.mjs": "b6048ccbb870b71393337ff21377216d14793b5ddb2ff8b9ed8a87fccce73a43",
+    "runtime/control.mjs": "55d25af8196cb5f31e22b4309d48e52d507f47fdd5b263d6af95958178130fca",
+    "runtime/mailbox.mjs": "0b162d63c47fa5e06ff088d2cca5e4697038061e0489726fd01d88a5827e2ee7",
     "runtime/progress.mjs": "da7b83bc897d1a1782904c69933afe4aef84667f174833c24b92ea364748d856",
     "runtime/watchdog.mjs": "1ef35916387a4e914e2868c021c3b1c0212e991d9de58c4b4a7be915b53513c3",
     "runtime/daily-review.mjs": "c86a9599bdcaa56c8854e49e330c5f0adae5dfd5d069c979175caeb8e52f7b4f",
@@ -13,14 +13,16 @@
     "runtime/fetch-review-feedback.mjs": "b801eeea9a2d4951d002b03ff7101a53e926b3c058f0e2fe945eceafda9fb562",
     "runtime/outcomes.mjs": "78e553fbb78a1433b6b4c7b3a739062602b74334e0c8b4ea0a104d77d7e017c2",
     "runtime/model-selection.mjs": "cde3b8be50882361e9676b86c18170052691ab31f71f1a3c01139037072e70a4",
-    "runtime/lifecycle.mjs": "e04308b5deaa0df7bcd8b19d7024fb9c591110610bc83a078928ab70639d032e",
+    "runtime/lifecycle.mjs": "ba1283c15ff1e359fc5e48ccf58190ebd2fb2ef8549e31c023aaeadaa9643e2a",
     "runtime/waits.mjs": "aeb4cf2bdcf8bf5d939239d16d39f85122c3d11810ce6021d74c3875b09ba2de",
     "runtime/fetch-pr-state.mjs": "3ec4176c92caa3bc4858c93abbf5e46a031d14192d94e345ed16395924a158f5",
     "runtime/dependency-provenance.mjs": "fbaaded67eeca3a2ee62250e813d07d0667deef534d5b4d46e2ecab55060d320",
     "runtime/merge-approval.mjs": "026c58dc40ec63a93130221b8c830647e4bc256bbd97bd8dc73f2c2f839b7b22",
     "runtime/fetch-merge-approval.mjs": "dfb051627abc9da83c5848245055f0bff5d6ea21d1f4cdd8da36724e1dd69b03",
     "runtime/ci-state.mjs": "8f00790daaa150c53f93c36ea0cabbcebd9bc2c0e571c478328a68db7444de58",
-    "runtime/task-decisions.mjs": "8c3a1ada901f9c598d586d4b82e37ac47e0eccd77e7f9540f0d5d0e053d8a79e"
+    "runtime/task-decisions.mjs": "8c3a1ada901f9c598d586d4b82e37ac47e0eccd77e7f9540f0d5d0e053d8a79e",
+    "runtime/pr-review-gates.mjs": "0c68d3ac109c5e3d21a169f72344956c52173a9f0233f4af18c9aa30c7f1b63a",
+    "runtime/task-ownership.mjs": "5c0a92adb2512bce842c7e3327a5433443156fc7606832a3d61cd931d07e5e4c"
   },
   "state_included": false,
   "credentials_included": false

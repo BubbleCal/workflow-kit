@@ -1,3 +1,4 @@
+import { passedReviewGates } from './test-fixtures/pr-review.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -36,7 +37,7 @@ const createAction = (key = 'new-T-010', work = 'sophon:ENT-3453:implementation'
     reserved_heavy_count: 0, dispatches_this_run: 0,
     project_resolution_verified: true, project_resolution_ref: 'native-projects',
     intended_project_id: 'test-project', project_host_id: 'local', project_exists: true } });
-const prEvidence = () => ({ ...common(), pr_owner: 'test-author', pr_open: true, pr_draft: false,
+const prEvidence = () => ({ ...passedReviewGates(NOW,head,'https://github.com/example/service/pull/1'), ...common(), pr_owner: 'test-author', pr_open: true, pr_draft: false,
   ordinary_change: true, material_findings_open: false, validation_current: true,
   technical_review_current: true, current_head_sha: head,
   pr_url: 'https://github.com/example/service/pull/1' });
@@ -181,10 +182,10 @@ test('unlimited dispatch does not require a global quota census', () => {
 test('unlimited creation and dispatch exceed ten in the same run across a restart', () => {
   const dir = mkdtempSync(join(tmpdir(), 'workflow-unlimited-'));
   const path = join(dir, 'control.sqlite');
-  let s = new ControlStore(path, { now: () => NOW, capacity: resolveCapacity({ automatic_limit: null }) });
+  let s = new ControlStore(path, { taskRegistry:()=>null, now: () => NOW, capacity: resolveCapacity({ automatic_limit: null }) });
   try {
     for (let i = 0; i < 16; i++) {
-      if (i === 6) { s.close(); s = new ControlStore(path, { now: () => NOW }); }
+      if (i === 6) { s.close(); s = new ControlStore(path, { taskRegistry:()=>null, now: () => NOW }); }
       const a = i % 2 ? action(`continue-unlimited-${i}`) : createAction(`create-unlimited-${i}`, `unlimited-work-${i}`);
       a.evidence.active_heavy_count = 100;
       a.evidence.reserved_heavy_count = 100;
@@ -278,8 +279,8 @@ test('a changed notification key cannot create a second thread for the same cano
 test('receipt deduplication and derived scopes block duplicate concurrent owners', () => {
   const dir = mkdtempSync(join(tmpdir(), 'workflow-control-'));
   const p = join(dir, 'control.sqlite');
-  const a = new ControlStore(p, { now: () => NOW });
-  const b = new ControlStore(p, { now: () => NOW });
+  const a = new ControlStore(p, { taskRegistry:()=>null, now: () => NOW });
+  const b = new ControlStore(p, { taskRegistry:()=>null, now: () => NOW });
   try {
     assert.equal(a.prepare(action()).prepared, true);
     assert.equal(b.prepare(action()).prepared, false);
@@ -298,9 +299,9 @@ test('receipt deduplication and derived scopes block duplicate concurrent owners
 test('crash recovery never automatically repeats a claimed or uncertain action', () => {
   const dir = mkdtempSync(join(tmpdir(), 'workflow-restart-'));
   const p = join(dir, 'control.sqlite');
-  let s = new ControlStore(p, { now: () => NOW });
+  let s = new ControlStore(p, { taskRegistry:()=>null, now: () => NOW });
   s.prepare(action()); const c = s.claim({ key: action().key, owner: 'old', evidence: dispatchEvidence() }); s.close();
-  s = new ControlStore(p, { now: () => NOW });
+  s = new ControlStore(p, { taskRegistry:()=>null, now: () => NOW });
   try {
     assert.equal(s.claim({ key: action().key, owner: 'new', evidence: dispatchEvidence() }).reason, 'claimed');
     assert.throws(() => s.reconcile({ key: action().key, confirmed_outcome: 'not_sent', evidence_ref: 'tool-read', owner_quiescent: false, verified_at: common().verified_at }), /quiescent/);
@@ -355,11 +356,12 @@ test('merge requires approval evidence, required checks and repository rules', (
     assert.equal(assess('merge', p, { ...e, ...patch }, NOW).allowed, false);
 });
 
-test('pending merge checks do not block a validated PR from review delivery', () => {
+test('pending applicable CI prevents both review delivery and merge', () => {
   const e = { ...prEvidence(), already_announced: false, required_checks_pass: false,
     approver: 'test-reviewer', approver_identity_verified: true, approval_state: 'APPROVED',
     approved_head_sha: head, repository_rules_satisfied: true, mergeable: true, admin_override: false };
-  assert.equal(assess('slack_pr', { channel_id: CHANNEL, message: e.pr_url, expected_head_sha: head }, e, NOW).allowed, true);
+  e.applicable_ci.checks[0].status='in_progress'; e.applicable_ci.checks[0].conclusion=null;
+  assert.equal(assess('slack_pr', { channel_id: CHANNEL, message: e.pr_url, expected_head_sha: head }, e, NOW).allowed, false);
   assert.equal(assess('merge', { pr_url: e.pr_url, expected_head_sha: head }, e, NOW).allowed, false);
   assert.equal(assess('slack_pr', { channel_id: CHANNEL, message: e.pr_url, expected_head_sha: head }, { ...e, validation_current: false }, NOW).allowed, false);
 });
@@ -529,6 +531,7 @@ test('standup prompt refinement preserves draft-only and exact-interval scope', 
  assert.equal(assess('automation_update',p,{...e,draft_only_preserved:false},NOW).allowed,false);
  assert.equal(assess('automation_update',p,{...e,exact_interval_preserved:false},NOW).allowed,false);
 });
+
 
 function retainedApprovalEvidence() {
   const reviewed='b'.repeat(40),at=new Date(NOW).toISOString();

@@ -132,3 +132,8 @@ numbers plus descriptive subjects. Route decision replies with decision_reply
 context while preserving verbatim human text and old aliases. Do not invent a
 choice when several pending questions match. Existing queued keys/payloads and
 receipts remain immutable; a display update is not a new notification or consent.
+
+Follow TASK_OWNERSHIP_AND_PR_GATES.md for actual canonical owner/handoff and
+CI/Gatekeeper proof fields. A generic owner_matches flag is insufficient; do not
+recycle idle/completed chats. Apply the new gates to undelivered open PRs without
+reposting old URLs or toggling ready unnecessarily. No permission/model changes.

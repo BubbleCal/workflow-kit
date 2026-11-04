@@ -1,3 +1,4 @@
+import { passedReviewGates } from './test-fixtures/pr-review.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -7,7 +8,7 @@ import { assess, ControlStore, CHANNEL } from './control.mjs';
 
 const head = 'a'.repeat(40), url = 'https://github.com/example/service/pull/1';
 const at = time => Date.parse('2026-11-03T' + time + '+08:00');
-const evidence = (now, kind = 'slack_pr') => ({ verified_at: new Date(now).toISOString(),
+const evidence = (now, kind = 'slack_pr') => ({ ...passedReviewGates(now,head,url,kind), verified_at: new Date(now).toISOString(),
   scope_authorized: true, authorization_ref: 'human-review-window', policy_version: 'v', current_policy_version: 'v', stopped: false,
   pr_owner: 'test-author', pr_open: true, pr_draft: kind === 'pr_ready', ordinary_change: true,
   material_findings_open: false, validation_current: true, technical_review_current: true,

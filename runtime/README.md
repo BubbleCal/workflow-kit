@@ -374,3 +374,6 @@ work and external integration opt-ins remain unchanged.
 TASK_DECISIONS.md documents task-decisions.mjs read-only views, private question
 preparation and reply routing. Actual notify/human-input queue preparation and
 inbox rendering use this path; only the coordinator saves question/page state.
+
+TASK_OWNERSHIP_AND_PR_GATES.md defines canonical chat checks, scoped checkpoint
+handoff, applicable_ci/gatekeeper evidence and actual ready/send gates.

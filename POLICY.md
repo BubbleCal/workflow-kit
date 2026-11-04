@@ -120,3 +120,14 @@ Use task-decisions.mjs for question preparation/views and reply routing. Actual
 human replies remain verbatim; selecting a question does not authorize or resolve
 it. Preserve ambiguity, pending questions, resolved answers and task acceptance.
 The coordinator alone projects the current managed page; no migration broadcast.
+
+## Canonical task identity and CI/Gatekeeper delivery
+
+Follow TASK_OWNERSHIP_AND_PR_GATES.md. An independent task gets its own chat;
+never recycle another canonical task owner, even idle or completed. Native
+creation receipts and canonical bindings gate new dispatch; explicit scoped
+checkpoint handoff preserves healthy jobs and the unrelated old task chat.
+PR sequence is draft -> current applicable CI pass -> ready -> automatic
+Gatekeeper review/valid fixes -> current CI pass plus applicable Gatekeeper
+approval -> canonical URL delivery. This supersedes earlier delivery-before-CI
+prose. Preserve blackout, technical review, Xuanwo merge and all external gates.

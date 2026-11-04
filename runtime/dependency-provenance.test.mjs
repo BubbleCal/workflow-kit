@@ -1,3 +1,4 @@
+import { passedReviewGates } from './test-fixtures/pr-review.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { dependencyReasons, releaseSuccessorVerified } from './dependency-provenance.mjs';
@@ -44,7 +45,7 @@ test('a previously claimed fork-ready action is denied at final send after the s
   let active=null;const c=new ControlStore(':memory:',{now:()=>NOW,dependencyPolicy:()=>active});
   const url='https://github.com/example/client/pull/13';
   c.feedback.ingest({repository:route.fork_repository,pr_number:13,head_sha:HEAD,head_before:HEAD,head_after:HEAD,checked_at:new Date(NOW).toISOString(),evidence_ref:'complete-feedback',complete:{reviews:true,review_comments:true,issue_comments:true,review_threads:true},reviews:[],review_comments:[],issue_comments:[],review_threads:[]});
-  const e={verified_at:new Date(NOW).toISOString(),scope_authorized:true,authorization_ref:'original',policy_version:'v',current_policy_version:'v',stopped:false,pr_owner:'test-author',pr_open:true,pr_draft:true,ordinary_change:true,material_findings_open:false,validation_current:true,technical_review_current:true,current_head_sha:HEAD,pr_url:url};
+  const e={...passedReviewGates(NOW,HEAD,url,'pr_ready'),verified_at:new Date(NOW).toISOString(),scope_authorized:true,authorization_ref:'original',policy_version:'v',current_policy_version:'v',stopped:false,pr_owner:'test-author',pr_open:true,pr_draft:true,ordinary_change:true,material_findings_open:false,validation_current:true,technical_review_current:true,current_head_sha:HEAD,pr_url:url};
   const a={key:'old-ready',kind:'pr_ready',task_id:'T-010',payload:{pr_url:url,operation:'mark_ready',expected_head_sha:HEAD},evidence:e};assert.equal(c.prepare(a).prepared,true);const claim=c.claim({key:a.key,owner:'coordinator',evidence:e});assert.equal(claim.claimed,true);
   active=policy;assert.equal(c.authorizeReviewSend({key:a.key,attempt_id:claim.attempt_id,owner:'coordinator',evidence:e,operation_not_started:true}).send,false);assert.equal(c.db.prepare('SELECT state FROM actions WHERE action_key=?').get(a.key).state,'claimed');c.close();
 });

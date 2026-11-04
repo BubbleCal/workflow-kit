@@ -1,3 +1,4 @@
+import { passedReviewGates } from './test-fixtures/pr-review.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ControlStore,CHANNEL} from './control.mjs';
@@ -57,7 +58,7 @@ test('new feedback after preparation is checked again at claim despite green CI'
 
 test('new feedback after claim blocks final review delivery without resetting the claimed attempt',()=>{
   const c=new ControlStore(':memory:',{now:()=>NOW}),s=snapshot();s.reviews=[];s.review_comments=[];s.review_threads=[];c.feedback.ingest(s);
-  const a={key:'claimed-review',kind:'slack_pr',task_id:'T-012',payload:{message:url,channel_id:CHANNEL,expected_head_sha:HEAD},evidence:{...evidence(),already_announced:false}};
+  const a={key:'claimed-review',kind:'slack_pr',task_id:'T-012',payload:{message:url,channel_id:CHANNEL,expected_head_sha:HEAD},evidence:{...passedReviewGates(NOW,HEAD,url),...evidence(),already_announced:false}};
   assert.equal(c.prepare(a).prepared,true);const claim=c.claim({key:a.key,owner:'coordinator',evidence:a.evidence});assert.equal(claim.claimed,true);
   c.feedback.ingest(snapshot());assert.equal(c.authorizeReviewSend({key:a.key,attempt_id:claim.attempt_id,owner:'coordinator',evidence:a.evidence,operation_not_started:true}).send,false);
   assert.equal(c.db.prepare('SELECT state FROM actions WHERE action_key=?').get(a.key).state,'claimed');c.close();

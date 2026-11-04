@@ -13,6 +13,8 @@ import { LifecycleLedger } from './lifecycle.mjs';
 import { readDependencyPolicy, dependencyReasons } from './dependency-provenance.mjs';
 import { retainedApprovalReasons } from './merge-approval.mjs';
 import { readDecisionState, taskDisplayText, taskId, resolveReply } from './task-decisions.mjs';
+import { reviewStageReasons } from './pr-review-gates.mjs';
+import { readTaskRegistry, ownershipReasons, scopedHandoffReasons } from './task-ownership.mjs';
 import { isReviewDelivery, readReviewWindow, reviewWindowAt, withReviewWindowGuidance, REVIEW_WINDOW } from './review-window.mjs';
 
 export const INBOX = bindings.threads.inbox;
@@ -160,8 +162,8 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
       need(typeof r.checkpoint_sha256 === 'string' && /^[a-f0-9]{64}$/.test(r.checkpoint_sha256) && r.checkpoint_sha256 === e.checkpoint_sha256 && e.checkpoint_saved === true && e.resources_preserved === true, 'replacement_checkpoint_not_verified');
       need(typeof r.archive_key === 'string' && typeof r.prior_creation_key === 'string', 'replacement_receipt_binding_required');
     }
-    need(e.ownership_handoff_verified === true && e.overlapping_owner === false && e.duplicate_task_exists === false, 'new_thread_owner_conflict_or_unknown');
-    need((e.underlying_job_for_scope_running === false || (payload?.replacement && e.preserved_jobs_handoff_verified === true && (payload.permission_probe_only === true || directStart))) && e.existing_driver_owns_step === false && e.pending_dispatch === false, 'new_thread_work_already_running_or_queued');
+    need(e.ownership_handoff_verified === true && e.overlapping_owner === false && (e.duplicate_task_exists === false || payload?.scope_handoff && e.duplicate_execution_owner_exists === false), 'new_thread_owner_conflict_or_unknown');
+    need((e.underlying_job_for_scope_running === false || payload?.scope_handoff && e.healthy_jobs_preserved === true && e.job_ownership_handoff_verified === true || (payload?.replacement && e.preserved_jobs_handoff_verified === true && (payload.permission_probe_only === true || directStart))) && e.existing_driver_owns_step === false && e.pending_dispatch === false, 'new_thread_work_already_running_or_queued');
     need(e.worktree_isolated === true && e.branch_owner_conflict === false && e.preparation_reused_or_absent === true, 'new_thread_workspace_not_ready');
     need(e.work_incomplete === true, 'no_incomplete_authorized_work');
     need(capacity?.max_new_heavy_concurrency === null && e.reserved_heavy_count === undefined ||
@@ -238,6 +240,7 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
     need(typeof payload?.expected_head_sha === 'string' && /^[a-f0-9]{40,64}$/.test(payload.expected_head_sha) && payload.expected_head_sha === e.current_head_sha, 'head_changed_or_unknown');
   }
   if (kind === 'pr_ready') need(payload?.operation === 'mark_ready' && prUrl(payload.pr_url) && payload.pr_url === e.pr_url, 'verified_draft_transition_required');
+  if (isReviewDelivery(kind)) reasons.push(...reviewStageReasons(kind, payload, e, now));
   if (kind === 'slack_pr') {
     need(payload?.channel_id === CHANNEL, 'slack_destination_forbidden');
     need(prUrl(payload?.message) && payload.message === e.pr_url, 'slack_message_must_match_verified_PR_URL');
@@ -301,7 +304,7 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
 }
 
 export class ControlStore {
-  constructor(path, { now = () => Date.now(), capacity = CAPACITY_LIMITS, progress = null, reviewRule = readReviewWindow, outcomeBindings = readOutcomeBindings, modelSelection = readModelSelection, dependencyPolicy = readDependencyPolicy } = {}) {
+  constructor(path, { now = () => Date.now(), capacity = CAPACITY_LIMITS, progress = null, reviewRule = readReviewWindow, outcomeBindings = readOutcomeBindings, modelSelection = readModelSelection, dependencyPolicy = readDependencyPolicy, taskRegistry = () => readTaskRegistry(path) } = {}) {
     this.now = now;
     this.capacity = capacity;
     this.progress = progress;
@@ -309,6 +312,7 @@ export class ControlStore {
     this.outcomeBindings = outcomeBindings;
     this.modelSelection = modelSelection;
     this.dependencyPolicy = dependencyPolicy;
+    this.taskRegistry = taskRegistry;
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;
@@ -381,6 +385,9 @@ export class ControlStore {
   }
   prepare(input) {
     const key = required(input.key, 'action key');
+    const ownership = ownershipReasons(input.kind,input.task_id,input.payload,input.evidence,this.taskRegistry(),this.db);
+    const handoff = input.kind==='create_thread' ? scopedHandoffReasons(input.task_id,input.payload,input.evidence) : [];
+    if(ownership.length || handoff.length)return {prepared:false,allowed:false,reasons:[...ownership,...handoff]};
     const prior = this.db.prepare('SELECT payload FROM actions WHERE action_key=?').get(key);
     if (['dispatch','create_thread'].includes(input.kind) && (!prior || JSON.parse(prior.payload).result_contract_version === 2))
       input = { ...input, payload: { ...input.payload, result_contract_version:2 } };
@@ -447,6 +454,9 @@ export class ControlStore {
       const blocked = this.db.prepare("SELECT action_key FROM actions WHERE scope_key=? AND state IN ('claimed','uncertain') AND action_key<>? LIMIT 1").get(row.scope_key, key);
       if (blocked) return { claimed: false, reason: 'scope_in_use', blocking_key: blocked.action_key };
       const payload = JSON.parse(row.payload);
+      const ownership = ownershipReasons(row.kind,row.task_id,payload,evidence,this.taskRegistry(),this.db);
+      const handoff = row.kind==='create_thread' ? scopedHandoffReasons(row.task_id,payload,evidence) : [];
+      if(ownership.length || handoff.length)return {claimed:false,allowed:false,reasons:[...ownership,...handoff]};
       if (row.kind === 'archive' && payload.purpose !== 'explicit_owner_replacement' && this.progress?.unfinishedForOwner(payload.thread_id))
         return { claimed: false, reason: 'owner_has_unfinished_goal_stages' };
       if (row.kind === 'assign_project') {

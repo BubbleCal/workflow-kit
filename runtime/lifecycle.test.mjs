@@ -1,3 +1,4 @@
+import { passedReviewGates } from './test-fixtures/pr-review.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ControlStore } from './control.mjs';
@@ -5,7 +6,7 @@ import { Mailbox, COORDINATOR, workPriority } from './mailbox.mjs';
 
 const NOW = Date.parse('2026-11-03T06:00:00Z'), HEAD = 'a'.repeat(40), repo = 'example/project', number = 42;
 const identity = { repository:repo, pr_number:number }, key = `${repo}#${number}`;
-const observation = (now, patch={}) => ({ ...identity, head_sha:HEAD, state:'open', draft:false,
+const observation = (now, patch={}) => ({ ...passedReviewGates(now,patch.head_sha??HEAD,`https://github.com/${repo}/pull/${number}`,patch.draft?'pr_ready':'slack_pr'), ...identity, head_sha:HEAD, state:'open', draft:false,
   updated_at:new Date(NOW).toISOString(), checked_at:new Date(now).toISOString(), evidence_ref:'github-state',
   approval_state:'pending', approval_head:HEAD,approval_evidence_ref:'current-head-review-read',
   checks_state:'pending', checks_scope:'required', checks_head:HEAD, checks_evidence_ref:'required-checks-read', ...patch });

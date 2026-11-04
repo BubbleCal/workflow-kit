@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { reviewWindowAt, REVIEW_WINDOW } from './review-window.mjs';
 import { readDependencyPolicy, forkRoute, releaseSuccessorVerified } from './dependency-provenance.mjs';
 import { ciFailures } from './ci-state.mjs';
+import { reviewStageReasons } from './pr-review-gates.mjs';
 
 const stable = v => JSON.stringify(v && typeof v === 'object' ? Array.isArray(v) ? v.map(x => JSON.parse(stable(x))) : Object.fromEntries(Object.keys(v).sort().map(k => [k, JSON.parse(stable(v[k]))])) : v ?? null);
 const hash = v => createHash('sha256').update(stable(v)).digest('hex').slice(0, 24);
@@ -121,6 +122,10 @@ export class LifecycleLedger {
     if (s.draft || !sent) {
       if (!readiness || readiness.head !== s.head_sha || readiness.validation_passed !== true || readiness.technical_review_passed !== true)
         return answer('readiness_unknown', 'obtain_readiness');
+      const stageReasons=reviewStageReasons(s.draft?'pr_ready':'slack_pr',
+        {pr_url:url,expected_head_sha:s.head_sha},s,this.now(),20*60000);
+      if(stageReasons.length) return answer(stageReasons.some(r=>r.includes('CI'))?'review_ci_pending':'gatekeeper_pending',
+        stageReasons.some(r=>r.includes('CI'))?'verify_review_ci':'verify_gatekeeper',{gate_reasons:stageReasons});
       const window = reviewWindowAt(this.now(), REVIEW_WINDOW);
       if (window.blocked) return answer('review_window', null, { due_at: window.next_eligible_at });
       return answer('ready_undelivered', 'deliver_review', { draft: s.draft });
@@ -188,10 +193,10 @@ export class LifecycleLedger {
         p.expected_head_sha !== current.head || row.action !== 'deliver_review' || a.kind !== 'slack_pr' ||
         p.message !== `https://github.com/${row.pr_key.replace('#','/pull/')}`) throw new Error('Exact delivered PR receipt required');
     } else if (disposition === 'progress') {
-      if ((!mergedRefresh && !['resolve_closed','decide_after_merge','decide_feedback','obtain_readiness','repair_feedback','triage_ci','reconcile_draft','reconcile_delivery','deliver_local','reconcile_release_route'].includes(row.action)) ||
+      if ((!mergedRefresh && !['resolve_closed','decide_after_merge','decide_feedback','obtain_readiness','verify_review_ci','verify_gatekeeper','repair_feedback','triage_ci','reconcile_draft','reconcile_delivery','deliver_local','reconcile_release_route'].includes(row.action)) ||
         progress_resolution?.verified !== true || !progress_resolution.task_ids?.includes(current.task_id))
         throw new Error('Actual task-bound progress disposition required');
-      if (['repair_feedback','triage_ci','reconcile_draft'].includes(row.action) && progress_resolution.task_complete === true)
+      if (['repair_feedback','triage_ci','reconcile_draft','verify_review_ci','verify_gatekeeper'].includes(row.action) && progress_resolution.task_complete === true)
         throw new Error('Material feedback, CI failure or draft reconciliation needs a successor or verified wait, not task completion');
       if (row.action==='reconcile_release_route' && !releaseSuccessorVerified(progress_resolution.goals,current.task_id,current.release_route))
         throw new Error('Persist the released-upstream, automatic-sync, consumer-adoption and integrated-acceptance successor path');
