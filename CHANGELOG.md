@@ -1,5 +1,9 @@
 # Changes
 
+## 0.2.18
+
+Rotate the protected result slot by prior first-non-human opportunities. An unprocessed batch-tail result keeps its original eligibility instead of repeatedly losing to newer arrivals. Preserve human precedence, ordinary diagnostic rotation, immutable batches and progress-before-ACK guards.
+
 ## 0.2.11
 
 Require remaining assessment obligations to stay on the source task; unrelated unfinished goals cannot satisfy its cleanup requirement.

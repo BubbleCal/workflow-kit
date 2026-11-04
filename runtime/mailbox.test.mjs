@@ -197,6 +197,28 @@ test('one result opportunity preserves diagnostic capacity and rotates unfinishe
   assert.deepEqual(m.get(first.id).snapshot,first.snapshot);m.close();
 });
 
+test('an unprocessed batch-tail result retains its first early opportunity ahead of newer results',()=>{
+  let now=NOW-4*3600000;const m=new Mailbox(':memory:',{now:()=>now});
+  m.activateTransitions({source_message_id:'upgrade',actual_human_verified:true});
+  for(let i=0;i<18;i++)m.enqueue({key:'old-diagnostic-'+i,lane:'coordinator',kind:'recovery',payload:{event:'continuation_recovery'}});
+  const result=key=>({key,lane:'coordinator',kind:'worker_result',payload:{task_id:key,owner_thread_id:'owner-'+key,evidence_ref:'proof-'+key}});
+  now=NOW;m.enqueue(result('first-result'));m.enqueue(result('tail-result'));
+  const first=sent(m);m.begin(first.id);
+  assert.equal(first.snapshot.items[0].key,'first-result');
+  assert.equal(first.snapshot.items[19].key,'tail-result');
+  now+=500;m.enqueue(result('new-result'));
+  now+=500;m.finish(first.id,{processed_keys:[]});
+  m.enqueue(command('human-correction'));
+  const second=sent(m);m.begin(second.id);
+  assert.equal(second.snapshot.items[0].key,'human-correction');
+  assert.equal(second.snapshot.items[1].key,'tail-result');
+  assert.throws(()=>m.acknowledge(second.id,['tail-result']),/Durable successor/);
+  now+=1000;m.finish(second.id,{processed_keys:[]});
+  const third=sent(m);
+  assert.equal(third.snapshot.items[1].key,'new-result');
+  assert.deepEqual(m.get(first.id).snapshot,first.snapshot);m.close();
+});
+
 test('the result opportunity recognizes completed legacy assessments but not reconciliation targets',()=>{
   let now=NOW-4*3600000;const m=new Mailbox(':memory:',{now:()=>now});
   m.activateTransitions({source_message_id:'upgrade',actual_human_verified:true});

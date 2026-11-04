@@ -229,12 +229,19 @@ export class Mailbox {
       if (lane === 'maintenance') this.supersedeHealth(this.db.prepare("SELECT * FROM mail WHERE lane='maintenance' AND kind='workflow_recovery' AND state='pending'").all());
       // Finishing an unprocessed batch must not put the same oldest entries at
       // the front forever. Reuse durable snapshots; unsent reservations do not count.
-      const offered = lane === 'coordinator' && this.transitionVersion() >= 2 ? new Map(this.db.prepare(`
-        SELECT json_extract(i.value,'$.key') AS item_key,MAX(b.finished_at) AS offered_at
+      const opportunities = lane === 'coordinator' && this.transitionVersion() >= 2 ? this.db.prepare(`
+        SELECT json_extract(i.value,'$.key') AS item_key,MAX(b.finished_at) AS offered_at,
+          MAX(CASE WHEN NOT EXISTS (
+            SELECT 1 FROM json_each(b.snapshot,'$.items') earlier
+            WHERE CAST(earlier.key AS INTEGER)<CAST(i.key AS INTEGER)
+              AND json_extract(earlier.value,'$.kind')!='human_command'
+          ) THEN b.finished_at END) AS early_at
         FROM batches b,json_each(b.snapshot,'$.items') i
         JOIN mail m ON m.item_key=json_extract(i.value,'$.key')
         WHERE b.lane='coordinator' AND b.state='finished' AND m.state='pending'
-        GROUP BY json_extract(i.value,'$.key')`).all().map(r=>[r.item_key,r.offered_at])) : new Map();
+        GROUP BY json_extract(i.value,'$.key')`).all() : [];
+      const offered = new Map(opportunities.map(r=>[r.item_key,r.offered_at]));
+      const earlyOffered = new Map(opportunities.map(r=>[r.item_key,r.early_at]));
       const rows = lane === 'coordinator' && this.transitionVersion() >= 2 ?
         this.db.prepare("SELECT * FROM mail WHERE lane='coordinator' AND state='pending'").all()
           .sort((a,b)=>workPriority(a,this.now())-workPriority(b,this.now()) ||
@@ -245,8 +252,13 @@ export class Mailbox {
         // Aging can fill a whole batch with diagnostics. Give one actual result
         // an early opportunity; retain human precedence and rotation for the rest.
         const firstNonHuman = rows.findIndex(row => row.kind !== 'human_command');
-        const resultIndex = rows.findIndex(row => row.kind === 'worker_result' ||
-          legacyAssessmentOwner({ kind: row.kind, payload: JSON.parse(row.payload) }));
+        // Inclusion near a batch's tail does not consume its early result slot.
+        // Otherwise an unprocessed tail can repeatedly lose to newer arrivals.
+        const result = rows.filter(row => row.kind === 'worker_result' ||
+          legacyAssessmentOwner({ kind: row.kind, payload: JSON.parse(row.payload) }))
+          .sort((a,b)=>(earlyOffered.get(a.item_key) ?? a.created_at)-(earlyOffered.get(b.item_key) ?? b.created_at) ||
+            a.created_at-b.created_at || a.seq-b.seq)[0];
+        const resultIndex = result ? rows.indexOf(result) : -1;
         if (firstNonHuman >= 0 && firstNonHuman < 20 && resultIndex > firstNonHuman) {
           const [result] = rows.splice(resultIndex, 1);
           rows.splice(firstNonHuman, 0, result);

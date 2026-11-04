@@ -68,6 +68,13 @@ The known assessment_complete envelope may use thread_id as source owner only wh
 
 ## Bounded completion admission
 
+Choose that protected result by its last completed-batch opportunity as the first
+non-human input, falling back to enqueue time. Mere inclusion later in an
+unfinished batch does not consume that early opportunity. Keep ordinary queue
+rotation for other positions, human precedence, source-task ACK guards and all
+in-flight snapshots unchanged. This improves admission fairness, not a guarantee
+of immediate acceptance or permission to restart a worker.
+
 For new version-2 coordinator batches, reserve the first non-human position for
 one canonical worker_result or explicitly completed legacy assessment when one
 is pending. Choose it using existing retry rotation, so a repeatedly unfinished
