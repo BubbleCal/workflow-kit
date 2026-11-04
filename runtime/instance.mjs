@@ -7,7 +7,8 @@ const path = resolve(INSTANCE_ROOT, 'instance.json');
 const raw = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
 export const bindings = {
   ...raw,
-  threads: { coordinator:null, inbox:null, maintenance:null, dispatcher:null, ...raw.threads },
+  threads: { coordinator:null, inbox:raw.threads?.main??null, maintenance:null, dispatcher:null, ...raw.legacy_roles, ...raw.threads,
+    ...(raw.layout==='native'?{inbox:raw.threads?.main}: {}) },
   scope: { project_id:null, project_root:null, repositories:[], ...raw.scope },
   identity: { github_login:null, ...raw.identity },
   delivery: { slack_enabled:false, slack_channel_id:null, ready_enabled:false,
@@ -17,6 +18,11 @@ export const bindings = {
 export function requireBindings() {
   if (!bindings.instance_id || !bindings.scope.project_id || !bindings.scope.project_root)
     throw new Error('Initialize this instance and bind its verified native project before running the workflow.');
+  if(bindings.layout==='native') {
+    if(typeof bindings.threads.main!=='string'||!bindings.threads.main.trim())throw new Error('Bind the verified main conversation for this native instance');
+    if(bindings.threads.discovery && bindings.threads.discovery===bindings.threads.main)throw new Error('Discovery must use its own background conversation');
+    return;
+  }
   const ids = Object.values(bindings.threads);
   if (ids.length !== 4 || ids.some(id => typeof id !== 'string' || !id.trim()) || new Set(ids).size !== 4)
     throw new Error('Bind four distinct native chats for this instance; run node workflow.mjs doctor.');

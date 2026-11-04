@@ -13,9 +13,12 @@ const output = value => process.stdout.write(JSON.stringify(value,null,2)+'\n');
 const configPath=join(root,'instance.json');
 
 try {
-  if (command === 'runtime') {
+  if(command==='migrate' || command==='init'&&!args.includes('--legacy') || ['bind','doctor'].includes(command)&&existsSync(configPath)&&read(configPath).layout==='native') {
+    const {nativeBootstrap}=await import('./runtime/native-bootstrap.mjs');
+    const result=nativeBootstrap(command,args,root);output(result);if(command==='doctor'&&!result.local_ready)process.exitCode=2;
+  } else if (command === 'runtime' || command==='task' || command==='sources' || command==='discovery') {
     const { runtimeMain } = await import('./runtime/reactive-cli.mjs');
-    await runtimeMain(args,{root,output});
+    await runtimeMain(command==='runtime'?args:[command,...args],{root,output});
   } else if (command === 'init') {
     const name=option('name'),projectRoot=option('project-root');
     if(!name?.trim()||!projectRoot)throw new Error('Usage: node workflow.mjs init --name <name> --project-root <existing-directory>');
@@ -80,7 +83,7 @@ try {
   } else if(command==='test') {
     await import('./tools/test.mjs');
   } else {
-    output({version:'0.4.0',commands:['init --name <name> --project-root <directory>','bind --file <verified-bindings.json>','doctor','test','runtime init|status|probe|queue-verify|bind-inbox|op|run|service'],
+    output({version:'0.5.0',commands:['init --name <name> --project-root <directory>','bind --file <verified-bindings.json>','doctor','test','task list|builtin|op','sources list|op','discovery status|op','migrate --file <verified-migration.json>','runtime init|status|probe|queue-verify|bind-inbox|op|run|service'],
       native_setup:'START-HERE.md',model_selection:'instance.json models; inherit by default, explicit role overrides only after user selection'});
     if(command)process.exitCode=2;
   }

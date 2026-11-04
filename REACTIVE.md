@@ -1,3 +1,5 @@
+> 0.5 native installation: start with START-HERE.md and WORK_TASKS.md. Only main is required; optional source-only discovery follows DISCOVERY.md. New tasks use the SQLite catalog. Legacy dispatcher/registry instructions below apply only to unmigrated records. The native queue and execution protocol remain in force.
+
 # Desktop-owned native queue runtime (0.4.0)
 
 workflow-kit 负责事件、事实、目标合同、计划和动作回执。Codex 桌面 App 始终负责会话、排队、执行、模型、权限及审批。

@@ -1,3 +1,12 @@
+# 0.5.0 — ordinary exploration and optional discovery
+
+- Default to a verified main conversation and optional source-only discovery, without mandatory legacy roles or registry files.
+- Seed an ordinary exploration draft; share acceptance, canonical ownership, native queue, revisable plans and evidence-based completion with other work.
+- Add project work packages, dependency admission, multiple PR contracts and direct child report/completion events.
+- Add independently optional scoped Linear, Slack and Notion read plans, durable pagination, candidate deduplication and explicit standing acceptance/creation policies.
+- Preserve native queue execution proofs and receipts across partial scans, scope invalidation, restart and legacy layout migration.
+- Validate with isolated native CLI and connector fixtures; real source access is verified during each installation, not claimed by this release.
+
 # Changes
 
 ## 0.4.0

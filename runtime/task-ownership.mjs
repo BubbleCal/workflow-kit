@@ -1,11 +1,29 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import {DatabaseSync} from 'node:sqlite';
 
 export function readTaskRegistry(databasePath) {
   if (databasePath === ':memory:') return null;
   const path = resolve(dirname(databasePath), 'registry.json');
-  return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : { task_registry: { items: {} } };
+  const legacy=existsSync(path)?JSON.parse(readFileSync(path,'utf8')):{task_registry:{items:{}}};
+  const configPath=resolve(dirname(databasePath),'instance.json');
+  const config=existsSync(configPath)?JSON.parse(readFileSync(configPath,'utf8')):null;
+  if(config?.layout!=='native')return legacy;
+  const items={...legacy.task_registry?.items};
+  const catalogPath=resolve(dirname(databasePath),'control.sqlite');
+  if(existsSync(catalogPath)) {
+    const db=new DatabaseSync(catalogPath,{readOnly:true});
+    try{if(db.prepare("SELECT 1 FROM sqlite_master WHERE name='work_items'").get())for(const t of db.prepare('SELECT * FROM work_items').all()){
+      const data=JSON.parse(t.data),authorization=t.authorization?JSON.parse(t.authorization):null;
+      items[t.id]={id:t.id,canonical_key:t.canonical_key,owner_thread_id:t.owner_thread_id,status:t.state,
+        authorization_message_id:authorization?.source_message_id,source_user_message_id:authorization?.source_message_id,
+        kind:t.kind,workspace:data.workspace,hold:t.state==='paused'};
+    }}finally{db.close();}
+  }
+  return {...legacy,instance_id:config.instance_id,scope:config.scope,policy_version:'native-0.5',
+    hub_thread_id:config.threads.main,decision_inbox_thread_id:config.threads.main,discovery_thread_id:config.threads.discovery??null,
+    coordinator_thread_id:null,setup_thread_id:null,state_writer_thread_id:null,task_registry:{items}};
 }
 export function ownershipReasons(kind, taskId, payload, evidence, registry, db, actionKey) {
   if (!registry || !['task_queue','task_wake', 'dispatch', 'human_input'].includes(kind)) return [];
@@ -21,7 +39,7 @@ export function ownershipReasons(kind, taskId, payload, evidence, registry, db, 
       evidence.pending_dispatch === false && evidence.underlying_job_running === false;
     return authenticated && idle ? [] : ['authenticated_idle_dispatcher_invocation_required'];
   }
-  const controls = [registry.coordinator_thread_id,registry.hub_thread_id,registry.decision_inbox_thread_id,registry.setup_thread_id];
+  const controls = [registry.coordinator_thread_id,registry.hub_thread_id,registry.decision_inbox_thread_id,registry.setup_thread_id,registry.discovery_thread_id].filter(Boolean);
   if (controls.includes(payload.thread_id)) return [];
   const tasks=registry.task_registry?.items??{},task=tasks[taskId];
   if (!task?.canonical_key || task.owner_thread_id!==payload.thread_id) return ['registered_task_owner_identity_required'];

@@ -1,16 +1,16 @@
 {
-  "version": "0.4.0",
-  "verified_at": "2026-11-04T16:41:32Z",
+  "version": "0.5.0",
+  "verified_at": "2026-11-04T19:36:09.503Z",
   "client_timezone": "Asia/Shanghai",
   "node": "v26.4.0",
   "command": "node workflow.mjs test",
   "exit_code": 0,
-  "runtime_tests": 248,
-  "portable_integration_tests": 5,
-  "passed": 253,
+  "runtime_tests": 264,
+  "portable_integration_tests": 8,
+  "passed": 272,
   "failed": 0,
-  "tested_sources_digest": "2f6c1a2be47e2b6ef930174dbb1532c1f3f58e9e0c0bd09dfc1f289b39fae1a5",
-  "integrated_upstream_commit": "e8eb53aec9a3ab874ba8d1b4d17027f0644368d9",
+  "tested_sources_digest": "37a39a9d8cf31dfb0b87ee9efc05ef80b590c17269e7b47b48a479401a492a44",
+  "integrated_upstream_commit": "ebdb838e30b26c6363786f229530b4882ef61873",
   "native_queue_validation": {
     "real_desktop": true,
     "cli_version": "codex-cli 0.166.0-alpha.5.1",
@@ -30,7 +30,9 @@
     "raw_evidence_exported": false,
     "app_server_client_used": false,
     "resume_flag_used": false,
-    "remote_flag_used": false
+    "remote_flag_used": false,
+    "verified_in_version": "0.4.0",
+    "repeated_for_0_5": false
   },
   "coverage": [
     "Original scope, ownership, approval, CI, review and merge guards",
@@ -38,7 +40,14 @@
     "Immutable events, typed waits, revisable plans and stale action contexts",
     "Actual native desktop identity/message proofs and per-host queue validation gate",
     "Schema-2 migration refuses a live old runtime, backs up configuration, pauses old active tasks and preserves receipts",
-    "Cross-instance isolation and legacy immediate-human-trigger behavior"
+    "Cross-instance isolation and legacy immediate-human-trigger behavior",
+    "Fresh native installation with only main and no legacy registry or required control roles",
+    "Built-in exploration executes and completes through the ordinary queue with all sources disabled",
+    "No-finding research outcomes, candidate-only follow-up proposals and explicit standing authorization",
+    "Project child acceptance, multiple-PR contract support and direct report/completion routing",
+    "Scoped optional sources, immutable pages, exact pagination and cursor recovery",
+    "Source invalidation, stale generations, independent source failures and cross-database receipt recovery",
+    "Legacy layout migration preserves old files and original execution owners"
   ],
   "live_workflow_instances_modified": false,
   "models_or_permissions_changed": false,
@@ -48,7 +57,19 @@
     "Actual queue validation covers the current local desktop environment; revalidate after host, CLI or App changes",
     "No production latency percentile or general task reasoning quality claim",
     "Native approval dialogs were not deliberately triggered; runtime does not handle approval requests",
-    "Queue acceptance while offline or App closed is not proof of execution; unknown results are not automatically retried"
+    "Queue acceptance while offline or App closed is not proof of execution; unknown results are not automatically retried",
+    "Version 0.5 paths use isolated native-CLI/connector fixtures; real Linear, Slack and Notion account access and source semantics must be checked per installation",
+    "Exploration is seeded as a draft; no live workflow instance or autonomous product task was activated",
+    "No recurring exploration schedule is installed; repeated investigations use the ordinary task authorization path"
   ],
-  "fixture_fix": "Pre-existing concurrent JSON request-log rewrites were replaced with append-only records; production collection remains parallel"
+  "fixture_fix": "Pre-existing concurrent JSON request-log rewrites were replaced with append-only records; production collection remains parallel",
+  "discovery_source_validation": {
+    "real_connected_sources": false,
+    "fixture_read_plans": [
+      "linear",
+      "slack",
+      "notion"
+    ],
+    "real_accounts_configured": false
+  }
 }

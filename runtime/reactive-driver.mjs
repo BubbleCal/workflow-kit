@@ -34,6 +34,7 @@ export function wakePrompt(root,task,wake,checkpoint) {
   // plan and event bodies are fetched from checkpoint after actual consumption.
   const packet={task_id:task.task_id,owner_thread_id:task.owner_id,wake_id:wake.id,
     context_rev:task.context_rev,pending_event_count:checkpoint.events.length};
+  const exploration=task.contract.task_kind==='exploration'?`\n这是普通的自主探索任务。读取 ${join(root,'WORK_TASKS.md')}，按合同中的 exploration 范围自行选择代码、论文、博客或现有 benchmark 调查。先建立假设、基线、指标和停止条件；不要求一定找到改进。不修改产品代码或使用云资源，除非合同明确授权。用 task report 保存证据、findings/no_actionable_findings/inconclusive 结果；后续建议是普通候选任务，不交给发现 Agent 执行研究。` : '';
   return `[workflow-event:${wake.id}]
 这是通过 Codex 原生队列送达的工作流事件，不是新的人类授权。桌面 App 管理本回合、队列、模型、权限和审批；工作流程序不接管会话。
 先读 ${join(root,'REACTIVE.md')} 的执行负责人协议。通过桌面 App 原生 read_thread 读取本对话当前回合（保留完整 userMessage，不能使用截断文本）；将真实结果及检索时间作为 native_proof 提交 begin。
@@ -42,7 +43,7 @@ begin 后读取 checkpoint。排队期间可能已有新事件，以下摘要不
 依据新信息选择 continue/revise/wait/needs_decision/complete，并记录理由、证据和版本。方案可调整，用户验收条件不可自行删掉。若假设被推翻或同一失败反复出现且没有新证据，重新比较方案。保护健康作业，不把队列回执、回合结束或测试通过当成整个任务完成。
 decide 返回的 action_context 放入外部动作 payload.runtime_context；继续使用原 control 守卫、当前 head、CI、审批、范围排除和送审窗口。自然阶段边界和外部动作前再次 checkpoint。完成本次处置后 finish；需要用户决定或重要完成时使用既有 notify。
 不要运行会话恢复、回合启动或远程控制命令，不改变模型/权限，不发送跨对话消息。原生审批由桌面 App 处理。
-${JSON.stringify(packet,null,2)}`;
+${JSON.stringify(packet,null,2)}${exploration}`;
 }
 
 export class ReactiveDriver {
@@ -87,6 +88,13 @@ export class ReactiveDriver {
     }
   }
   bridgeLegacy() {
+    const notices=this.control.db.prepare("SELECT * FROM work_notices WHERE state='pending'").all();
+    if(notices.length){const m=new Mailbox(join(this.root,'mailbox.sqlite'));try{for(const n of notices){
+      const task=this.control.work.get(n.task_id),payload=JSON.parse(n.payload);
+      if(task?.state==='candidate'||payload.catalog_owner_needed&&task?.state==='accepted'&&!task.owner_thread_id)
+        m.enqueue({key:n.key,lane:'inbox',kind:'decision',payload});
+      this.control.db.prepare("UPDATE work_notices SET state='delivered' WHERE key=?").run(n.key);
+    }}finally{m.close();}}
     const handoffs=this.control.db.prepare("SELECT * FROM rt_handoffs WHERE state='pending'").all();
     if(handoffs.length){const m=new Mailbox(join(this.root,'mailbox.sqlite'));try{for(const h of handoffs){
       m.enqueue({key:h.key,lane:'coordinator',kind:'event',payload:JSON.parse(h.payload)});
@@ -148,7 +156,12 @@ export class ReactiveDriver {
     if(!this.config.inbox||this.capability?.verified!==true)return;
     const m=new Mailbox(join(this.root,'mailbox.sqlite'),{now:this.now});
     try{
-      const ids=new Set(this.state.tasks().filter(t=>t.mode==='active').map(t=>t.task_id));
+      const ids=new Set([...this.state.tasks().filter(t=>t.mode==='active').map(t=>t.task_id),...this.control.work.list().map(t=>t.id)]);
+      for(const row of m.db.prepare("SELECT item_key,payload FROM mail WHERE lane='inbox' AND state='pending'").all()){
+        const payload=JSON.parse(row.payload);
+        if(payload.catalog_candidate&&this.control.work.get(payload.task_id)?.state!=='candidate')m.db.prepare("UPDATE mail SET state='superseded' WHERE item_key=? AND state='pending'").run(row.item_key);
+        if(payload.catalog_owner_needed&&this.control.work.get(payload.task_id)?.owner_thread_id)m.db.prepare("UPDATE mail SET state='superseded' WHERE item_key=? AND state='pending'").run(row.item_key);
+      }
       const result=m.reserveQueuedInbox(ids);if(!result.reserved)return;
       const batch=result.batch,path=join(this.root,'batches',`${batch.id}.json`),prompt=renderPrompt(batch,path);
       this.queue.validate(this.config.inbox.thread_id,prompt);m.setPrompt(batch.id,prompt);
@@ -159,6 +172,29 @@ export class ReactiveDriver {
         m.delivery(batch.id,{outcome:'sent',receipt:{queue_receipt:receipt,execution_verified:false}});
       }catch(error){m.delivery(batch.id,{outcome:error.not_sent?'not_sent':'uncertain',receipt:{error:error.message,verified_not_sent:error.not_sent===true}});}
     }catch(error){this.state.diagnostic('inbox',{error:error.message});}
+    finally{m.close();}
+  }
+  async discoveryTick() {
+    if(this.capability?.verified!==true)return;
+    const m=new Mailbox(join(this.root,'mailbox.sqlite'),{now:this.now});
+    try{
+      this.control.discovery.reconcileMailbox(m);
+      const due=this.control.discovery.enqueueDue(m,this.root);
+      if(due.reason==='discovery_role_not_bound'){this.state.diagnostic('discovery',{reason:due.reason});return;}
+      if(!this.control.discovery.config.threads?.discovery)return;
+      for(const item of m.db.prepare("SELECT item_key,payload FROM mail WHERE lane='discovery' AND state='pending'").all()){
+        if(this.control.discovery.batch(JSON.parse(item.payload).batch_id)?.state==='invalidated')
+          m.db.prepare("UPDATE mail SET state='superseded' WHERE item_key=? AND state='pending'").run(item.item_key);
+      }
+      const reserved=m.reserveQueuedInbox(null,'discovery');if(!reserved.reserved)return;
+      const b=reserved.batch,scan=this.control.discovery.batch(b.snapshot.items[0].payload.batch_id);
+      if(!scan||scan.state!=='pending'){m.releaseReservation(b.id);return;}
+      const prompt=scan.prompt;m.setPrompt(b.id,prompt);this.queue.validate(this.control.discovery.config.threads.discovery,prompt);
+      if(!m.authorizeQueueSend(b.id).send)return;
+      try{const receipt=await this.queue.enqueue(this.control.discovery.config.threads.discovery,prompt);
+        m.delivery(b.id,{outcome:'sent',receipt:{queue_receipt:receipt,execution_verified:false}});
+      }catch(error){m.delivery(b.id,{outcome:error.not_sent?'not_sent':'uncertain',receipt:{error:error.message,verified_not_sent:error.not_sent===true}});}
+    }catch(error){this.state.diagnostic('discovery',{error:error.message});}
     finally{m.close();}
   }
   launch(set,key,fn){
@@ -172,6 +208,7 @@ export class ReactiveDriver {
       this.launch(this.polling,row.subject,()=>this.poll(row));
     for(const task of this.state.tasks().filter(t=>t.mode==='active'&&t.wake_at!==null))this.launch(this.delivering,task.task_id,()=>this.deliver(task));
     this.launch(this.delivering,'control:inbox',()=>this.deliverInbox());
+    this.launch(this.delivering,'control:discovery',()=>this.discoveryTick());
     if(wait)await Promise.allSettled([...this.jobs]);
   }
   async close(){await Promise.allSettled([...this.jobs]);}

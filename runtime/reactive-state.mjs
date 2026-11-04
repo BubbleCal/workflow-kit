@@ -260,6 +260,8 @@ export class ReactiveState {
       } else if (disposition === 'revise' || !this.plan(task_id) && disposition === 'continue') throw new Error('A concrete plan is required');
       if (disposition === 'wait') this.validateWait(task_id,wait);
       if (disposition === 'complete') {
+        const childReasons=this.completionReasons?.(task_id)??[];
+        if(childReasons.length)throw new Error(`Project acceptance still has unfinished work: ${childReasons.join(', ')}`);
         if (!Array.isArray(acceptance) || task.contract.requirements.some(r=>!acceptance.some(a=>a.requirement_id===r.id && a.passed===true && a.evidence_ref)))
           throw new Error('Completion requires evidence for every contract requirement');
         if (this.db.prepare(`SELECT 1 FROM actions WHERE task_id=? AND kind NOT IN ('task_wake','task_queue') AND ${liveAction}`).get(task_id))
@@ -336,6 +338,7 @@ export class ReactiveState {
       if(task.dirty)throw new Error('New information must be assessed before finishing; checkpoint again');
       if(task.status==='ready')throw new Error('Continue the concrete plan, record a typed wait or request a decision before finishing');
       this.db.prepare("UPDATE rt_wakes SET state='finished',completed_at=?,evidence_ref=? WHERE id=?").run(this.now(),evidence_ref,wake_id);
+      if(task.status==='complete')this.onCompleteInside?.(task_id,wake_id,evidence_ref);
       return {finished:true,task_complete:task.status==='complete'};
     });
   }

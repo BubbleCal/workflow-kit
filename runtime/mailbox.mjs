@@ -18,7 +18,7 @@ import { readDecisionState, taskDisplayText } from './task-decisions.mjs';
 export const COORDINATOR = bindings.threads.coordinator;
 export const INBOX = bindings.threads.inbox;
 export const MAINTENANCE = bindings.threads.maintenance;
-const laneThread = { coordinator: COORDINATOR, inbox: INBOX, maintenance: MAINTENANCE };
+const laneThread = { coordinator: COORDINATOR, inbox: INBOX, maintenance: MAINTENANCE, discovery:bindings.threads.discovery??null };
 const stable = v => JSON.stringify(v && typeof v === 'object' ? Array.isArray(v) ? v.map(x => JSON.parse(stable(x))) : Object.fromEntries(Object.keys(v).sort().map(k => [k, JSON.parse(stable(v[k]))])) : v ?? null);
 const digest = v => createHash('sha256').update(stable(v)).digest('hex');
 const required = (v, name) => { if (typeof v !== 'string' || !v.trim()) throw new Error(`${name} must be a nonempty string`); return v; };
@@ -84,7 +84,7 @@ export class Mailbox {
         acknowledged_generation INTEGER NOT NULL DEFAULT 0,
         last_tick INTEGER NOT NULL DEFAULT 0, last_intake INTEGER NOT NULL DEFAULT 0,
         enabled INTEGER NOT NULL DEFAULT 1);
-      INSERT OR IGNORE INTO lane_state(lane) VALUES ('coordinator'),('inbox'),('maintenance');`);
+      INSERT OR IGNORE INTO lane_state(lane) VALUES ('coordinator'),('inbox'),('maintenance'),('discovery');`);
     this.db.exec(`CREATE TABLE IF NOT EXISTS transition_settings (id INTEGER PRIMARY KEY, version INTEGER NOT NULL, source_message_id TEXT);
       INSERT OR IGNORE INTO transition_settings VALUES (1,1,NULL);`);
     this.immediate = new ImmediateTriggers(this.db,{now:this.now,registry:this.taskRegistry});
@@ -160,6 +160,7 @@ export class Mailbox {
       required(payload?.evidence_ref,'result evidence');
     }
     if (lane === 'maintenance' && !['daily_review','workflow_recovery'].includes(kind)) throw new Error('Unsupported maintenance input');
+    if(lane==='discovery'&&kind!=='source_scan')throw new Error('Discovery only accepts configured source scans');
     const d = digest({ lane, kind, payload });
     return this.atomic(() => {
       const old = this.db.prepare('SELECT * FROM mail WHERE item_key=?').get(key);
@@ -302,14 +303,15 @@ export class Mailbox {
     const r = this.db.prepare("UPDATE batches SET prompt=? WHERE id=? AND state='reserved' AND prompt IS NULL").run(prompt, id);
     if (!r.changes && this.get(id)?.prompt !== prompt) throw new Error('A batch prompt cannot change after reservation');
   }
-  reserveQueuedInbox(taskIds) {
+  reserveQueuedInbox(taskIds,lane='inbox') {
     return this.atomic(()=>{
-      const lane='inbox',s=this.db.prepare('SELECT * FROM lane_state WHERE lane=?').get(lane);
+      if(!['inbox','discovery'].includes(lane)||!laneThread[lane])throw new Error('Unknown native control queue');
+      const s=this.db.prepare('SELECT * FROM lane_state WHERE lane=?').get(lane);
       if(!s.enabled)return {reserved:false,reason:'lane_paused'};
       const current=this.db.prepare("SELECT id,state FROM batches WHERE lane=? AND state IN ('reserved','sending','sent','uncertain','running')").get(lane);
-      if(current)return {reserved:false,reason:'batch_in_flight',batch:current};
-      const rows=this.db.prepare("SELECT * FROM mail WHERE lane='inbox' AND state='pending' ORDER BY seq").all()
-        .filter(r=>taskIds.has(JSON.parse(r.payload).task_id)).slice(0,5);
+      if(current)return current.state==='reserved'?{reserved:true,batch:this.get(current.id),recovered_reservation:true}:{reserved:false,reason:'batch_in_flight',batch:current};
+      const rows=this.db.prepare("SELECT * FROM mail WHERE lane=? AND state='pending' ORDER BY seq").all(lane)
+        .filter(r=>lane==='discovery'||taskIds.has(JSON.parse(r.payload).task_id)).slice(0,lane==='discovery'?1:5);
       if(!rows.length)return {reserved:false,reason:'nothing_due'};
       const id=randomUUID(),snapshot={id,lane,run_id:id,delivery_transport:'native_queue',transition_contract_version:this.transitionVersion(),
         created_at:new Date(this.now()).toISOString(),signal_generation:s.generation,intake_due:false,budget_minutes:5,
@@ -323,9 +325,9 @@ export class Mailbox {
   authorizeQueueSend(id) {
     return this.atomic(()=>{
       const b=this.get(id);
-      if(!b||b.lane!=='inbox'||b.snapshot.delivery_transport!=='native_queue'||b.state!=='reserved'||!b.prompt)
+      if(!b||!['inbox','discovery'].includes(b.lane)||b.snapshot.delivery_transport!=='native_queue'||b.state!=='reserved'||!b.prompt)
         return {send:false,reason:'native_queue_batch_required'};
-      if(!this.db.prepare("SELECT enabled FROM lane_state WHERE lane='inbox'").get().enabled)return {send:false,reason:'lane_paused'};
+      if(!this.db.prepare('SELECT enabled FROM lane_state WHERE lane=?').get(b.lane).enabled)return {send:false,reason:'lane_paused'};
       this.db.prepare("UPDATE batches SET state='sending',dispatched_at=? WHERE id=?").run(this.now(),id);
       return {send:true,transport:'native_queue',prompt:b.prompt};
     });
@@ -523,6 +525,7 @@ export class Mailbox {
 }
 
 export function renderPrompt(batch, batchFile, decisionState) {
+  if(batch.lane==='discovery')return batch.snapshot.items[0].payload.text;
   const marker = `[workflow-batch:${batch.id}]`;
   const begin = JSON.stringify({ op: 'begin', batch_id: batch.id });
   const finish = JSON.stringify({ op: 'finish', batch_id: batch.id });
@@ -564,6 +567,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       const review = existsSync(schedulePath) ? dailyReviewEvent(Date.now(), JSON.parse(readFileSync(schedulePath, 'utf8'))) : null;
       if (review) result.daily_review = mailbox.enqueue(review);
       for (const lane of Object.keys(laneThread)) {
+        if(!laneThread[lane])continue;
         const p = (input.snapshots ?? []).find(p => p.thread?.id === laneThread[lane]);
         const r = mailbox.reserve(lane, p);
         if (!r.reserved) { result.skips.push({ lane, ...r }); continue; }

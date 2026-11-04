@@ -1,5 +1,7 @@
 import { bindings, INSTANCE_ROOT, requireBindings, instancePolicyReasons } from './instance.mjs';
 import { ReactiveState } from './reactive-state.mjs';
+import {WorkCatalog} from './work-catalog.mjs';
+import {DiscoveryStore} from './discovery.mjs';
 import { ciFailures } from './ci-state.mjs';
 import { scopeActionReasons } from './scope-exclusions.mjs';
 import { DatabaseSync } from 'node:sqlite';
@@ -356,6 +358,12 @@ export class ControlStore {
       finally { m.close(); }
     } });
     this.reactive.checkWait = condition => this.checkReactiveWait(condition);
+    this.work = new WorkCatalog(this.db,{config:{...bindings,instance_root:path===':memory:'?'[instance-root]':dirname(path)},now:this.now});
+    this.reactive.completionReasons = taskId => this.work.completionReasons(taskId);
+    this.work.onReportInside = (id,event) => this.work.publishToParentInside(this.reactive,id,event);
+    this.reactive.onCompleteInside = (id,wake,evidence_ref) => this.work.publishToParentInside(this.reactive,id,
+      {key:wake,type:'child_completed',payload:{status:'complete'},evidence_ref});
+    this.discovery = new DiscoveryStore(this.db,{config:bindings,work:this.work,reactive:this.reactive,now:this.now});
   }
   close() { this.db.close(); }
   atomic(fn) {
