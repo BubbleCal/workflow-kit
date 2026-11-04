@@ -11,6 +11,7 @@ import {ReactiveDriver} from './reactive-driver.mjs';
 import {publishScheduledOccurrence} from './schedule-source.mjs';
 import {verifyDesktopLoader} from './desktop-loader.mjs';
 import {bindings,requireBindings} from './instance.mjs';
+import {EXPLORATION_TEMPLATE} from './work-catalog.mjs';
 
 const ROOT=join(dirname(fileURLToPath(import.meta.url)),'..');
 const read=path=>JSON.parse(readFileSync(path,'utf8'));
@@ -98,11 +99,57 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
       if(existingProcess(control))throw new Error('Stop the existing workflow runtime before migrating its transport');
       let backup=null;
       if(old){backup=path+'.pre-native-queue.'+Date.now();writeFileSync(backup,readFileSync(path),{mode:0o600});}
-      save(path,{...DEFAULT_RUNTIME,...Object.fromEntries(['tick_ms','poll_min_ms','poll_max_ms'].filter(k=>old?.[k]!==undefined).map(k=>[k,old[k]]))});
+      save(path,{...DEFAULT_RUNTIME,...Object.fromEntries(['tick_ms','poll_min_ms','poll_max_ms'].filter(k=>old?.[k]!==undefined).map(k=>[k,old[k]])),
+        ...(bindings.layout==='native'?{inbox:{thread_id:bindings.threads.main,project_id:bindings.scope.project_id,workspace:bindings.thread_workspaces.main}}:{})});
       const paused=control.db.prepare("UPDATE rt_tasks SET mode='paused' WHERE mode='active'").run().changes;
       output({initialized:true,transport:'native_queue',backup,paused_tasks:paused,queue_verified:false,receipts_preserved:true});return;
     }
     if(command==='status'){output(state.status());return;}
+    if(['task','sources','discovery'].includes(command)) {
+      if(bindings.layout!=='native')throw new Error('Use the independent native layout for new task registration and discovery; preserve or migrate the legacy instance first');
+      const action=args[1];
+      const input=['list','status','builtin'].includes(action)?{op:action}:fileIndex>=0?read(inputFile()):JSON.parse(readFileSync(0,'utf8'));
+      let result;
+      if(command==='task'){
+        if(input.op==='list'||input.op==='status')result=control.work.list();
+        else if(input.op==='builtin')result=control.work.seedBuiltins();
+        else if(input.op==='get')result=control.work.get(input.task_id);
+        else if(input.op==='create')result=control.work.create(input.kind==='exploration'?{...structuredClone(EXPLORATION_TEMPLATE),...input}:input);
+        else if(input.op==='configure'){if(input.changes?.workspace)input.changes.workspace=realpathSync(input.changes.workspace);result=control.work.configure(input);}
+        else if(input.op==='accept')result=control.work.accept(input);
+        else if(input.op==='policy')result=control.work.setPolicy(input);
+        else if(input.op==='dismiss')result=control.work.dismiss(input);
+        else if(input.op==='request_owner')result=control.work.requestOwner(input);
+        else if(input.op==='bind_owner')result=control.work.bindOwner(input);
+        else if(input.op==='start'){
+          const config=runtimeConfig(root);await queueCapability(config,new NativeQueue(config.queue));
+          result=control.work.start(state,{...input,queue_compatibility_verified:true});
+        }else if(input.op==='report')result=control.work.recordReport(input);
+        else throw new Error('Unknown ordinary task operation');
+      }else if(command==='sources'){
+        if(input.op==='list'||input.op==='status')result=control.discovery.status();
+        else if(input.op==='configure')result=control.discovery.configure(input);
+        else throw new Error('Use sources list or configure');
+      }else{
+        if(input.op==='status')result=control.discovery.status();
+        else if(input.op==='plan')result=control.discovery.checkBatch(input.batch_id);
+        else if(input.op==='begin'){
+          result=control.discovery.begin(input);mailbox=new Mailbox(join(root,'mailbox.sqlite'));
+          const mail=mailbox.db.prepare('SELECT batch_id FROM mail WHERE item_key=?').get(result.mail_key);
+          if(!mail?.batch_id)throw new Error('Discovery has no native queue batch receipt');
+          mailbox.begin(mail.batch_id);
+          if(result.invalidated)mailbox.finish(mail.batch_id,{processed_keys:[result.mail_key],note:'source scope changed; no source reads'});
+        }else if(input.op==='ingest')result=control.discovery.ingest(input);
+        else if(input.op==='classify')result=control.discovery.classify(input);
+        else if(input.op==='finish'){
+          const b=control.discovery.batch(input.batch_id);result=control.discovery.finish(input);
+          mailbox=new Mailbox(join(root,'mailbox.sqlite'));const mail=mailbox.db.prepare('SELECT batch_id FROM mail WHERE item_key=?').get(b.mail_key);
+          if(!mail?.batch_id)throw new Error('Discovery queue receipt unavailable');
+          mailbox.finish(mail.batch_id,{processed_keys:[b.mail_key],note:result.finished?'source scan completed':'source scan checkpointed'});
+        }else throw new Error('Unknown source-only discovery operation');
+      }
+      output(result);return;
+    }
     // Service shutdown must remain usable even when migrating obsolete config.
     if(command==='service'){
       if(process.platform!=='darwin')throw new Error('Use runtime run on non-macOS hosts');
@@ -198,14 +245,15 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
       output(result);return;
     }
     if(command==='run'){
-      const capability=state.tasks().some(t=>t.mode==='active')?await queueCapability(config,queue):null;
+      const needsQueue=()=>state.tasks().some(t=>t.mode==='active')||control.discovery.sources().some(s=>s.enabled);
+      const capability=needsQueue()?await queueCapability(config,queue):null;
       release=lockRuntime(control);const driver=new ReactiveDriver({root,control,queue,config,capability});
       let stopping=false;const stop=()=>{stopping=true;};process.once('SIGINT',stop);process.once('SIGTERM',stop);
       output({event:'runtime_started',instance_id:bindings.instance_id,transport:'native_queue',pid:process.pid});
       try{do{
         const current=runtimeConfig(root);
         if(JSON.stringify(current.queue)!==JSON.stringify(config.queue))throw new Error('Queue executable configuration changed; restart the runtime before sending');
-        if(state.tasks().some(t=>t.mode==='active')&&(!driver.capability||current.queue_validation?.digest!==driver.capability.evidence_digest))
+        if(needsQueue()&&(!driver.capability||current.queue_validation?.digest!==driver.capability.evidence_digest))
           driver.capability=await queueCapability(current,queue);
         driver.config=current;
         await driver.tick({wait:args.includes('--once')});if(args.includes('--once'))break;

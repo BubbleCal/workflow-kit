@@ -13,9 +13,12 @@ const output = value => process.stdout.write(JSON.stringify(value,null,2)+'\n');
 const configPath=join(root,'instance.json');
 
 try {
-  if (command === 'runtime') {
+  if(command==='migrate' || command==='init'&&!args.includes('--legacy') || ['bind','doctor'].includes(command)&&existsSync(configPath)&&read(configPath).layout==='native') {
+    const {nativeBootstrap}=await import('./runtime/native-bootstrap.mjs');
+    const result=nativeBootstrap(command,args,root);output(result);if(command==='doctor'&&!result.local_ready)process.exitCode=2;
+  } else if (command === 'runtime' || command==='task' || command==='sources' || command==='discovery') {
     const { runtimeMain } = await import('./runtime/reactive-cli.mjs');
-    await runtimeMain(args,{root,output});
+    await runtimeMain(command==='runtime'?args:[command,...args],{root,output});
   } else if (command === 'init') {
     const name=option('name'),projectRoot=option('project-root');
     if(!name?.trim()||!projectRoot)throw new Error('Usage: node workflow.mjs init --name <name> --project-root <existing-directory>');
@@ -73,14 +76,17 @@ try {
       checks.push({name:'instance_identity_matches',ok:registry.instance_id===config.instance_id});
     }
     const receiptPath=join(root,'observations/native-setup.json'),receipt=existsSync(receiptPath)?read(receiptPath):null;
-    const nativeReady=!!config && receipt?.instance_id===config.instance_id && receipt?.dispatcher_thread_id===config.threads.dispatcher && receipt?.automation_status==='ACTIVE' && receipt?.native_readback_verified===true;
+    const runtime=existsSync(join(root,'runtime.json'))?read(join(root,'runtime.json')):null;
+    const queuedControls=receipt?.control_lanes_verified===true&&['coordinator','inbox','maintenance'].every(lane=>runtime?.control_lanes?.[lane]?.thread_id===config?.threads?.[lane]);
+    const nativeReady=!!config && receipt?.instance_id===config.instance_id && receipt?.native_readback_verified===true&&
+      (queuedControls||receipt?.dispatcher_thread_id===config.threads.dispatcher&&receipt?.automation_status==='ACTIVE');
     output({root,checks,local_ready:checks.every(c=>c.ok),native_setup_recorded:nativeReady,
       note:'The CLI cannot inspect Codex chat membership, connector credentials or scheduler availability. Verify them with native tools on the destination computer; a saved receipt is not a live probe.'});
     if(!checks.every(c=>c.ok))process.exitCode=2;
   } else if(command==='test') {
     await import('./tools/test.mjs');
   } else {
-    output({version:'0.5.0',commands:['init --name <name> --project-root <directory>','bind --file <verified-bindings.json>','doctor','test','runtime init|status|probe|queue-verify|bind-inbox|op|run|service'],
+    output({version:'0.6.0',commands:['init --name <name> --project-root <directory>','bind --file <verified-bindings.json>','doctor','test','task list|builtin|op','sources list|op','discovery status|op','migrate --file <verified-migration.json>','runtime init|status|probe|queue-verify|bind-inbox|op|run|service'],
       native_setup:'START-HERE.md',model_selection:'instance.json models; inherit by default, explicit role overrides only after user selection'});
     if(command)process.exitCode=2;
   }

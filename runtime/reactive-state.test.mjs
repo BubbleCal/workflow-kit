@@ -24,6 +24,19 @@ test('shared owners retain separate contracts and consume one grouped wake',()=>
   }finally{f.c.close();}
 });
 
+test('finishing a shared wake publishes every independently completed goal once',()=>{
+  const f=fixture();try{
+    f.s.adopt({task_id:'T-2',owner_thread_id:OWNER,contract:{...contract(),canonical_key:'second-goal'},source_message_id:'human',actual_human_verified:true});
+    f.s.setModes({task_ids:['T-1','T-2'],mode:'active',source_message_id:'human',actual_human_verified:true,native_binding:f.binding(),queue_compatibility_verified:true,legacy_quiescent:true});
+    const wake=f.begin(),completed=[];f.s.onCompleteInside=id=>completed.push(id);
+    for(const task_id of ['T-1','T-2'])f.s.decide({task_id,owner_thread_id:OWNER,wake_id:wake.id,expected_context_rev:0,expected_plan_rev:0,disposition:'complete',reason:'Each goal has its own accepted evidence',evidence_refs:[`result:${task_id}`],acceptance:contract().requirements.map(r=>({requirement_id:r.id,passed:true,evidence_ref:`${task_id}:${r.id}`}))});
+    assert.equal(f.s.finish({task_id:'T-2',wake_id:wake.id,turn_id:'native-turn',evidence_ref:'group-results'}).finished,true);
+    assert.deepEqual(completed,['T-1','T-2']);
+    assert.throws(()=>f.s.finish({task_id:'T-1',wake_id:wake.id,turn_id:'native-turn',evidence_ref:'replay'}),/actual running wake/);
+    assert.deepEqual(completed,['T-1','T-2']);
+  }finally{f.c.close();}
+});
+
 test('owner cutover is atomic and requires coverage without reclassifying completed aliases',()=>{
   const f=fixture();try{
     f.s.adopt({task_id:'T-2',owner_thread_id:OWNER,contract:{...contract(),canonical_key:'second'},source_message_id:'human',actual_human_verified:true});
@@ -35,6 +48,18 @@ test('owner cutover is atomic and requires coverage without reclassifying comple
     assert.throws(()=>f.s.setModes(request),/in-flight/);
     assert.deepEqual(f.s.tasks().map(t=>t.mode),['shadow','shadow']);
     assert.equal(registry.task_registry.items['T-old'].completed,undefined);
+  }finally{f.c.close();}
+});
+
+test('one shared task cannot return to a competing legacy driver on its own',()=>{
+  const f=fixture();try{
+    f.s.adopt({task_id:'T-2',owner_thread_id:OWNER,contract:{...contract(),canonical_key:'second'},source_message_id:'human',actual_human_verified:true});
+    const change={task_ids:['T-1','T-2'],source_message_id:'human',actual_human_verified:true,native_binding:f.binding(),queue_compatibility_verified:true,legacy_quiescent:true};
+    f.s.setModes({...change,mode:'active'});
+    assert.throws(()=>f.mode('legacy'),/all shared-owner tasks/);
+    assert.deepEqual(f.s.tasks().map(t=>t.mode),['active','active']);
+    assert.deepEqual(f.s.setModes({...change,mode:'legacy'}).tasks.map(t=>t.mode),['legacy','legacy']);
+    assert.equal(f.s.status().pending_handoffs.length,2);
   }finally{f.c.close();}
 });
 

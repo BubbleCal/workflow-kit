@@ -1,4 +1,6 @@
-# Desktop-owned native queue runtime (0.5.0)
+> Native installation: START-HERE.md and WORK_TASKS.md use a verified main conversation with optional source-only discovery. Existing legacy layouts retain their roles and state; this release does not silently convert them.
+
+# Desktop-owned native queue runtime (0.6.0)
 
 本机验证还发现：`codex queue` 不会自动加载桌面端尚未加载的旧对话。
 可选 `desktop_loader` 使用官方的 `codex://threads/<UUID>` 链接和 macOS

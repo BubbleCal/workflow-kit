@@ -165,6 +165,9 @@ export class ReactiveState {
       const tasks=task_ids.map(id=>this.task(id));if(tasks.some(t=>!t))throw new Error('Unknown task');
       if(new Set(tasks.map(t=>t.owner_id)).size!==1)throw new Error('A cutover group must have one original owner');
       if(mode==='active')this.assertOwnerCoverage(tasks[0].owner_id,new Set(task_ids));
+      if(['legacy','shadow'].includes(mode)&&tasks.some(t=>['active','paused'].includes(t.mode))&&
+        this.tasks().some(t=>t.owner_id===tasks[0].owner_id&&['active','paused'].includes(t.mode)&&!task_ids.includes(t.task_id)))
+        throw new Error('Return all shared-owner tasks together before enabling another driver');
       for(const task of tasks){
       const task_id=task.task_id;
       if (task.mode === mode) continue;
@@ -296,6 +299,8 @@ export class ReactiveState {
       if (disposition === 'wait') this.validateWait(task_id,wait);
       if(disposition==='cycle_complete'&&!task.contract.schedule_sources?.length)throw new Error('Cycle completion requires a bound recurring schedule');
       if (['complete','cycle_complete'].includes(disposition)) {
+        const childReasons=this.completionReasons?.(task_id)??[];
+        if(childReasons.length)throw new Error(`Project acceptance still has unfinished work: ${childReasons.join(', ')}`);
         if (!Array.isArray(acceptance) || task.contract.requirements.some(r=>!acceptance.some(a=>a.requirement_id===r.id && a.passed===true && a.evidence_ref)))
           throw new Error('Completion requires evidence for every contract requirement');
         if (this.db.prepare(`SELECT 1 FROM actions WHERE task_id=? AND kind NOT IN ('task_wake','task_queue') AND ${liveAction}`).get(task_id))
@@ -380,13 +385,15 @@ export class ReactiveState {
         if(member.status==='ready')throw new Error(`Continue the concrete plan for member ${id}, record a typed wait or request a decision before finishing`);
       }
       this.db.prepare("UPDATE rt_wakes SET state='finished',completed_at=?,evidence_ref=? WHERE id=?").run(this.now(),evidence_ref,wake_id);
-      return {finished:true,task_complete:task.status==='complete'};
+      for(const id of wake.member_ids)if(this.task(id).status==='complete')this.onCompleteInside?.(id,wake_id,evidence_ref);
+      return {finished:true,task_complete:this.task(task_id).status==='complete'};
     });
   }
   actionReasons(kind,task_id,payload) {
     if(kind==='task_wake')return ['direct_app_server_transport_removed'];
     const task=this.task(task_id);
     const owned=payload?.thread_id?this.db.prepare("SELECT task_id FROM rt_tasks WHERE owner_id=? AND mode IN ('active','paused')").get(payload.thread_id):null;
+    if(owned&&kind==='dispatch'&&!['active','paused'].includes(task?.mode))return ['reactive_owner_manages_shared_tasks'];
     if(owned && task?.owner_id!==payload.thread_id && ['dispatch','task_queue'].includes(kind))return ['reactive_owner_has_another_task'];
     if(kind==='task_queue' && !task)return ['reactive_task_not_registered'];
     if(!task || !['active','paused'].includes(task.mode))return kind==='task_queue'?['reactive_task_not_active']:[];

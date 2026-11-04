@@ -1,18 +1,37 @@
-# 在另一台 Mac 上部署独立实例
+# Native installation and migration
 
-在目标电脑的 Codex 中打开本目录，复制 [README.md](README.md) 中「直接发给 agent 的安装 prompt」，填写项目名称和实际绝对路径后发送。README 是唯一的可复制安装请求入口；下面保留实际安装步骤和核验要求。
+安装请求与授权以实际用户消息为准；文档本身不授予创建对话或运行任务的权限。可复制请求见 README.md。
 
-下面是执行这项安装的操作约定。文档本身不是用户授权；以目标电脑上的实际安装请求为准。
+1. 核验项目目录、适用 AGENTS.md、Node 的 node:sqlite，以及 Codex 原生项目和对话工具。复用匹配实例；已有状态不得重新 init。
+2. 新实例运行 node workflow.mjs init --name <name> --project-root <path>。默认 native 布局，只生成本地配置和一条探索草稿，不创建 App 对话或定时任务。
+3. 用原生工具核验实际项目、主对话、cwd。按需在已有授权下创建可选 discovery 对话。保存真实回读，写入 bindings 文件：
 
-1. 读 README.md、POLICY.md、QUEUE_PROTOCOL.md 和 ROLE_PROMPTS.md。运行 node workflow.mjs doctor，检查本机 Node 对 node:sqlite 的支持。已有匹配实例时复用，不再次 init 或创建重复角色。
-2. 使用目标电脑上的原生 list_projects/list_threads 等工具核验项目。项目目录以用户的实际路径为准，不从另一个实例的历史消息推断。必要时使用支持的项目创建能力，不能直接修改 App 内部数据库。
-3. 在本目录执行 node workflow.mjs init --name <name> --project-root <path>，用实际参数和安全的 shell quoting。保存用户安装请求的 source message ID。
-4. 根据原生 catalog 确定项目 ID，再按 ROLE_PROMPTS.md 创建或复用四个角色。用户已明确请求这些角色时才调用 create_thread。可以把当前安装 chat 复用为维护角色。四个角色必须不同且都能访问本目录；保留模型／推理选择，不改原生权限。只按 instance.json models 中用户明确选择的 override 传模型参数。
-5. 用原生列表回读实际 project/chat 归属，将结果保存到 observations/bindings-native.json。写一个 bindings.json，包含 project_id、threads={coordinator,inbox,maintenance,dispatcher}、native_verified=true、evidence_ref，然后执行 node workflow.mjs bind --file bindings.json。不能从创建 ACK 推断已经绑定正确。
-6. 使用原生 sidebar 工具置顶本实例 inbox。发现已有同实例触发器时更新或核验，避免重复创建。通过支持的 automation_update 工具创建一条暂为 PAUSED 的十分钟 heartbeat，目标为本实例 dispatcher，notificationPolicy=failed_runs_only，prompt 使用 ROLE_PROMPTS.md 的触发器模板。查询实际工具 schema；不写原始自动化文件或调用未支持的内部 RPC。不要另加协调器、决策中心或每日审视 heartbeat。
-7. 运行 doctor 和 node workflow.mjs test；测试在隔离临时实例运行，不向正式邮箱塞测试事项。通过真实原生快照核验空闲检查、角色归属和触发器目标。初始化期间只能建立角色和记录，不启动项目实施任务或发送外部信息。
-8. 核验完毕后设置本实例 registry.setup_complete=true，再用支持的原生工具将这条触发器设为 ACTIVE 并回读。保存 observations/native-setup.json，包含 instance_id、dispatcher_thread_id、实际 automation ID、automation_status、native_readback_verified、真实 readback evidence_ref，再运行 doctor。后续 registry/decisions 归后台协调唯一写入；安装者不成为第二个运行时 writer。向用户给出本实例决策中心链接和缺失的可选集成，不把默认关闭的集成报成故障。
+```json
+{
+  "project_id": "<verified project ID>",
+  "threads": {"main": "<actual main conversation UUID>"},
+  "thread_workspaces": {"main": "/actual/conversation/cwd"},
+  "native_verified": true,
+  "evidence_ref": "observations/native-project-and-chat-readback.json"
+}
+```
 
-新项目随后可以逐项启用外部能力。修改 instance.json 时，需取得对应项目的实际授权，核验 repositories、github_login 和频道／审批人／页面；不能从安装包、其他实例或例子中继承授权。
+4. 运行 node workflow.mjs bind --file <file>，再 runtime init。仅在已启用外部来源时增加 threads.discovery 和其 thread_workspaces.discovery。绑定只是保存核验记录，doctor 不执行在线探测。
+5. 按 REACTIVE.md 进行当前主机的 queue-verify；真实验证应覆盖空闲消费和忙碌时不打断当前回合。已有证据只有当前 CLI/App/主机仍一致时才能复用。运行 node workflow.mjs test 和 doctor。
+6. 按实际安装授权运行 runtime service install（macOS）或 runtime run。没有来源和 active 任务时服务保持无扫描。来源配置、任务接收和负责人绑定分别使用 DISCOVERY.md、WORK_TASKS.md 的协议。
+7. 交付真实状态和证据。来源读取、Slack PR 发送、Notion 写入、ready 和 merge 是不同配置；启用读取不会启用写入。
 
-安装或升级时，在实例绑定与验证完成后按 LIFECYCLE.md 登记当前交付物并启用阶段合同 v2，再启用原触发器。启用使用这次实际用户请求的来源编号；保留在途旧批次，不复制其他实例的任务、页面或凭据。
+## Existing four-role instances
+
+旧实例保持兼容，不在启动时隐式迁移。先停止旧 runtime 和十分钟调度，核验没有在途控制批次或不确定外部动作。保护工程任务、作业、原始回执及旧 registry。
+
+在实际迁移授权下保存 migration.json，包含 actual_human_verified、source_message_id、legacy_scheduler_paused、scheduler_evidence_ref、native_verified、evidence_ref、相同 project_id、threads.main 和 thread_workspaces.main；可选 discovery 同绑定格式。执行：
+
+```sh
+node workflow.mjs migrate --file observations/migration.json
+node workflow.mjs doctor
+```
+
+命令备份 instance.json，导入已登记 rt_tasks 的原负责人和合同，保留任务模式、队列回执和旧文件，更新主对话通知目标，并列出尚未导入的旧账本任务。它不会修改或归档原生角色、停用 App 定时任务或擅自接管旧任务。未迁移任务需逐项核验后登记，原调度不得与新执行器同时驱动同一任务。再次检查 runtime 队列配置和迁移输出，再按实际授权恢复服务。
+
+旧四角色从零安装必须显式使用 init --legacy，并只遵循 LEGACY_START_HERE.md 和 LEGACY_ROLE_PROMPTS.md。

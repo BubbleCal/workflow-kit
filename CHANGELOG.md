@@ -1,6 +1,6 @@
 # Changes
 
-## 0.5.0
+## 0.6.0
 
 - Keep independent task contracts while coalescing a shared owner into one durable native queue message.
 - Add atomic group cutover, fresh unarchived bindings, and evidenced inheritance of an already running turn.
@@ -8,6 +8,18 @@
 - Distinguish proven pre-enqueue rejection from an uncertain send; preserve existing unknown effects for explicit reconciliation.
 - Support verified App deep links for unloaded conversations, with one open request per existing receipt and no message replay.
 - Scale full GitHub reads to the monitored source count, honor shared rate-limit resets, and stop polling user-excluded PRs without limiting engineering concurrency.
+
+
+- Preserve the upstream ordinary-work catalog and optional source discovery in the same release.
+
+## 0.5.0 — ordinary exploration and optional discovery
+
+- Default to a verified main conversation and optional source-only discovery, without mandatory legacy roles or registry files.
+- Seed an ordinary exploration draft; share acceptance, canonical ownership, native queue, revisable plans and evidence-based completion with other work.
+- Add project work packages, dependency admission, multiple PR contracts and direct child report/completion events.
+- Add independently optional scoped Linear, Slack and Notion read plans, durable pagination, candidate deduplication and explicit standing acceptance/creation policies.
+- Preserve native queue execution proofs and receipts across partial scans, scope invalidation, restart and legacy layout migration.
+- Validate with isolated native CLI and connector fixtures; real source access is verified during each installation, not claimed by this release.
 
 
 ## 0.4.0

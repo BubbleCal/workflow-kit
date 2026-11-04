@@ -1,3 +1,5 @@
+> 0.5 native installation: start with ../START-HERE.md and WORK_TASKS.md. Only main is required; optional source-only discovery follows DISCOVERY.md. New tasks use the SQLite catalog. Legacy dispatcher/registry instructions below apply only to unmigrated records. The native queue and execution protocol remain in force.
+
 # Portable instance bindings
 
 The 0.4.0 reactive entry point is `node workflow.mjs runtime`. It submits only through the native Codex queue; it contains no direct session client. Read ../REACTIVE.md for real desktop idle/busy validation, shadow/active modes, receiver proof, plan revisions and migration. Queue acceptance is separate from execution. The action ledger and external guards remain shared; legacy commands remain for unmigrated tasks and historical receipts.
