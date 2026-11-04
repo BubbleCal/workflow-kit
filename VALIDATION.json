@@ -1,15 +1,15 @@
 {
-  "version": "0.2.13",
-  "verified_at": "2026-11-03T21:06:04.618899+00:00",
+  "version": "0.2.14",
+  "verified_at": "2026-11-04T03:33:23.313143+00:00",
   "environment": {
     "platform": "darwin",
     "architecture": "arm64",
     "node": "v23.11.0"
   },
   "tests": {
-    "runtime": 179,
+    "runtime": 182,
     "portable_integration": 3,
-    "passed": 182,
+    "passed": 185,
     "failed": 0
   },
   "verified": [
@@ -47,7 +47,8 @@
     "Known completed assessments using legacy thread_id receive urgent result treatment and require source task/owner progress while preserving remaining cleanup; generic recipient fields, immutable payloads and version-1 contracts remain unchanged",
     "An unrelated unfinished goal cannot replace remaining obligations on the source assessment task",
     "Each new v2 batch admits one canonical result or known completed legacy assessment immediately after humans despite a larger aged diagnostic backlog; result retry rotation and other queue capacity remain, while v1 batches and source-task ACK guards are unchanged",
-    "A fresh same-head draft after a sent ready action requires task-bound draft reconciliation; pre-send snapshots refresh, uncertain sends retain reconciliation, old delivery receipts and blanket completion cannot ACK, handled episodes deduplicate, and later draft episodes remain independent"
+    "A fresh same-head draft after a sent ready action requires task-bound draft reconciliation; pre-send snapshots refresh, uncertain sends retain reconciliation, old delivery receipts and blanket completion cannot ACK, handled episodes deduplicate, and later draft episodes remain independent",
+    "Owner recovery reuses typed WaitLedger validation only when every unfinished owner/task stage is blocked by valid facts; expiry, changed jobs, missing proof and independent pending work remain actionable, post-selection protection is rechecked, and existing recovery/source/goal state is retained"
   ],
   "operational_data_exported": false,
   "credentials_exported": false,

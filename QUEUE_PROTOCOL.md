@@ -112,3 +112,15 @@ repeat on each poll. A new head/state transition or ready action retains its
 own disposition. Existing CI triage, full-feedback gates and uncertain sends
 remain prior checks. The watch/parent goal stay open; a later ready/Slack/merge
 operation still needs its ordinary actual authorization and delivery guards.
+
+## Preserve evidenced waits in the owner sweep
+
+Before selecting or observing an idle owner/task, reuse WaitLedger checks for
+all its unfinished stages. If every stage is blocked by a currently valid typed
+condition, leave its existing job/dependency/review wait alone. Do not interpret
+the idle chat as forgotten execution. Missing, expired or changed facts remain
+actionable; any independent pending/running stage keeps ordinary reconciliation.
+This uses the same source identity, freshness and PR/human rules as wait handling,
+not an extra timer or an unchecked existing-driver flag. Previously queued cases,
+source ACKs, goals and native jobs remain unchanged; the coordinator reconciles
+existing diagnostics through the normal evidenced disposition.

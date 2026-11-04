@@ -1,11 +1,11 @@
 {
-  "version": "0.2.13",
+  "version": "0.2.14",
   "source": "local workflow runtime snapshot",
   "source_files": {
     "runtime/control.mjs": "dc6f36fa3ea07ce4ae4d4e86107455ec3b2f9e1d48c28839517da6557f8a44d6",
-    "runtime/mailbox.mjs": "1824d6f543145a135d9d94cebf6fe97fbcc7d1f79ab623c31ff9473318004c12",
+    "runtime/mailbox.mjs": "4b80be2b2c923998b376d06cb13000bfa955f89f28265b5a37eaa559a58857ec",
     "runtime/progress.mjs": "da7b83bc897d1a1782904c69933afe4aef84667f174833c24b92ea364748d856",
-    "runtime/watchdog.mjs": "5bcaea5039a08855eede19051afe2abd321f967cae9b5f763c8af34c48d16e72",
+    "runtime/watchdog.mjs": "1ef35916387a4e914e2868c021c3b1c0212e991d9de58c4b4a7be915b53513c3",
     "runtime/daily-review.mjs": "c86a9599bdcaa56c8854e49e330c5f0adae5dfd5d069c979175caeb8e52f7b4f",
     "runtime/review-window.mjs": "9b753b7e67d170e0c35e91dec094d76c3edf5bc15e45b0414b4f308efe0e09a7",
     "runtime/engineering-principles.mjs": "04c91677387887f5c093a299704eadbb5d895bc99eb3b19f16cbcaa06e04bb1d",

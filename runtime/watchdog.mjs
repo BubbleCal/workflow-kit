@@ -7,8 +7,8 @@ const idle = o => ['idle','notLoaded'].includes(o?.thread?.status?.type) && !(o.
 
 // A bounded detector/outbox on the existing dispatcher. It never dispatches work.
 export class ContinuationWatchdog {
-  constructor(db, progress, now = () => Date.now()) {
-    this.db = db; this.progress = progress; this.now = now;
+  constructor(db, progress, now = () => Date.now(), checkWait = () => ({ valid: false })) {
+    this.db = db; this.progress = progress; this.now = now; this.checkWait = checkWait;
     db.exec(`CREATE TABLE IF NOT EXISTS watchdog_cursor (id INTEGER PRIMARY KEY, last_owner TEXT NOT NULL);
       INSERT OR IGNORE INTO watchdog_cursor VALUES (1,'');
       CREATE TABLE IF NOT EXISTS watchdog_rounds (id INTEGER PRIMARY KEY, owners TEXT NOT NULL, observed_at INTEGER);
@@ -32,6 +32,10 @@ export class ContinuationWatchdog {
     const stages = this.progress.goals().filter(g => !g.complete).flatMap(g => g.stages)
       .filter(s => s.task_id === taskId && s.owner_thread_id === ownerId && s.state !== 'complete');
     if (stages.length && stages.every(s => ['human_hold','native_approval'].includes(s.blocker?.kind))) return 'held_goal_stages';
+    // Reuse the same source/freshness checks as wait reconciliation. One valid
+    // wait cannot hide another stage that still has authorized work to do.
+    if (stages.length && stages.every(s => s.state === 'blocked' && this.checkWait(s.blocker?.condition).valid))
+      return 'verified_goal_waits';
     return null;
   }
   reconcileContinuations() {

@@ -140,3 +140,15 @@ scope must not hide an independently actionable subset. Existing duplicate rows
 and in-flight batch snapshots are not rewritten; the coordinator reconciles them
 from current task evidence. Coalescing does not authorize dispatch, retirement,
 archival or completion, or bypass current holds/drivers/permissions.
+
+## Preserve evidenced waits in the owner sweep
+
+Before selecting or observing an idle owner/task, reuse WaitLedger checks for
+all its unfinished stages. If every stage is blocked by a currently valid typed
+condition, leave its existing job/dependency/review wait alone. Do not interpret
+the idle chat as forgotten execution. Missing, expired or changed facts remain
+actionable; any independent pending/running stage keeps ordinary reconciliation.
+This uses the same source identity, freshness and PR/human rules as wait handling,
+not an extra timer or an unchecked existing-driver flag. Previously queued cases,
+source ACKs, goals and native jobs remain unchanged; the coordinator reconciles
+existing diagnostics through the normal evidenced disposition.

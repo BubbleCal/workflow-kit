@@ -104,6 +104,45 @@ test('a newly applied hold protects even an already selected round', () => {
   m.close();
 });
 
+test('a verified running-job wait protects its owner only until its evidence expires',()=>{
+  let now=NOW;const m=new Mailbox(':memory:',{now:()=>now});
+  const condition={kind:'job',fact_key:'service-running',subject:'local:service',job_id:'owned-pid'};
+  m.waits.observe({fact_key:condition.fact_key,kind:'job',subject:condition.subject,
+    data:{job_id:'owned-pid',state:'running'},observed_at:new Date(now).toISOString(),
+    expires_at:new Date(now+600000).toISOString(),evidence_ref:'actual-process-and-HTTP-read'});
+  m.progress.record({event_key:'service-accepted',evidence_ref:'actual-service',goals:[{
+    id:'service-scope',authorization_ref:'original-human',expected_revision:0,complete:false,
+    stages:[{id:'preserve-service',task_id:'T1',owner_thread_id:'worker',scope_key:'original-service',state:'blocked',depends_on:[],
+      blocker:{reason:'Existing service runs',resume_condition:'Actual failure or changed requirement',evidence_ref:'actual-service',condition}}]}]});
+  assert.equal(select(m).owners.length,0);
+  now+=600000;const round=select(m);assert.equal(round.owners.length,1);
+  observe(m,round,[poll(now)]);assert.equal(m.watchdog.outbox().length,1);m.close();
+});
+
+test('valid waits cannot hide an independent pending stage or a changed job state',()=>{
+  for(const mode of ['independent','completed','missing']){
+    const m=new Mailbox(':memory:',{now:()=>NOW});const condition={kind:'job',fact_key:'job',subject:'owned:job',job_id:'job1'};
+    if(mode!=='missing')m.waits.observe({fact_key:'job',kind:'job',subject:'owned:job',data:{job_id:'job1',state:mode==='completed'?'complete':'running'},observed_at:new Date(NOW).toISOString(),expires_at:new Date(NOW+600000).toISOString(),evidence_ref:'job-read'});
+    const stages=[{id:'waiting',task_id:'T1',owner_thread_id:'worker',scope_key:'owned:job',state:'blocked',depends_on:[],blocker:{reason:'Recorded wait',resume_condition:'Changed state',evidence_ref:'job-read',condition}}];
+    if(mode==='independent')stages.push({id:'independent',task_id:'T1',owner_thread_id:'worker',scope_key:'independent',state:'pending',step_id:'source-fix',action:'Implement the independent authorized fix',depends_on:[]});
+    m.progress.record({event_key:'accepted',evidence_ref:'original-scope',goals:[{id:'scope',authorization_ref:'human',expected_revision:0,complete:false,stages}]});
+    const round=select(m);assert.equal(round.owners.length,1,mode);observe(m,round,[poll(NOW)]);assert.equal(m.watchdog.outbox().length,1,mode);m.close();
+  }
+});
+
+test('a wait recorded after selection protects the observation without erasing an older recovery',()=>{
+  let now=NOW;const m=new Mailbox(':memory:',{now:()=>now});const first=select(m);observe(m,first,[poll(now)]);flush(m);
+  const original=m.watchdog.status()[0];now+=300000;const selected=select(m);
+  const condition={kind:'dependency',fact_key:'release',subject:'official:release',requirement:'published API'};
+  m.waits.observe({fact_key:'release',kind:'dependency',subject:'official:release',data:{requirement:'published API',available:false},observed_at:new Date(now).toISOString(),expires_at:new Date(now+600000).toISOString(),evidence_ref:'actual-release-source'});
+  m.progress.record({event_key:'accepted-wait',evidence_ref:'actual-release-source',goals:[{id:'scope',authorization_ref:'human',expected_revision:0,complete:false,stages:[{id:'adopt',task_id:'T1',owner_thread_id:'worker',scope_key:'adoption',state:'blocked',depends_on:[],blocker:{reason:'Release absent',resume_condition:'Official release exists',evidence_ref:'actual-release-source',condition}}]}]});
+  const checked=m.watchdog.observe({round_id:selected.round_id,snapshots:[poll(now)],registry:registry([task()])});
+  assert.equal(checked.inspected[0].reason,'protected_scope');
+  assert.equal(m.watchdog.status().length,1);assert.equal(m.watchdog.status()[0].phase,original.phase);
+  assert.equal(m.db.prepare('SELECT state FROM mail WHERE item_key=?').get(original.recovery_key).state,'pending');
+  assert.equal(m.progress.unfinishedForOwner('worker'),true);m.close();
+});
+
 test('protected false positives close without completing goals and resume detection after release', () => {
   let now = NOW; const m = new Mailbox(':memory:', { now: () => now });
   pendingGoal(m, [task()]); observe(m, select(m), [poll(now)]);

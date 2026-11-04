@@ -94,7 +94,7 @@ export class Mailbox {
       const task=source.task_registry?.items?.[data.task_id];
       return !!task && (task.hold === true || typeof task.hold==='string' && !!task.hold.trim() || /implementation_hold|human_hold/.test(task.status??''));
     }});
-    this.watchdog = new ContinuationWatchdog(this.db, this.progress, this.now);
+    this.watchdog = new ContinuationWatchdog(this.db, this.progress, this.now, condition => this.waits.check(condition));
   }
   close() { this.db.close(); }
   transitionVersion() { return this.db.prepare('SELECT version FROM transition_settings WHERE id=1').get().version; }
