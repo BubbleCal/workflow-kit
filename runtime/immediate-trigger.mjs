@@ -66,6 +66,7 @@ export class ImmediateTriggers {
     if(old?.state==='sent')return {send:false,reason:'already_invoked',key:row.action_key,receipt:JSON.parse(old.receipt??'{}')};
     if(old&&!['prepared','deferred'].includes(old.state))return {send:false,reason:'preserve_existing_invocation_state',transport_state:old.state};
     if(row.covered_seq>=row.max_seq)return {send:false,reason:'already_observed',coverage:JSON.parse(row.coverage??'{}')};
+    if(this.nativeControlRuntime?.())return {send:false,reason:'native_queue_control_runtime',key:row.action_key,next:'The existing programmatic runtime will admit this durable input; do not invoke a second dispatcher.'};
     if(!idle(snapshot,d.dispatcher_id,this.now()))return {send:false,coalesced:true,reason:'preserve_busy_or_unknown_dispatcher',
       next_native:{tool:'wait_threads',arguments:{targets:[{threadId:d.dispatcher_id,hostId:'local',...(snapshot?.cursor?{afterCursor:snapshot.cursor}:{})}],timeoutMs:15000}},
       next:'After the existing short turn ends, recheck human_trigger_status. If still uncovered, immediately prepare/claim once; never inject into an active turn.'};
@@ -93,5 +94,12 @@ export class ImmediateTriggers {
     return {send:true,key:row.action_key,attempt_id:result.attempt_id,owner:'human-trigger-producer',
       native_tool:'send_message_to_thread',native_arguments:{threadId:d.dispatcher_id,hostId:'local',prompt:result.payload.prompt},
       settle:'Record control op=settle immediately with this key/attempt, outcome and exact tool receipt. Ambiguous send is uncertain, never not_sent without evidence.'};
+  }
+  coverQueued(snapshot) {
+    for(const item of snapshot.items.filter(i=>i.kind==='human_command')){
+      const source=item.payload.source_message_id;
+      this.db.prepare('UPDATE immediate_human_triggers SET covered_seq=MAX(covered_seq,?),coverage=? WHERE source_id=?')
+        .run(item.seq,JSON.stringify({reason:'native_queue_batch_admission',batch_id:snapshot.id,sequence:item.seq,execution_verified:false}),source??'');
+    }
   }
 }

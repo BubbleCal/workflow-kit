@@ -1,6 +1,6 @@
 import { ImmediateTriggers } from './immediate-trigger.mjs';
 import { readTaskRegistry } from './task-ownership.mjs';
-import { reactiveOwners, mailTaskIds } from './reactive-ownership.mjs';
+import { reactiveOwners, mailTaskIds, nativeControlRuntime } from './reactive-ownership.mjs';
 import { stageScopeExclusion } from './scope-exclusions.mjs';
 import { bindings, INSTANCE_ROOT, requireBindings, shellQuote } from './instance.mjs';
 import { DatabaseSync } from 'node:sqlite';
@@ -89,6 +89,7 @@ export class Mailbox {
       INSERT OR IGNORE INTO transition_settings VALUES (1,1,NULL);`);
     this.immediate = new ImmediateTriggers(this.db,{now:this.now,registry:this.taskRegistry});
     this.immediate.reactiveOwners = this.reactiveOwners;
+    this.immediate.nativeControlRuntime = ()=>nativeControlRuntime(path);
     this.progress = new ProgressLedger(this.db, this.now, {scopeExclusion:(g,s)=>stageScopeExclusion(this.taskRegistry(),g,s)});
     this.progress.reactiveOwners = this.reactiveOwners;
     this.waits = new WaitLedger(this.db,{now:this.now,scopeExclusion:(g,s)=>stageScopeExclusion(this.taskRegistry(),g,s),checkPr:condition=>
@@ -231,9 +232,9 @@ export class Mailbox {
       return this.watchdog.observe(input);
     });
   }
-  reserve(lane, observation, { task_ids = null } = {}) {
+  reserve(lane, observation, { task_ids = null, native_queue = false } = {}) {
     if (!laneThread[lane]) throw new Error(`Unknown lane: ${lane}`);
-    if (!isIdle(observation, this.now()) || observation.thread.id !== laneThread[lane]) return { reserved: false, reason: 'target_busy_or_unknown' };
+    if (!native_queue&&(!isIdle(observation, this.now()) || observation.thread.id !== laneThread[lane])) return { reserved: false, reason: 'target_busy_or_unknown' };
     return this.atomic(() => {
       const current = this.db.prepare("SELECT id,state FROM batches WHERE lane=? AND state IN ('reserved','sending','sent','uncertain','running')").get(lane);
       if (current) return { reserved: false, reason: 'batch_in_flight', batch: current };
@@ -288,12 +289,14 @@ export class Mailbox {
       const id = randomUUID();
       const intakeDue = lane === 'coordinator' && this.now() - s.last_intake >= 3600000;
       const snapshot = { id, lane, run_id: id, transition_contract_version:this.transitionVersion(), created_at: new Date(this.now()).toISOString(),
+        ...(native_queue?{delivery_transport:'native_queue'}:{}),
         signal_generation: s.generation, intake_due: intakeDue, budget_minutes: lane === 'maintenance' ? 20 : 5,
         items: rows.map(r => ({ key: r.item_key, kind: r.kind, payload: JSON.parse(r.payload), seq: r.seq })) };
       const ids = rows.map(r => r.seq);
       this.db.prepare(`INSERT INTO batches(id,lane,state,item_ids,signal_generation,intake_due,snapshot,preflight_turn,created_at)
-        VALUES (?,?,'reserved',?,?,?,?,?,?)`).run(id, lane, JSON.stringify(ids), s.generation, Number(intakeDue), JSON.stringify(snapshot), observation.latestTurn.id, this.now());
+        VALUES (?,?,'reserved',?,?,?,?,?,?)`).run(id, lane, JSON.stringify(ids), s.generation, Number(intakeDue), JSON.stringify(snapshot), native_queue?null:observation.latestTurn.id, this.now());
       for (const row of rows) this.db.prepare("UPDATE mail SET state='in_batch',batch_id=? WHERE seq=? AND state='pending'").run(id, row.seq);
+      if(native_queue&&lane==='coordinator')this.immediate.coverQueued(snapshot);
       return { reserved: true, batch: this.get(id) };
     });
   }
@@ -320,12 +323,29 @@ export class Mailbox {
       return {reserved:true,batch:this.get(id)};
     });
   }
+  reserveQueuedLane(lane) {
+    if(!laneThread[lane])throw new Error('Unknown control lane');
+    // A new event may wake the lane immediately. Reoffering the same unresolved
+    // batch waits for the existing ten-minute fallback instead of spinning.
+    const last=this.db.prepare("SELECT snapshot,finished_at FROM batches WHERE lane=? AND state='finished' ORDER BY finished_at DESC LIMIT 1").get(lane);
+    if(last&&this.now()-last.finished_at<600000){
+      const snapshot=JSON.parse(last.snapshot),watermark=Math.max(0,...snapshot.items.map(i=>i.seq));
+      const s=this.db.prepare('SELECT generation FROM lane_state WHERE lane=?').get(lane);
+      if(s.generation<=snapshot.signal_generation&&!this.db.prepare("SELECT 1 FROM mail WHERE lane=? AND state='pending' AND seq>?").get(lane,watermark))
+        return {reserved:false,reason:'unchanged_batch_cooldown'};
+    }
+    return this.reserve(lane,null,{native_queue:true});
+  }
+  admitSchedules(configs={}) {
+    const daily=dailyReviewEvent(this.now(),configs.daily_review);
+    return daily?{daily_review:this.enqueue(daily)}:{};
+  }
   authorizeQueueSend(id) {
     return this.atomic(()=>{
       const b=this.get(id);
-      if(!b||b.lane!=='inbox'||b.snapshot.delivery_transport!=='native_queue'||b.state!=='reserved'||!b.prompt)
+      if(!b||!laneThread[b.lane]||b.snapshot.delivery_transport!=='native_queue'||b.state!=='reserved'||!b.prompt)
         return {send:false,reason:'native_queue_batch_required'};
-      if(!this.db.prepare("SELECT enabled FROM lane_state WHERE lane='inbox'").get().enabled)return {send:false,reason:'lane_paused'};
+      if(!this.db.prepare('SELECT enabled FROM lane_state WHERE lane=?').get(b.lane).enabled)return {send:false,reason:'lane_paused'};
       this.db.prepare("UPDATE batches SET state='sending',dispatched_at=? WHERE id=?").run(this.now(),id);
       return {send:true,transport:'native_queue',prompt:b.prompt};
     });

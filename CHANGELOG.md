@@ -1,5 +1,15 @@
 # Changes
 
+## 0.5.0
+
+- Keep independent task contracts while coalescing a shared owner into one durable native queue message.
+- Add atomic group cutover, fresh unarchived bindings, and evidenced inheritance of an already running turn.
+- Route control batches and existing native schedule events through the same queue, retaining original times and per-cycle acceptance.
+- Distinguish proven pre-enqueue rejection from an uncertain send; preserve existing unknown effects for explicit reconciliation.
+- Support verified App deep links for unloaded conversations, with one open request per existing receipt and no message replay.
+- Scale full GitHub reads to the monitored source count, honor shared rate-limit resets, and stop polling user-excluded PRs without limiting engineering concurrency.
+
+
 ## 0.4.0
 
 Remove the direct App Server client and RPC test fixture. Submit event and inbox messages only through `codex queue`, without resume, remote endpoints, session-control calls or model/permission overrides. Require actual idle and busy desktop-consumption evidence before activation; distinguish queue acceptance from receiver execution and preserve uncertain sends.

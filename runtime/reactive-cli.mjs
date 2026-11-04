@@ -8,6 +8,8 @@ import {ControlStore} from './control.mjs';
 import {Mailbox} from './mailbox.mjs';
 import {NativeQueue,validateQueueCompatibility,verifyExecutionProof,verifyNativeBinding,nativeReadback} from './native-queue.mjs';
 import {ReactiveDriver} from './reactive-driver.mjs';
+import {publishScheduledOccurrence} from './schedule-source.mjs';
+import {verifyDesktopLoader} from './desktop-loader.mjs';
 import {bindings,requireBindings} from './instance.mjs';
 
 const ROOT=join(dirname(fileURLToPath(import.meta.url)),'..');
@@ -15,7 +17,7 @@ const read=path=>JSON.parse(readFileSync(path,'utf8'));
 const save=(path,data)=>{writeFileSync(path+'.tmp',JSON.stringify(data,null,2)+'\n',{mode:0o600});renameSync(path+'.tmp',path);};
 const digest=data=>createHash('sha256').update(data).digest('hex');
 export const DEFAULT_RUNTIME=Object.freeze({schema_version:2,transport:'native_queue',queue:{binary:'codex',timeout_ms:15000},
-  tick_ms:1000,poll_min_ms:30000,poll_max_ms:300000});
+  tick_ms:1000,poll_min_ms:30000,poll_max_ms:300000,poll_connections:2,github_read_budget_per_hour:1800});
 
 export function runtimeConfig(root=ROOT) {
   const path=join(root,'runtime.json');if(!existsSync(path))throw new Error('Run node workflow.mjs runtime init first');
@@ -23,7 +25,17 @@ export function runtimeConfig(root=ROOT) {
   if(c.schema_version!==2||c.transport!=='native_queue'||c.adapter)throw new Error('Direct session transport was removed. Stop the old service and run runtime init, then verify the native queue');
   for(const key of ['tick_ms','poll_min_ms','poll_max_ms'])if(!Number.isSafeInteger(c[key])||c[key]<100||c[key]>3600000)throw new Error(`Invalid ${key}`);
   if(c.poll_min_ms>c.poll_max_ms)throw new Error('Poll bounds are reversed');
+  if(!Number.isSafeInteger(c.poll_connections)||c.poll_connections<1||c.poll_connections>16||
+    !Number.isSafeInteger(c.github_read_budget_per_hour)||c.github_read_budget_per_hour<120||c.github_read_budget_per_hour>5000)throw new Error('Invalid GitHub source budget');
   if(c.inbox&&(c.inbox.thread_id!==bindings.threads.inbox||c.inbox.project_id!==bindings.scope.project_id||!c.inbox.workspace))throw new Error('Inbox must match this instance');
+  if(c.control_lanes)for(const [lane,b]of Object.entries(c.control_lanes))
+    if(!['coordinator','inbox','maintenance'].includes(lane)||b.thread_id!==bindings.threads[lane]||!b.workspace)throw new Error('Control lanes must match verified instance roles');
+  if(c.desktop_loader?.enabled){
+    if(process.platform!=='darwin'||!c.desktop_loader.authorization_ref)throw new Error('Authorized macOS App loading is required');
+    const bytes=readFileSync(c.desktop_loader.evidence_file);
+    if(digest(bytes)!==c.desktop_loader.evidence_digest)throw new Error('Desktop loading evidence changed');
+    verifyDesktopLoader(JSON.parse(bytes),c.desktop_loader.bundle_id);
+  }
   return {...c,repositories:bindings.scope.repositories};
 }
 export async function queueCapability(config,queue) {
@@ -33,13 +45,30 @@ export async function queueCapability(config,queue) {
   const proof=validateQueueCompatibility(JSON.parse(bytes),await queue.probe());
   return {...proof,evidence_digest:config.queue_validation.digest};
 }
-export function legacyQuiescent(root,taskId) {
+export function legacyQuiescent(root,taskId,nativeBinding) {
   const path=join(root,'mailbox.sqlite');if(!existsSync(path))return true;
   const db=new DatabaseSync(path,{readOnly:true});
   try{
     if(!db.prepare("SELECT 1 FROM sqlite_master WHERE name='batches'").get())return true;
-    return !db.prepare("SELECT 1 FROM batches WHERE lane='coordinator' AND state IN ('reserved','sending','sent','uncertain','running')").get() &&
-      !db.prepare("SELECT 1 FROM continuation_actions WHERE json_extract(payload,'$.task_id')=? AND state IN ('reserved','sent','uncertain','running')").get(taskId);
+    // Native control batches use the same action ledger and task-mode guards;
+    // setModes atomically rejects claimed/uncertain effects. Only the old
+    // dispatcher batches require a global quiescent boundary.
+    if(db.prepare("SELECT 1 FROM batches WHERE lane='coordinator' AND state IN ('reserved','sending','sent','uncertain','running') AND COALESCE(json_extract(snapshot,'$.delivery_transport'),'legacy')<>'native_queue'").get())return false;
+    const actions=(Array.isArray(taskId)?taskId:[taskId]).flatMap(id=>db.prepare("SELECT * FROM continuation_actions WHERE json_extract(payload,'$.task_id')=? AND state IN ('reserved','sent','uncertain','running')").all(id));
+    if(!actions.length)return true;
+    if(actions.some(a=>a.state!=='running'))return false;
+    // An evidenced already-running turn is inherited, never resent. The native
+    // queue waits for that exact turn to end; sent/unknown inputs still block.
+    let native;try{native=nativeReadback(nativeBinding?.readback);verifyNativeBinding(nativeBinding,{thread_id:native.thread.id,workspace:native.thread.cwd});}catch{return false;}
+    const turn=native.turns?.[0];
+    if(!(native.thread.status?.type==='active'&&turn?.status==='inProgress'||['idle','notLoaded'].includes(native.thread.status?.type)&&turn?.status==='completed'))return false;
+    const controlPath=join(root,'control.sqlite');if(!existsSync(controlPath))return false;
+    const control=new DatabaseSync(controlPath,{readOnly:true});
+    try{return actions.every(a=>{
+      const receipt=a.receipt?JSON.parse(a.receipt):{},sent=control.prepare('SELECT state,payload FROM actions WHERE action_key=?').get(a.action_key);
+      return a.owner_thread_id===native.thread.id&&a.actual_turn===turn.id&&a.actual_turn!==a.preflight_turn&&receipt.outcome==='sent'&&
+        !!receipt.work_evidence_ref&&receipt.control_action_key===a.action_key&&sent?.state==='sent'&&JSON.parse(sent.payload).thread_id===native.thread.id;
+    });}finally{control.close();}
   }finally{db.close();}
 }
 function existingProcess(control) {
@@ -112,6 +141,15 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
       const inbox={thread_id:binding.thread_id,project_id:bindings.scope.project_id,workspace:binding.workspace};
       save(join(root,'runtime.json'),{...read(join(root,'runtime.json')),inbox});output({bound:true,inbox});return;
     }
+    if(command==='bind-controls'){
+      await queueCapability(config,queue);const proofs=read(inputFile()),lanes={};
+      for(const lane of ['coordinator','inbox','maintenance']){
+        const proof=proofs[lane],readback=nativeReadback(proof?.readback);
+        const binding=verifyNativeBinding(proof,{thread_id:bindings.threads[lane],workspace:readback?.thread?.cwd});
+        lanes[lane]={thread_id:binding.thread_id,workspace:binding.workspace};
+      }
+      save(join(root,'runtime.json'),{...read(join(root,'runtime.json')),control_lanes:lanes});output({bound:true,control_lanes:lanes});return;
+    }
     if(command==='op'){
       const input=fileIndex>=0?read(inputFile()):JSON.parse(readFileSync(0,'utf8'));let result;
       if(input.op==='adopt'){
@@ -119,12 +157,13 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         const original=control.db.prepare('SELECT created_at FROM rt_contracts WHERE task_id=? AND revision=1').get(t.task_id);
         state.ingest({event_id:`adopt:${t.task_id}:${input.source_message_id}`,task_id:t.task_id,source:'human_authorization',subject:`contract:${t.task_id}`,
           type:'task_adopted',observed_at:original.created_at,payload:t.contract,evidence_ref:input.source_message_id,debounce_ms:0});result=existing;
-      }else if(input.op==='mode'){
+      }else if(input.op==='mode'||input.op==='mode_group'){
         if(input.mode==='active')await queueCapability(config,queue);
-        result=state.setMode({...input,queue_compatibility_verified:input.mode==='active',legacy_quiescent:legacyQuiescent(root,input.task_id)});
+        result=state[input.op==='mode_group'?'setModes':'setMode']({...input,queue_compatibility_verified:input.mode==='active',legacy_quiescent:legacyQuiescent(root,input.task_ids??input.task_id,input.native_binding)});
       }else if(input.op==='amend'){input.contract.workspace=realpathSync(input.contract.workspace);result=state.amend(input);}
       else if(input.op==='checkpoint')result=state.checkpoint(input.task_id);
       else if(input.op==='publish')result=state.ingest(input);
+      else if(input.op==='schedule_event')result=publishScheduledOccurrence(root,state,input);
       else if(input.op==='begin')result=state.begin(input);
       else if(input.op==='decide'){
         mailbox=new Mailbox(join(root,'mailbox.sqlite'));state.checkWait=c=>['pr','review_request'].includes(c?.kind)?control.checkReactiveWait(c):mailbox.waits.check(c);
@@ -144,7 +183,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         const proof=verifyExecutionProof(input.native_proof,{thread_id:task.owner_id,workspace:task.contract.workspace,prompt:wake.prompt,terminal:true});
         if(!input.evidence_ref)throw new Error('Inspect actual results before recovery');
         control.atomic(()=>{
-          const other=control.db.prepare("SELECT 1 FROM actions WHERE task_id=? AND action_key<>? AND state IN ('claimed','uncertain')").get(task.task_id,wake.id);
+          const other=wake.member_ids.some(id=>control.db.prepare("SELECT 1 FROM actions WHERE task_id=? AND action_key<>? AND state IN ('claimed','uncertain')").get(id,wake.id));
           if(other)throw new Error('Reconcile uncertain external effects first');
           // Exact native message consumption proves this transport delivered; it
           // does not prove the task succeeded or authorize repeating side effects.
@@ -152,7 +191,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
             .run(JSON.stringify({outcome:'sent',evidence_ref:proof.evidence_ref,native_turn:proof.turn_id}),Date.now(),wake.id);
           control.db.prepare("UPDATE rt_wakes SET state='ended_unresolved',turn_id=?,completed_at=?,evidence_ref=? WHERE id=?")
             .run(proof.turn_id,Date.now(),input.evidence_ref,wake.id);
-          state.ingestInside({event_id:`recover:${wake.id}`,task_id:task.task_id,source:'native_desktop_observation',subject:`turn:${proof.turn_id}`,type:'owner_ended',
+          for(const id of wake.member_ids)state.ingestInside({event_id:`recover:${wake.id}:${id}`,task_id:id,source:'native_desktop_observation',subject:`turn:${proof.turn_id}`,type:'owner_ended',
             observed_at:Date.now(),payload:{previous_wake:wake.id,actual_turn:proof.turn_id,status:proof.status},evidence_ref:input.evidence_ref,debounce_ms:0});
         });result={recovered:true,task_complete:false};
       }else throw new Error(`Unknown runtime operation: ${input.op}`);

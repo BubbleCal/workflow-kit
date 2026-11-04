@@ -33,6 +33,96 @@ test('shadow mode records changes without a queue submission or legacy feedback 
     const revision=f.state.task('T-1').context_rev;f.advance(30000);await f.driver.tick({wait:true});assert.equal(f.state.task('T-1').context_rev,revision);
   }finally{await f.close();}
 });
+
+test('shared PR observations fan out while the owner receives one queue message',async()=>{
+  const f=setup();try{
+    const original=f.state.task('T-1').contract;
+    f.state.adopt({task_id:'T-2',owner_thread_id:OWNER,contract:{...original,canonical_key:'second'},source_message_id:'human',actual_human_verified:true});
+    f.state.setModes({task_ids:['T-1','T-2'],mode:'active',source_message_id:'human',actual_human_verified:true,native_binding:f.binding(),queue_compatibility_verified:true,legacy_quiescent:true});
+    let collections=0;const collect=f.driver.collector;f.driver.collector=async(...args)=>{collections++;return collect(...args);};
+    await f.driver.tick({wait:true});f.advance(1001);await f.driver.tick({wait:true});
+    assert.equal(collections,1);assert.equal(f.queue.calls.length,1);
+    assert.equal(f.state.checkpoint('T-2').facts[0].data.review,'Please handle empty input');
+    assert.deepEqual(f.state.openWake('T-1').member_ids,['T-1','T-2']);
+    await Promise.all(['T-1','T-2'].map(id=>f.driver.deliver(f.state.task(id))));assert.equal(f.queue.calls.length,1);
+  }finally{await f.close();}
+});
+
+test('native control lanes preserve uncertain batches and do not spin on unchanged work',async()=>{
+  const f=setup();let m;try{
+    f.driver.config.control_lanes={coordinator:{thread_id:COORDINATOR,workspace:f.root}};
+    m=new Mailbox(join(f.root,'mailbox.sqlite'),{now:f.now});
+    m.enqueue({key:'control-work',lane:'coordinator',kind:'configuration',payload:{text:'Reconcile the existing binding'}});
+    await f.driver.deliverControls();assert.equal(f.queue.calls.length,1);
+    const batch=m.db.prepare("SELECT id FROM batches WHERE lane='coordinator'").get();
+    m.begin(batch.id);m.finish(batch.id,{processed_keys:[],note:'Remaining source work is retained'});
+    await f.driver.deliverControls();assert.equal(f.queue.calls.length,1);
+    m.enqueue({key:'new-human',lane:'coordinator',kind:'human_command',payload:{text:'Actual new authorized request'}});
+    f.queue.failure=true;await f.driver.deliverControls();assert.equal(f.queue.calls.length,2);
+    f.advance(600000);await f.driver.deliverControls();assert.equal(f.queue.calls.length,2);
+    assert.equal(m.db.prepare("SELECT COUNT(*) AS n FROM batches WHERE state='uncertain'").get().n,1);
+  }finally{m?.close();await f.close();}
+});
+
+test('an earlier-sorting late task cannot starve its owners already reserved message',async()=>{
+  const f=setup();try{
+    const original={...f.state.task('T-1').contract,pull_requests:[]};
+    f.state.amend({task_id:'T-1',expected_contract_rev:1,contract:original,source_message_id:'human',actual_human_verified:true});
+    f.decide({disposition:'needs_decision',plan:undefined});f.activate();
+    f.state.adopt({task_id:'T-2',owner_thread_id:OWNER,contract:{...original,canonical_key:'second'},source_message_id:'human',actual_human_verified:true});
+    f.state.setMode({task_id:'T-2',mode:'active',source_message_id:'human',actual_human_verified:true,native_binding:f.binding(),queue_compatibility_verified:true,legacy_quiescent:true});
+    const reserved=f.state.reserveQueuedWake('T-2').wake;
+    f.event('late-first',{new:'source'});await f.driver.tick({wait:true});
+    assert.equal(f.queue.calls.length,1);assert.equal(f.state.openWake('T-2').id,reserved.id);
+    assert.equal(f.state.openWake('T-1'),null);
+  }finally{await f.close();}
+});
+
+test('an unconsumed queue receipt gets one native loading check without another dispatch',async()=>{
+  const f=setup();let m;try{
+    f.activate();await f.driver.deliver(f.state.task('T-1'));const queueId=f.state.openWake('T-1').queue_id;f.advance(60001);
+    m=new Mailbox(join(f.root,'mailbox.sqlite'),{now:f.now});
+    f.driver.requestNativeQueueChecks(m);f.driver.requestNativeQueueChecks(m);
+    assert.equal(m.db.prepare("SELECT COUNT(*) AS n FROM mail WHERE item_key LIKE 'native-queue-check:%'").get().n,1);
+    assert.equal(f.queue.calls.length,1);assert.equal(f.state.openWake('T-1').state,'queued');
+    assert.equal(f.state.openWake('T-1').queue_id,queueId);
+  }finally{m?.close();await f.close();}
+});
+
+test('desktop loading never resends a queue message or repeats an uncertain open across restart',async()=>{
+  const f=setup();try{
+    f.activate();await f.driver.deliver(f.state.task('T-1'));const wake=f.state.openWake('T-1');f.advance(60001);
+    f.driver.config.desktop_loader={enabled:true,bundle_id:'com.openai.codex'};
+    let opens=0;f.driver.desktopLoader={async open(){opens++;throw new Error('Unknown App open outcome');}};
+    await f.driver.loadPendingDesktopChats();await f.driver.loadPendingDesktopChats();
+    assert.equal(opens,1);assert.equal(f.queue.calls.length,1);
+    assert.equal(f.state.openWake('T-1').queue_id,wake.queue_id);assert.equal(f.state.openWake('T-1').state,'queued');
+    assert.equal(f.control.db.prepare('SELECT state FROM rt_desktop_loads').get().state,'uncertain');
+    const restarted=new ReactiveDriver({root:f.root,control:f.control,queue:f.queue,config:f.driver.config,capability:{verified:true},now:f.now});
+    restarted.desktopLoader=f.driver.desktopLoader;await restarted.loadPendingDesktopChats();assert.equal(opens,1);await restarted.close();
+  }finally{await f.close();}
+});
+
+test('rate-limit backoff preserves task delivery and resumes source reads after the provider reset',async()=>{
+  const f=setup();try{
+    let reads=0;const collect=f.driver.collector;
+    f.driver.rate.readQuota=async()=>({core:{remaining:0,reset:(f.now()+60000)/1000}});
+    f.driver.collector=async()=>{reads++;throw new Error('API rate limit exceeded');};
+    f.activate();await f.driver.tick({wait:true});assert.equal(reads,1);assert.equal(f.queue.calls.length,1);assert.equal(f.state.task('T-1').mode,'active');
+    f.advance(30000);await f.driver.tick({wait:true});assert.equal(reads,1);
+    f.driver.collector=async(...args)=>{reads++;return collect(...args);};f.advance(31001);await f.driver.tick({wait:true});
+    assert.equal(reads,2);assert.equal(f.control.db.prepare('SELECT failures FROM rt_polls').get().failures,0);assert.equal(f.queue.calls.length,1);
+  }finally{await f.close();}
+});
+
+test('explicitly excluded PRs stop source polling without deleting historical evidence',async()=>{
+  const f=setup();try{
+    f.driver.configurePolls();
+    f.control.taskRegistry=()=>({scope_restrictions:{skip:{task_id:'T-1',source_message_id:'human',evidence_ref:'actual-source',verbatim_text:'Stop this branch',status:'excluded',targets:{pr_urls:['https://github.com/example/service/pull/1']}}}});
+    f.driver.configurePolls();assert.equal(f.control.db.prepare('SELECT enabled FROM rt_polls').get().enabled,0);
+    assert.equal(f.control.db.prepare('SELECT COUNT(*) AS n FROM rt_polls').get().n,1);
+  }finally{await f.close();}
+});
 test('active events submit one native queue message without reading or controlling a desktop session',async()=>{
   const f=setup();try{
     f.activate();await f.driver.tick({wait:true});f.advance(1001);await f.driver.deliver(f.state.task('T-1'));

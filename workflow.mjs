@@ -80,7 +80,7 @@ try {
   } else if(command==='test') {
     await import('./tools/test.mjs');
   } else {
-    output({version:'0.4.0',commands:['init --name <name> --project-root <directory>','bind --file <verified-bindings.json>','doctor','test','runtime init|status|probe|queue-verify|bind-inbox|op|run|service'],
+    output({version:'0.5.0',commands:['init --name <name> --project-root <directory>','bind --file <verified-bindings.json>','doctor','test','runtime init|status|probe|queue-verify|bind-inbox|op|run|service'],
       native_setup:'START-HERE.md',model_selection:'instance.json models; inherit by default, explicit role overrides only after user selection'});
     if(command)process.exitCode=2;
   }

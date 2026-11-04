@@ -25,6 +25,7 @@ export function ownershipReasons(kind, taskId, payload, evidence, registry, db, 
   if (controls.includes(payload.thread_id)) return [];
   const tasks=registry.task_registry?.items??{},task=tasks[taskId];
   if (!task?.canonical_key || task.owner_thread_id!==payload.thread_id) return ['registered_task_owner_identity_required'];
+  if(kind==='task_queue'&&db.prepare("SELECT 1 FROM rt_tasks t JOIN rt_wake_members m ON m.task_id=t.task_id JOIN rt_wakes w ON w.id=m.wake_id WHERE t.task_id=? AND t.owner_id=? AND t.mode='active' AND w.id=? AND w.task_id=? AND w.owner_id=t.owner_id").get(taskId,payload.thread_id,payload.wake_id,taskId))return [];
   // A native creation receipt predates later erroneous registry reassignment.
   const created=db.prepare(`SELECT a.payload FROM thread_setups s JOIN actions a ON a.action_key=s.creation_key
     WHERE s.thread_id=? AND a.kind='create_thread' AND a.state='sent' ORDER BY a.created_at LIMIT 1`).get(payload.thread_id);

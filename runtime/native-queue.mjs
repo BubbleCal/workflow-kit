@@ -114,9 +114,16 @@ export function verifyExecutionProof(proof,{thread_id,workspace,prompt,now=Date.
 
 export function verifyNativeBinding(proof,{thread_id,workspace,now=Date.now()}) {
   const read=nativeReadback(proof?.readback),at=Date.parse(proof?.checked_at);
+  const listing=proof?.active_listing,listingAt=Date.parse(listing?.checked_at);
+  let entries=listing?.readback?.threads;
+  if(!entries)for(const item of listing?.readback?.content??[])if(item.type==='text'){try{entries=JSON.parse(item.text).threads;}catch{}}
+  const unloaded=read?.thread?.status?.type==='notLoaded'&&listing?.source==='codex_app.list_threads'&&listing?.request?.archived===false&&
+    listing.request.mode==='history'&&Number.isFinite(listingAt)&&listingAt<=now+5000&&now-listingAt<=60000&&
+    entries?.some(t=>t.id===thread_id&&t.kind==='codex'&&t.hostId==='local'&&t.cwd===workspace)&&
+    ['completed','failed','interrupted'].includes(read.turns?.[0]?.status);
   if(proof?.source!=='codex_app.read_thread'||!Number.isFinite(at)||at>now+5000||now-at>60000||
     read?.thread?.id!==thread_id||read.thread.kind!=='codex'||read.thread.hostId!=='local'||read.thread.cwd!==workspace||
-    !['idle','active'].includes(read.thread.status?.type))
+    !(['idle','active'].includes(read.thread.status?.type)||unloaded))
     throw new Error('Fresh desktop-tool identity/workspace readback is required for cutover');
   return {verified:true,thread_id,workspace,status:read.thread.status?.type};
 }

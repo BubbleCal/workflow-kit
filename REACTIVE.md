@@ -1,4 +1,40 @@
-# Desktop-owned native queue runtime (0.4.0)
+# Desktop-owned native queue runtime (0.5.0)
+
+本机验证还发现：`codex queue` 不会自动加载桌面端尚未加载的旧对话。
+可选 `desktop_loader` 使用官方的 `codex://threads/<UUID>` 链接和 macOS
+`open -g -b <verified-bundle-id>` 请求当前已验证的 App 打开原对话；不添加第二条
+消息、不使用 --resume、不连接 App Server、不设置模型或权限。打开请求不等于执行，
+仍以真实原生回合 begin 为准。每个队列回执/控制批次最多请求打开一次；未知打开结果
+不自动重复。未消费的任务随后向既有协调器提交一次有界核查。
+
+启用前在本机验证一个原对话从 notLoaded 到 loaded 且原 turn ID 不变，把完整原生
+wait_threads 读回保存在本机，运行 verifyDesktopLoader 校验。runtime.json 的
+`desktop_loader` 包含 enabled、bundle_id、authorization_ref、evidence_file 和
+evidence_digest（文件 SHA256）。原始证据必须含 source=codex_app.wait_threads、
+bundle_id、host_fingerprint、before 和 after；另一个机器不能复用。使用 App 官方入口
+加载属于桌面端操作，App 继续管理会话、执行和审批。服务只重启 workflow-kit 自身。
+参考：[官方对话链接](https://learn.chatgpt.com/docs/reference/commands#chats)。
+
+共享负责人可以保留多个独立任务。逐项 adopt 后，用 `mode_group` 的 `task_ids`
+在同一事务里切换这个负责人的全部未完成目标。同一负责人最多有一条未消费或执行中的
+原生队列消息，消息列出本轮 `task_ids`；一次 begin 后逐项 checkpoint/decide，全部处置后
+只 finish 一次。每个任务的合同、计划和验收仍独立。历史单任务回执原样保留。
+
+未加载的对话可以使用实际 read_thread 终态记录，加上同一分钟内
+`active_listing={source:"codex_app.list_threads",request:{mode:"history",archived:false},checked_at,readback}`
+证明它仍在未归档列表中；不为核验而恢复会话或打断作业。已归档和未知身份仍不能自动投递。
+
+`runtime bind-controls --file <proofs.json>` 可把 coordinator/inbox/maintenance 三个既有
+控制入口绑定到原生队列，proofs 按 lane 保存实际新鲜读回。旧批次、在途消息和不确定
+回执继续阻止重复投递；同一批未处理完的旧输入至少间隔十分钟才重提，新输入可即时入队。
+
+定时服务保留原生 automation 的执行时间，只把 prompt 改成登记事件的短生产者。
+本机 `runtime-schedules.json` 保存原授权、原 prompt 文件及 SHA256、原负责人和任务。
+生产者读取自己的实际当前回合后调用 runtime op=schedule_event；相同来源的同日事件
+只登记一次。它不执行原工作。原执行者由普通队列消费原指令。
+`trigger_only:true` 的合同在迁移和普通观察时不提前运行；仅 schedule_due 或实际 human_command
+触发。周期成果逐项验收后用 decide disposition=cycle_complete，再 finish；这只完成本次
+周期，长期服务保持 waiting，等待下一次真实定时事件，不创建每小时空转任务。
 
 workflow-kit 负责事件、事实、目标合同、计划和动作回执。Codex 桌面 App 始终负责会话、排队、执行、模型、权限及审批。
 
@@ -148,3 +184,22 @@ node workflow.mjs runtime service start
 本次实际验证了桌面 App 的空闲消费、忙碌顺序消费及真实当前回合证据校验。自动化测试覆盖原有守卫、队列回执、未知发送、先消费后 ACK、计划修订、旧配置迁移与跨实例隔离。原生 CLI 测试替身只用于回归，不冒充真实桌面测试。
 
 对于正式项目，先迁移一个已有任务，观察新反馈是否改变下一步，以及被反例推翻的方案能否调整。实际任务质量和延迟需要项目验收；不能用测试数量替代这些结果。
+
+## GitHub read budget
+
+The full PR collector preserves all-page feedback and individual CI checks. It
+uses a shared read budget (default 1,800 estimated REST reads/hour), scales its
+interval with enabled PR sources, and bounds concurrent collection requests.
+These are API limits, not engineering task or native owner concurrency limits.
+Explicitly excluded PRs stop polling while historical facts remain available.
+On provider rate limiting, the runtime reads the quota/reset evidence once,
+persists a global source pause and waits for reset; native task/control delivery
+continues. Stale facts do not become current or passing checks. Read source_rate
+in runtime status. Configuration: github_read_budget_per_hour and poll_connections.
+
+Native heartbeat sources should target the existing short dispatcher/source chat,
+not an engineering or meeting-preparation owner. Only the queued business event
+reaches the original execution owner. Keep standalone cron sources standalone.
+A source turn must register every actual schedule marker it receives; publication
+is deduplicated per source/day. Use the native heartbeat current_time_iso for the
+occurrence and report cutoff when present, even if consumption crosses midnight.

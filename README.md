@@ -1,6 +1,6 @@
 # Independent Workflow Kit
 
-0.4.0 移除直连 App Server 的驱动。后台只通过 Codex 原生 queue 提交事件，桌面 App 管理会话、执行和审批；已入队不等于已执行。事件账本、可修订计划和原有守卫保留。启用前必须实际验证桌面 App 的空闲和忙碌队列消费，步骤见 [REACTIVE.md](REACTIVE.md)，本次实测范围见 [NATIVE_QUEUE_VALIDATION.md](NATIVE_QUEUE_VALIDATION.md)。
+0.5.0 移除直连 App Server 的驱动。后台只通过 Codex 原生 queue 提交事件，桌面 App 管理会话、执行和审批；已入队不等于已执行。事件账本、可修订计划和原有守卫保留。启用前必须实际验证桌面 App 的空闲和忙碌队列消费，步骤见 [REACTIVE.md](REACTIVE.md)，本次实测范围见 [NATIVE_QUEUE_VALIDATION.md](NATIVE_QUEUE_VALIDATION.md)。
 
 下面的四角色安装入口继续兼容实例初始化和未迁移任务。active 任务使用 REACTIVE.md 的主对话与负责人协议，不再经过触发器/协调器的十分钟接力；原控制对话可以保留。
 
@@ -97,7 +97,7 @@ instance.json 的 models 是唯一模型配置入口。default="inherit"、角�
 
 原生工具、连接器和权限需要在目标电脑核验。本地 guard 是工作流约束，不是对任意直接外部调用的系统级拦截器。
 
-这是可独立安装的 0.4.0 源码包，不含自动更新服务。后续引擎升级应发布新版本，在独立实例测试后只更新代码和规则，保留各自的配置与状态。
+这是可独立安装的 0.5.0 源码包，不含自动更新服务。后续引擎升级应发布新版本，在独立实例测试后只更新代码和规则，保留各自的配置与状态。
 
 ## 文件
 

@@ -13,6 +13,18 @@ const snapshot=(type='idle',turn='before')=>({checked_at:new Date(NOW).toISOStri
 const enqueue=(x,id='human')=>routeControlPreparation(input(id),x.c,x.m,NOW);
 const close=x=>{x.c.close();x.m.close();};
 
+test('a live native control runtime replaces the manual dispatcher but admission is still evidenced',()=>{
+  const x=setup();try{
+    enqueue(x);x.m.immediate.nativeControlRuntime=()=>true;
+    assert.equal(x.m.immediate.invocation('human',snapshot(),x.c).reason,'native_queue_control_runtime');
+    assert.equal(x.m.immediate.status('human')[0].covered,false);
+    const batch=x.m.reserveQueuedLane('coordinator').batch;
+    assert.equal(x.m.immediate.status('human')[0].coverage.batch_id,batch.id);
+    assert.equal(x.m.immediate.status('human')[0].coverage.execution_verified,false);
+    assert.equal(x.c.db.prepare("SELECT COUNT(*) n FROM actions WHERE action_key LIKE 'human-trigger:%'").get().n,0);
+  }finally{close(x);}
+});
+
 test('actual human admission returns an immediate guarded native call and durable receipt exactly once',()=>{
   const x=setup(),r=enqueue(x);assert.equal(r.immediate_trigger[0].source_message_id,'human');
   assert.equal(x.m.immediate.invocation('human',snapshot(),x.c).prepared,true);

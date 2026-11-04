@@ -57,6 +57,12 @@ function freshness(evidence, now) {
   const at = Date.parse(evidence?.verified_at);
   return Number.isFinite(at) && at <= now + 5000 && now - at <= 60000;
 }
+function migratedSchedule(id,evidence,target) {
+  const path=new URL('../runtime-schedules.json',import.meta.url);
+  if(!existsSync(path))return false;
+  return JSON.parse(readFileSync(path,'utf8')).sources?.some(s=>s.id===id&&s.migration_source_message_id===evidence.source_message_id&&!!s.authorization_ref&&
+    (target===undefined||s.source_thread_id===target&&s.owner_thread_id!==target&&s.original_source_thread_id===s.owner_thread_id))===true;
+}
 
 function creationIdentity(result) {
   if (!result || result.isError) return null;
@@ -303,11 +309,18 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
     need(e.content_changed === true && e.manual_content_preserved === true, 'no_safe_substantive_page_change');
   }
   if (kind === 'automation_update') {
-    need(['automation-3', 'automation-4', 'daily-pr-standup-draft'].includes(payload?.automation_id), 'automation_outside_coordinator_scope');
+    need(['automation-3', 'automation-4', 'daily-pr-standup-draft'].includes(payload?.automation_id)||migratedSchedule(payload?.automation_id,e), 'automation_outside_coordinator_scope');
     need(e.actual_human_message_verified === true && e.source_actor_verified === true, 'actual_human_input_required');
     need(typeof payload?.source_message_id === 'string' && !!payload.source_message_id && payload.source_message_id === e.source_message_id, 'human_message_identity_mismatch');
     need(typeof payload?.expected_config_hash === 'string' && payload.expected_config_hash === e.current_config_hash, 'automation_config_changed_or_unknown');
-    need(e.non_prompt_fields_preserved === true, 'automation_non_prompt_fields_changed');
+    if(payload?.change_kind==='dispatcher_transport'){
+      need(payload.automation_id==='automation-3'&&payload.status==='PAUSED'&&e.native_control_queue_verified===true&&
+        e.prompt_and_schedule_preserved===true&&e.native_settings_preserved===true,'verified_native_control_cutover_required');
+    } else if(payload?.change_kind==='schedule_source_target'){
+      need(payload.native?.kind==='heartbeat'&&migratedSchedule(payload.automation_id,e,payload.native.targetThreadId)&&
+        e.source_target_change_authorized===true&&e.original_execution_owner_preserved===true&&e.schedule_and_native_settings_preserved===true,
+        'bound_native_source_target_required');
+    } else need(e.non_prompt_fields_preserved === true, 'automation_non_prompt_fields_changed');
     if (payload?.automation_id === 'daily-pr-standup-draft') need(e.standup_refinement_authorized === true && e.draft_only_preserved === true && e.exact_interval_preserved === true, 'standup_scope_not_preserved');
   }
   return { allowed: reasons.length === 0, reasons };
@@ -384,12 +397,13 @@ export class ControlStore {
       let imported = 0;
       for (const row of rows) {
         required(row.key, 'legacy action key');
-        const state = row.status === 'sent' ? 'sent' : ['cancelled', 'canceled', 'withdrawn'].includes(row.status) ? 'cancelled' : 'uncertain';
+        const rejectedBeforeEnqueue=row.status==='not_prepared'&&row.runtime_prepare?.prepared===false&&row.runtime_prepare?.allowed===false&&row.notification_not_enqueued===true;
+        const state = row.status === 'sent' ? 'sent' : rejectedBeforeEnqueue||['cancelled', 'canceled', 'withdrawn'].includes(row.status) ? 'cancelled' : 'uncertain';
         const payload = { legacy: true, purpose: row.purpose ?? null };
         const result = this.db.prepare(`INSERT OR IGNORE INTO actions
           (action_key,kind,task_id,scope_key,digest,payload,state,due,created_at,updated_at,receipt,imported)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,1)`).run(row.key, 'legacy', row.task_id ?? row.thread_id ?? 'unknown', `legacy:${row.key}`,
-          hash(payload), canonical(payload), state, this.now(), this.now(), this.now(), canonical({ registry_status: row.status, evidence_ref: row.evidence_file ?? null }));
+          hash(payload), canonical(payload), state, this.now(), this.now(), this.now(), canonical({ registry_status: row.status, evidence_ref: row.evidence_file ?? row.evidence_ref ?? null }));
         imported += Number(result.changes);
       }
       return { imported };

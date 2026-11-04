@@ -408,6 +408,31 @@ test('legacy receipts survive migration and processing pause does not cancel wor
   s.close();
 });
 
+test('proven rejection before enqueue is not imported as an unknown send',()=>{
+  const s=new ControlStore(':memory:',{now:()=>NOW});try{
+    s.importLegacy([{key:'denied',status:'not_prepared',runtime_prepare:{prepared:false,allowed:false},notification_not_enqueued:true,evidence_ref:'denied-prepare'},
+      {key:'unproven',status:'not_prepared'},{key:'ambiguous',status:'sending'}]);
+    assert.equal(s.db.prepare('SELECT state FROM actions WHERE action_key=?').get('denied').state,'cancelled');
+    assert.equal(s.db.prepare('SELECT state FROM actions WHERE action_key=?').get('unproven').state,'uncertain');
+    s.importLegacy([{key:'ambiguous',status:'cancelled'}]);
+    assert.equal(s.db.prepare('SELECT state FROM actions WHERE action_key=?').get('ambiguous').state,'uncertain');
+  }finally{s.close();}
+});
+
+test('pausing the old dispatcher requires verified native control delivery and unchanged schedule',()=>{
+  const p={automation_id:'automation-3',change_kind:'dispatcher_transport',status:'PAUSED',source_message_id:'human',expected_config_hash:'original'};
+  const e={...common(),actual_human_message_verified:true,source_actor_verified:true,source_message_id:'human',current_config_hash:'original',native_control_queue_verified:true,prompt_and_schedule_preserved:true,native_settings_preserved:true};
+  assert.equal(assess('automation_update',p,e,NOW).allowed,true);
+  assert.equal(assess('automation_update',p,{...e,native_control_queue_verified:false},NOW).allowed,false);
+  assert.equal(assess('automation_update',{...p,status:'ACTIVE'},e,NOW).allowed,false);
+});
+
+test('an automation cannot be retargeted without its specific bound source identity',()=>{
+  const p={automation_id:'automation-3',change_kind:'schedule_source_target',native:{kind:'heartbeat',targetThreadId:'unrelated-thread'},source_message_id:'human',expected_config_hash:'original'};
+  const e={...common(),actual_human_message_verified:true,source_actor_verified:true,source_message_id:'human',current_config_hash:'original',source_target_change_authorized:true,original_execution_owner_preserved:true,schedule_and_native_settings_preserved:true};
+  assert.equal(assess('automation_update',p,e,NOW).allowed,false);
+});
+
 const replacementArchive = () => ({ key: 'archive-replace', kind: 'archive', task_id: 'T-010',
   payload: { thread_id: 'old-owner', purpose: 'explicit_owner_replacement', source_message_id: 'human-replace', verbatim_text: 'Save progress, archive these chats and create replacements.', checkpoint_sha256: 'b'.repeat(64) },
   evidence: { ...common(), thread_status: 'idle', queued_input: false, pending_dispatch: false, old_writer_quiescent: true, expected_turn_id: 'old-turn', actual_turn_id: 'old-turn', owner_thread_id: 'old-owner', control_or_service_chat: false, actual_human_message_verified: true, source_actor_verified: true, replacement_request_verified: true, source_message_id: 'human-replace', source_text: 'Save progress, archive these chats and create replacements.', checkpoint_saved: true, checkpoint_sha256: 'b'.repeat(64), resources_preserved: true, preserved_jobs_handoff_verified: true, task_remains_incomplete: true, task_complete: false } });

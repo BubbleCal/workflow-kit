@@ -1,7 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {NativeQueue,validateQueueCompatibility,verifyExecutionProof} from './native-queue.mjs';
+import {NativeQueue,validateQueueCompatibility,verifyExecutionProof,verifyNativeBinding} from './native-queue.mjs';
 import {OWNER,QUEUE_ID,NOW,compatibilityFixture,nativeProof} from './test-fixtures/reactive.mjs';
+
+test('unloaded owners require a fresh unarchived listing and terminal native turn',()=>{
+  const proof=nativeProof({status:'completed'});proof.readback.thread.status.type='notLoaded';
+  const verify=()=>verifyNativeBinding(proof,{thread_id:OWNER,workspace:'/task',now:NOW});
+  assert.throws(verify,/identity\/workspace/);
+  proof.active_listing={source:'codex_app.list_threads',checked_at:new Date(NOW).toISOString(),request:{mode:'history',archived:false},readback:{threads:[{id:OWNER,kind:'codex',hostId:'local',cwd:'/task'}]}};
+  assert.equal(verify().verified,true);
+  proof.active_listing.request.archived=true;assert.throws(verify,/identity\/workspace/);
+  proof.active_listing.request.archived=false;proof.readback.turns[0].status='inProgress';assert.throws(verify,/identity\/workspace/);
+});
 
 test('the native adapter only uses fixed queue arguments and records acceptance separately from execution',async()=>{
   let called;const q=new NativeQueue({run:async(binary,args)=>{called={binary,args};return {stdout:`Queued message ${QUEUE_ID} for thread ${OWNER}.\n`};},now:()=>NOW});

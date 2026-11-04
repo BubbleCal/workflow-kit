@@ -6,6 +6,51 @@ import {join} from 'node:path';
 import {scopeActionReasons} from './scope-exclusions.mjs';
 import {fixture,contract,plan,nativeProof,NOW,OWNER,QUEUE_ID} from './test-fixtures/reactive.mjs';
 
+test('shared owners retain separate contracts and consume one grouped wake',()=>{
+  const f=fixture();try{
+    f.s.adopt({task_id:'T-2',owner_thread_id:OWNER,contract:{...contract(),canonical_key:'other-goal'},source_message_id:'human:migrate',actual_human_verified:true});
+    f.s.setModes({task_ids:['T-1','T-2'],mode:'active',source_message_id:'human:migrate',actual_human_verified:true,native_binding:f.binding(),queue_compatibility_verified:true,legacy_quiescent:true});
+    f.event();f.event('second',{result:'pending'},{task_id:'T-2'});
+    const w=f.s.reserveQueuedWake('T-1').wake;
+    assert.deepEqual(w.member_ids,['T-1','T-2']);
+    assert.equal(f.s.reserveQueuedWake('T-2').reserved,false);
+    f.c.db.prepare("UPDATE rt_wakes SET state='queued',prompt='group' WHERE id=?").run(w.id);
+    f.s.begin({task_id:'T-1',wake_id:w.id,native_proof:nativeProof({message:'group'})});
+    f.decide({wake_id:w.id,disposition:'needs_decision',plan:undefined});
+    assert.throws(()=>f.s.finish({task_id:'T-1',wake_id:w.id,turn_id:'native-turn',evidence_ref:'partial'}),/member|concrete plan/);
+    f.s.decide({task_id:'T-2',owner_thread_id:OWNER,wake_id:w.id,expected_context_rev:f.s.task('T-2').context_rev,expected_plan_rev:0,disposition:'needs_decision',reason:'Original independent approval still required',evidence_refs:['original-hold']});
+    assert.equal(f.s.finish({task_id:'T-2',wake_id:w.id,turn_id:'native-turn',evidence_ref:'both-disposed'}).finished,true);
+    assert.notEqual(f.s.task('T-1').contract.canonical_key,f.s.task('T-2').contract.canonical_key);
+  }finally{f.c.close();}
+});
+
+test('owner cutover is atomic and requires coverage without reclassifying completed aliases',()=>{
+  const f=fixture();try{
+    f.s.adopt({task_id:'T-2',owner_thread_id:OWNER,contract:{...contract(),canonical_key:'second'},source_message_id:'human',actual_human_verified:true});
+    const registry={scope:{project_id:'project'},task_registry:{items:{'T-1':{canonical_key:'query-work',owner_thread_id:OWNER},'T-2':{canonical_key:'second',owner_thread_id:OWNER},'T-old':{owner_thread_id:OWNER,task_complete:true,status:'complete_archived_verified'}}}};
+    f.s.registry=()=>registry;
+    assert.throws(()=>f.activate(),/all unfinished tasks/);
+    f.c.importLegacy([{key:'unknown-second-effect',task_id:'T-2',status:'sending'}]);
+    const request={task_ids:['T-1','T-2'],mode:'active',source_message_id:'human',actual_human_verified:true,native_binding:f.binding(),queue_compatibility_verified:true,legacy_quiescent:true};
+    assert.throws(()=>f.s.setModes(request),/in-flight/);
+    assert.deepEqual(f.s.tasks().map(t=>t.mode),['shadow','shadow']);
+    assert.equal(registry.task_registry.items['T-old'].completed,undefined);
+  }finally{f.c.close();}
+});
+
+test('a late sibling event cannot bypass a running or uncertain owner delivery',()=>{
+  const f=fixture();try{
+    f.s.adopt({task_id:'T-2',owner_thread_id:OWNER,contract:{...contract(),canonical_key:'second'},source_message_id:'human',actual_human_verified:true});
+    f.activate();f.event();const w=f.begin();
+    f.s.setMode({task_id:'T-2',mode:'active',source_message_id:'human',actual_human_verified:true,native_binding:f.binding(),queue_compatibility_verified:true,legacy_quiescent:true});
+    f.event('late',{new:'fact'},{task_id:'T-2'});
+    assert.equal(f.s.reserveQueuedWake('T-2').reason,'owner_wake_in_flight');
+    f.c.db.prepare("UPDATE rt_wakes SET state='uncertain' WHERE id=?").run(w.id);
+    assert.equal(f.s.reserveQueuedWake('T-2').reason,'owner_wake_in_flight');
+    assert.deepEqual(f.s.openWake('T-1').member_ids,['T-1']);
+  }finally{f.c.close();}
+});
+
 test('immutable events deduplicate, reject changed identities and preserve newer source observations',()=>{
   const f=fixture();try{
     assert.equal(f.event().changed,true);assert.equal(f.event().duplicate,true);assert.throws(()=>f.event('e1',{changed:true}),/immutable/);

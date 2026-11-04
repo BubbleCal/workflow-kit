@@ -1,10 +1,11 @@
 {
-  "version": "0.4.0",
-  "verified_at": "2026-11-04T16:41:32Z",
+  "version": "0.5.0",
+  "verified_at": "2026-11-04T19:37:31.877450+00:00",
   "entry_point": "REACTIVE.md",
   "native_evidence_summary": "NATIVE_QUEUE_VALIDATION.md",
   "native_desktop_idle_and_busy_verified": true,
   "portable_runtime_cli_tested": true,
   "legacy_setup_preserved": true,
-  "live_workflow_instances_changed": false
+  "live_workflow_instances_changed": false,
+  "reactive_documentation": "REACTIVE.md documents grouped owners, native schedule sources, verified App loading and API read budgets"
 }
