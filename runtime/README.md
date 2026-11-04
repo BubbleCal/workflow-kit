@@ -370,3 +370,7 @@ Follow ../LIFECYCLE.md for actual PR-state obligations, owned-result disposition
 wait evidence, operational priority with aging, and cached-state invariant checks
 on the existing dispatcher. Enable only at a verified batch boundary; existing
 work and external integration opt-ins remain unchanged.
+
+TASK_DECISIONS.md documents task-decisions.mjs read-only views, private question
+preparation and reply routing. Actual notify/human-input queue preparation and
+inbox rendering use this path; only the coordinator saves question/page state.

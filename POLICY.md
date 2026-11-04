@@ -110,3 +110,13 @@ This uses the same source identity, freshness and PR/human rules as wait handlin
 not an extra timer or an unchecked existing-driver flag. Previously queued cases,
 source ACKs, goals and native jobs remain unchanged; the coordinator reconciles
 existing diagnostics through the normal evidenced disposition.
+
+## Task-only decision display and routing
+
+Follow TASK_DECISIONS.md. All current/future user-facing choices use their parent
+T task and a descriptive subject. Preserve old D aliases and immutable evidence,
+but new question identities are private task/dedup hashes, not another sequence.
+Use task-decisions.mjs for question preparation/views and reply routing. Actual
+human replies remain verbatim; selecting a question does not authorize or resolve
+it. Preserve ambiguity, pending questions, resolved answers and task acceptance.
+The coordinator alone projects the current managed page; no migration broadcast.

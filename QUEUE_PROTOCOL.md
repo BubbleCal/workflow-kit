@@ -124,3 +124,11 @@ This uses the same source identity, freshness and PR/human rules as wait handlin
 not an extra timer or an unchecked existing-driver flag. Previously queued cases,
 source ACKs, goals and native jobs remain unchanged; the coordinator reconciles
 existing diagnostics through the normal evidenced disposition.
+
+## Task-only choices
+
+Follow TASK_DECISIONS.md. New notifications and inbox presentation use parent T
+numbers plus descriptive subjects. Route decision replies with decision_reply
+context while preserving verbatim human text and old aliases. Do not invent a
+choice when several pending questions match. Existing queued keys/payloads and
+receipts remain immutable; a display update is not a new notification or consent.

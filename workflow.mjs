@@ -30,7 +30,7 @@ try {
       scope:config.scope,capacity:{automatic_limit:null,max_new_heavy_concurrency:null,max_dispatches_per_run:null},
       task_registry:{items:{}},threads:[],outbox:[],discovery:{enabled:true,project_ids:[],source:'only verified chats in this instance project'},
       queue_transport:{mode:'fixed_batch_mailbox',dispatcher_interval_minutes:10},sources:{},delivery_items:{}};
-    atomic(join(root,'registry.json'),registry);atomic(join(root,'decisions.json'),{schema_version:1,next_id:1,items:[]});
+    atomic(join(root,'registry.json'),registry);atomic(join(root,'decisions.json'),{schema_version:2,display:'task_only',items:[]});
     atomic(join(root,'pr-review-window.json'),{timezone:prefs.timezone,blocked_start_inclusive:prefs.review_blackout.start_inclusive,blocked_end_exclusive:prefs.review_blackout.end_exclusive});
     const localDate=new Date(Date.now()+8*3600000).toISOString().slice(0,10);
     atomic(join(root,'daily-review/config.json'),{enabled:true,timezone:prefs.timezone,time:prefs.daily_review_time,first_date:localDate,owner_thread_id:null,authorization_ref:'Instance installation request; preserve its actual native message reference in setup evidence.'});

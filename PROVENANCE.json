@@ -1,9 +1,9 @@
 {
-  "version": "0.2.14",
+  "version": "0.2.15",
   "source": "local workflow runtime snapshot",
   "source_files": {
-    "runtime/control.mjs": "dc6f36fa3ea07ce4ae4d4e86107455ec3b2f9e1d48c28839517da6557f8a44d6",
-    "runtime/mailbox.mjs": "4b80be2b2c923998b376d06cb13000bfa955f89f28265b5a37eaa559a58857ec",
+    "runtime/control.mjs": "c6b78e5aef7fac344d64d72c52340c7b1b80279cf4662230515d571bf7d05ac4",
+    "runtime/mailbox.mjs": "b6048ccbb870b71393337ff21377216d14793b5ddb2ff8b9ed8a87fccce73a43",
     "runtime/progress.mjs": "da7b83bc897d1a1782904c69933afe4aef84667f174833c24b92ea364748d856",
     "runtime/watchdog.mjs": "1ef35916387a4e914e2868c021c3b1c0212e991d9de58c4b4a7be915b53513c3",
     "runtime/daily-review.mjs": "c86a9599bdcaa56c8854e49e330c5f0adae5dfd5d069c979175caeb8e52f7b4f",
@@ -19,7 +19,8 @@
     "runtime/dependency-provenance.mjs": "fbaaded67eeca3a2ee62250e813d07d0667deef534d5b4d46e2ecab55060d320",
     "runtime/merge-approval.mjs": "026c58dc40ec63a93130221b8c830647e4bc256bbd97bd8dc73f2c2f839b7b22",
     "runtime/fetch-merge-approval.mjs": "dfb051627abc9da83c5848245055f0bff5d6ea21d1f4cdd8da36724e1dd69b03",
-    "runtime/ci-state.mjs": "8f00790daaa150c53f93c36ea0cabbcebd9bc2c0e571c478328a68db7444de58"
+    "runtime/ci-state.mjs": "8f00790daaa150c53f93c36ea0cabbcebd9bc2c0e571c478328a68db7444de58",
+    "runtime/task-decisions.mjs": "8c3a1ada901f9c598d586d4b82e37ac47e0eccd77e7f9540f0d5d0e053d8a79e"
   },
   "state_included": false,
   "credentials_included": false

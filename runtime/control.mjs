@@ -12,6 +12,7 @@ import { readModelSelection, withCreationModel } from './model-selection.mjs';
 import { LifecycleLedger } from './lifecycle.mjs';
 import { readDependencyPolicy, dependencyReasons } from './dependency-provenance.mjs';
 import { retainedApprovalReasons } from './merge-approval.mjs';
+import { readDecisionState, taskDisplayText, taskId, resolveReply } from './task-decisions.mjs';
 import { isReviewDelivery, readReviewWindow, reviewWindowAt, withReviewWindowGuidance, REVIEW_WINDOW } from './review-window.mjs';
 
 export const INBOX = bindings.threads.inbox;
@@ -627,19 +628,36 @@ export class ControlStore {
   }
 }
 
-export function routeControlPreparation(input, control, mailbox, now = Date.now()) {
+export function routeControlPreparation(input, control, mailbox, now = Date.now(), decisionState) {
   const routed = input.kind === 'notify' || input.kind === 'human_input' && input.payload?.thread_id === COORDINATOR;
   if (!routed) return null;
   const gate = assess(input.kind, input.payload, input.evidence, now, control.capacity);
   if (!gate.allowed) return { prepared: false, ...gate };
   const previous = control.db.prepare('SELECT state FROM actions WHERE action_key=?').get(input.key);
   if (previous && ['sent','cancelled','claimed','uncertain'].includes(previous.state)) return { prepared: false, key: input.key, state: previous.state, reason: 'existing_delivery_must_not_be_replayed' };
+  const existingMail = mailbox.db.prepare('SELECT seq,state FROM mail WHERE item_key=?').get(input.key);
+  if (existingMail && !previous) throw new Error('Mailbox key already exists without this control action; reconcile its source before reuse');
+  const notification = input.kind === 'notify';
+  let text = notification ? input.payload.text ?? input.payload.prompt ?? input.payload.message : input.payload.verbatim_text;
+  required(text, 'queued message text');
+  let decisionRoute;
+  if (!existingMail) {
+    const state = decisionState ?? readDecisionState();
+    if (notification) {
+      text = taskDisplayText(text, state, { rejectUnknown: input.payload.category === 'decision' });
+      if (input.payload.category === 'decision' && !text.includes(taskId(input.task_id)))
+        text = `${taskId(input.task_id)} · 待你决定\n${text}`;
+    } else {
+      const reply = input.payload.decision_reply ??
+        (input.payload.legacy_decision_alias || input.payload.decision_id ?
+          { reference: input.payload.legacy_decision_alias ?? input.payload.decision_id } :
+          input.payload.intent === 'decision_answer' ? { reference: input.task_id } : null);
+      if (reply) decisionRoute = resolveReply(reply, state);
+    }
+  }
   const preparation = control.prepare(input);
   if (preparation.allowed === false) return preparation;
-  const notification = input.kind === 'notify';
-  const text = notification ? input.payload.text ?? input.payload.prompt ?? input.payload.message : input.payload.verbatim_text;
-  required(text, 'queued message text');
-  const queued = mailbox.enqueue({ key: input.key, lane: notification ? 'inbox' : 'coordinator',
+  const queued = existingMail ?? mailbox.enqueue({ key: input.key, lane: notification ? 'inbox' : 'coordinator',
     kind: notification ? input.payload.category : 'human_command', payload: {
       text, task_id: input.task_id, control_action_key: input.key,
       source_message_id: input.payload.source_message_id ?? null,
@@ -648,6 +666,8 @@ export function routeControlPreparation(input, control, mailbox, now = Date.now(
       intent: input.payload.intent ?? null,
       question_message_id: input.payload.question_message_id ?? null,
       result_reference: input.payload.result_reference ?? null,
+      ...(decisionRoute ? { decision_route: decisionRoute } : {}),
+      ...(input.payload.legacy_decision_alias ? { legacy_decision_alias: input.payload.legacy_decision_alias } : {}),
     } });
   control.db.prepare("UPDATE actions SET state='queued',receipt=?,updated_at=? WHERE action_key=? AND state IN ('prepared','queued')")
     .run(JSON.stringify({ mailbox_key: input.key, sequence: queued.seq }), now, input.key);
