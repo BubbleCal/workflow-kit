@@ -163,6 +163,21 @@ test('unfinished batch entries rotate so an equal-priority recovery is not starv
   m.close();
 });
 
+test('terminal-owner recovery does not wait for aging behind already offered diagnostics',()=>{
+  let now=NOW-4*3600000;const m=new Mailbox(':memory:',{now:()=>now});
+  m.activateTransitions({source_message_id:'upgrade',actual_human_verified:true});
+  for(let i=0;i<20;i++)m.enqueue({key:'diagnostic-'+i,lane:'coordinator',kind:'event',payload:{event:'stage_reconciliation'}});
+  now=NOW-1000;const first=sent(m);m.begin(first.id);
+  now=NOW-500;m.enqueue({key:'owner-finished-with-work',lane:'coordinator',kind:'recovery',payload:{event:'continuation_recovery',
+    watchdog_case:'continuation-gap:original-owner',owner_thread_id:'original-owner',observed_turn_id:'completed-turn',task_ids:['T-owner']}});
+  m.enqueue({key:'new-result',lane:'coordinator',kind:'worker_result',payload:{task_id:'T-result',owner_thread_id:'other-owner',evidence_ref:'completed-proof'}});
+  now=NOW;m.finish(first.id,{processed_keys:[]});m.enqueue(command('human-first'));
+  const next=sent(m);
+  assert.deepEqual(next.snapshot.items.slice(0,3).map(i=>i.key),['human-first','new-result','owner-finished-with-work']);
+  assert.equal(next.snapshot.items.length,20);
+  assert.deepEqual(m.get(first.id).snapshot,first.snapshot);m.close();
+});
+
 test('released unsent reservations do not count as processing opportunities',()=>{
   const m=new Mailbox(':memory:',{now:()=>NOW});m.activateTransitions({source_message_id:'upgrade',actual_human_verified:true});
   for(let i=0;i<21;i++)m.enqueue({key:'retry-'+i,lane:'coordinator',kind:'recovery',payload:{event:'continuation_recovery'}});

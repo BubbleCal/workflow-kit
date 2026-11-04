@@ -22,7 +22,7 @@ const required = (v, name) => { if (typeof v !== 'string' || !v.trim()) throw ne
 export function workPriority(row, now) {
   if (row.kind === 'human_command') return 0;
   const p = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload;
-  const base = p?.event === 'pr_lifecycle_action' ?
+  const base = row.kind === 'recovery' && p?.event === 'continuation_recovery' ? 1 : p?.event === 'pr_lifecycle_action' ?
     (['repair_feedback','resolve_closed','assess_feedback','triage_ci','reconcile_draft'].includes(p.action) ? 1 : 2) :
     p?.event === 'stage_reconciliation' ? 3 : requiresProgress({ kind:row.kind,payload:p },2) ? 1 : p?.event === 'wait_reconciliation' ? 3 :
     row.kind === 'recovery' ? 3 : row.kind === 'configuration' ? 4 : 6;

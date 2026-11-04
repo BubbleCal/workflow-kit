@@ -1,5 +1,9 @@
 # Changes
 
+## 0.2.20
+
+Admit canonical terminal-owner continuation recovery to urgent non-human priority immediately. Preserve human precedence, the protected result slot, retry rotation, fixed batches and all existing guarded-resume checks; generic recovery and diagnostics retain their priorities.
+
 ## 0.2.19
 
 Recognize the observed exact Gatekeeper approval-with-non-blocking-risk header. Preserve full semantic feedback at prepare, claim and final delivery, latest current-head verdict, CI and normal merge gates. Unknown, conditional, quoted, dismissed or negative verdicts still block.

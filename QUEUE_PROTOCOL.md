@@ -144,3 +144,14 @@ Follow TASK_OWNERSHIP_AND_PR_GATES.md for actual canonical owner/handoff and
 CI/Gatekeeper proof fields. A generic owner_matches flag is insufficient; do not
 recycle idle/completed chats. Apply the new gates to undelivered open PRs without
 reposting old URLs or toggling ready unnecessarily. No permission/model changes.
+
+## Urgent terminal-owner recovery
+
+Canonical recovery inputs with event=continuation_recovery enter urgent
+non-human priority immediately. Do not impose a thirty/sixty-minute aging wait
+before reconciling a completed owner with unfinished work. Human inputs retain
+precedence, the protected completion-result slot and ordinary retry rotation
+remain, and generic recovery/diagnostic priorities are unchanged. Priority only
+controls admission; current scope, native jobs/holds, typed waits, uncertainty,
+original ownership and guarded dispatch still decide whether work can resume.
+No new timer, concurrency limit or automatic restart is introduced.
