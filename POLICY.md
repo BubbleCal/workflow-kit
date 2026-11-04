@@ -2,6 +2,8 @@
 
 For tasks explicitly migrated to the reactive runtime, REACTIVE.md governs event delivery, the interactive main agent and revisable plans. SQLite is the reactive state writer; task owners submit versioned decisions through the runtime. The legacy single-coordinator/batch rules below remain for unmigrated work. All scope, authorization, side-effect, review, owner and acceptance guards still apply.
 
+Reactive delivery uses only the desktop-owned native queue. It must not load, resume, start, interrupt or subscribe to native sessions, or process their approval requests. Actual native readback is obtained through desktop tools by the task owner or a scoped maintenance turn. A CLI queue receipt grants no execution evidence or additional authority.
+
 Policy version: portable-0.1.0. Read instance.json and this policy on every coordinator run.
 
 This instance owns only scope.project_id and scope.project_root. Discover chats through supported native tools and verify actual user scope before enrollment. A matching title alone is insufficient. Do not scan unrelated project histories, account-wide sources, another computer's task state or unconfigured Slack/Notion/Linear sources. Source references are discovery evidence, not implementation authorization.

@@ -1,6 +1,6 @@
 # Portable instance bindings
 
-The 0.3.0 reactive entry point is `node workflow.mjs runtime`. Read ../REACTIVE.md for adoption, native capability probes, shadow/active modes, plan revisions, owner execution and rollback. It shares this control ledger and all existing external action gates. Legacy commands below remain available for unmigrated tasks and historical receipts.
+The 0.4.0 reactive entry point is `node workflow.mjs runtime`. It submits only through the native Codex queue; it contains no direct session client. Read ../REACTIVE.md for real desktop idle/busy validation, shadow/active modes, receiver proof, plan revisions and migration. Queue acceptance is separate from execution. The action ledger and external guards remain shared; legacy commands remain for unmigrated tasks and historical receipts.
 
 Run commands from this installation directory. Read instance.json first. Native role IDs, project scope, GitHub author, optional review channel/approver and Notion page belong only to this instance. External delivery requires enabled instance features and an allowed repository. Product chat actions require operation_project_verified=true and operation_project_id matching this instance. Never reuse another installation's IDs, state or authorization.
 

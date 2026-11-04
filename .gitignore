@@ -21,3 +21,4 @@ node_modules/
 outcomes/
 dependency-policy.json
 runtime.json
+runtime.json.*

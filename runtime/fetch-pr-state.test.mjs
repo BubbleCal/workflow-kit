@@ -15,9 +15,9 @@ for(const mode of ['partial','closed','moved']){
       writeFileSync(join(dir,'pr.json'),JSON.stringify(pr));
       writeFileSync(join(dir,'gh'),`#!/usr/bin/env node
 const fs=require('fs'),path=require('path'),dir=__dirname,endpoint=process.argv[3];
-const calls=path.join(dir,'calls.json'),seen=fs.existsSync(calls)?JSON.parse(fs.readFileSync(calls)):[];seen.push(endpoint);fs.writeFileSync(calls,JSON.stringify(seen));
+const calls=path.join(dir,'calls.jsonl');fs.appendFileSync(calls,JSON.stringify(endpoint)+'\\n');
 const pr=JSON.parse(fs.readFileSync(path.join(dir,'pr.json')));
-if(endpoint.includes('/pulls/')){if(process.env.FIXTURE_MODE==='moved'&&seen.filter(x=>x.includes('/pulls/')).length>1)pr.head.sha='b'.repeat(40);console.log(JSON.stringify(pr));}
+if(endpoint.includes('/pulls/')){const seen=fs.readFileSync(calls,'utf8').trim().split('\\n').map(JSON.parse);if(process.env.FIXTURE_MODE==='moved'&&seen.filter(x=>x.includes('/pulls/')).length>1)pr.head.sha='b'.repeat(40);console.log(JSON.stringify(pr));}
 else if(process.env.FIXTURE_MODE==='closed'){process.exit(9);}
 else if(endpoint.includes('/check-runs'))console.log(JSON.stringify([{total_count:2,check_runs:[{id:1,name:'deny',head_sha:pr.head.sha,status:'completed',conclusion:'failure',html_url:'https://example.test/check/1'},{id:2,name:'build',head_sha:pr.head.sha,status:'in_progress',conclusion:null}]}]));
 else console.log(JSON.stringify([{sha:pr.head.sha,total_count:0,statuses:[]}]));
@@ -25,7 +25,7 @@ else console.log(JSON.stringify([{sha:pr.head.sha,total_count:0,statuses:[]}]));
       const output=join(dir,'snapshot.json'),r=spawnSync(process.execPath,[collector,'--repo','example/project','--pr','42','--output',output],{encoding:'utf8',env:{...process.env,PATH:dir+delimiter+process.env.PATH,FIXTURE_MODE:mode}});
       if(mode==='moved'){assert.notEqual(r.status,0);assert.equal(existsSync(output),false);return;}
       assert.equal(r.status,0,r.stderr);const snapshot=JSON.parse(readFileSync(output));
-      if(mode==='closed'){assert.equal(snapshot.state,'closed');assert.equal(snapshot.ci,undefined);assert.equal(JSON.parse(readFileSync(join(dir,'calls.json'))).every(x=>x.includes('/pulls/')),true);}
+      if(mode==='closed'){assert.equal(snapshot.state,'closed');assert.equal(snapshot.ci,undefined);assert.equal(readFileSync(join(dir,'calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse).every(x=>x.includes('/pulls/')),true);}
       else{assert.equal(snapshot.ci.checks[0].conclusion,'failure');assert.equal(snapshot.ci.checks[1].status,'in_progress');assert.equal(snapshot.checks_state,'unknown');assert.equal(snapshot.ci.required_policy,'not_evaluated');}
     }finally{rmSync(dir,{recursive:true,force:true});}
   });

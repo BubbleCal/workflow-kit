@@ -29,13 +29,13 @@ export function resolveCapacity(value = {}) {
   return { ...value, max_new_heavy_concurrency: value.automatic_limit,
     max_dispatches_per_run: value.automatic_limit };
 }
-const KINDS = new Set(['task_wake', 'dispatch', 'create_thread', 'assign_project', 'human_input', 'notify', 'slack_pr', 'pr_ready', 'merge', 'archive', 'unarchive', 'auth', 'notion_sync', 'automation_update']);
+const KINDS = new Set(['task_queue', 'task_wake', 'dispatch', 'create_thread', 'assign_project', 'human_input', 'notify', 'slack_pr', 'pr_ready', 'merge', 'archive', 'unarchive', 'auth', 'notion_sync', 'automation_update']);
 const PROTECTED_THREADS = new Set(Object.values(bindings.threads));
 const prUrl = value => typeof value === 'string' && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*$/.test(value);
 function scopeKey(kind, payload) {
   if (kind === 'create_thread') return `new-thread:${required(payload?.canonical_task_key, 'payload.canonical_task_key')}`;
   if (kind === 'assign_project') return `project-membership:${required(payload?.host_id, 'host_id')}:${required(payload?.thread_id, 'thread_id')}`;
-  if (['task_wake', 'dispatch', 'human_input', 'archive', 'unarchive'].includes(kind)) return `thread:${required(payload?.thread_id, 'payload.thread_id')}`;
+  if (['task_queue', 'task_wake', 'dispatch', 'human_input', 'archive', 'unarchive'].includes(kind)) return `thread:${required(payload?.thread_id, 'payload.thread_id')}`;
   if (kind === 'notify') return `inbox:${INBOX}`;
   if (kind === 'notion_sync') return `notion:${payload?.data_source_id ?? required(payload?.page_id, 'payload.page_id')}`;
   if (kind === 'auth') return `browser:${required(payload?.host_id, 'payload.host_id')}`;
@@ -120,12 +120,10 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
     need(e.underlying_job_running === false, 'background_job_or_unknown');
     need(typeof e.expected_turn_id === 'string' && !!e.expected_turn_id && e.expected_turn_id === e.actual_turn_id, 'turn_changed_or_unknown');
   };
-  if (kind === 'task_wake') {
-    idle(true);
-    need(e.event_wake_authorized === true && e.native_permissions_unchanged === true && e.native_approval_pending === false,
-      'authorized_event_delivery_and_preserved_permissions_required');
-    need(e.owner_matches === true && e.overlapping_owner === false && e.existing_driver_owns_step === false,
-      'event_owner_conflict_or_existing_driver');
+  if (kind === 'task_queue') {
+    need(e.event_wake_authorized === true && e.native_queue_only === true && e.queue_compatibility_verified === true &&
+      typeof e.queue_compatibility_ref==='string' && !!e.queue_compatibility_ref, 'verified_desktop_queue_transport_required');
+    need(e.owner_matches === true, 'event_owner_conflict');
     need(payload?.thread_id === e.owner_thread_id && payload?.starts_heavy_work === false && !!payload?.wake_id,
       'event_wake_identity_required');
   }
@@ -535,7 +533,7 @@ export class ControlStore {
       if (!feedback.allowed) return {claimed:false,...feedback};
       const attempt = randomUUID();
       this.db.prepare("UPDATE actions SET state='claimed',attempt_id=?,owner=?,attempts=attempts+1,last_error=NULL,updated_at=? WHERE action_key=?").run(attempt, owner, this.now(), key);
-      if (row.kind === 'task_wake') this.db.prepare("UPDATE rt_wakes SET state='claimed' WHERE id=? AND state='reserved'").run(payload.wake_id);
+      if (row.kind === 'task_queue') this.db.prepare("UPDATE rt_wakes SET state='claimed' WHERE id=? AND state='reserved'").run(payload.wake_id);
       return { claimed: true, key, attempt_id: attempt, payload: JSON.parse(row.payload),
         ...(isReviewDelivery(row.kind) ? { send_tool_forbidden: true, requires_review_send_authorization: true } : {}) };
     });
@@ -570,16 +568,30 @@ export class ControlStore {
     if (!['sent', 'uncertain', 'not_sent'].includes(outcome)) throw new Error(`Invalid outcome: ${outcome}`);
     return this.atomic(() => {
       const row = this.db.prepare('SELECT * FROM actions WHERE action_key=?').get(key);
+      if(row?.kind==='task_queue' && row.state==='sent' && row.attempt_id===attempt_id) {
+        const wake=this.db.prepare('SELECT * FROM rt_wakes WHERE id=?').get(JSON.parse(row.payload).wake_id);
+        if(wake?.started_at && wake.turn_id) {
+          if(outcome==='not_sent')throw new Error('Native consumption contradicts non-delivery');
+          this.db.prepare('UPDATE actions SET receipt=?,updated_at=? WHERE action_key=?')
+            .run(canonical({...JSON.parse(row.receipt??'{}'),transport:{outcome,evidence_ref,native_result}}),this.now(),key);
+          if(native_result?.queue_receipt?.thread_id===JSON.parse(row.payload).thread_id)
+            this.db.prepare('UPDATE rt_wakes SET queue_id=COALESCE(queue_id,?) WHERE id=?').run(native_result.queue_receipt.queue_id,wake.id);
+          return {key,state:'sent',consumed_before_transport_ack:true};
+        }
+      }
       if (!row || row.state !== 'claimed' || row.attempt_id !== attempt_id) throw new Error(`Stale or unowned attempt: ${key}`);
       const retryable = outcome === 'not_sent' && ['rejected_before_send', 'transient_before_send'].includes(error_class) && row.attempts < 2;
       const state = outcome === 'not_sent' ? retryable ? 'prepared' : 'failed' : outcome;
       const due = retryable ? this.now() + Math.min(300000, 5000 * 2 ** (row.attempts - 1)) : this.now();
       this.db.prepare('UPDATE actions SET state=?,due=?,receipt=?,last_error=?,updated_at=? WHERE action_key=?')
         .run(state, due, canonical({ outcome, evidence_ref, ...(native_result ? { native_result } : {}) }), error_class, this.now(), key);
-      if (row.kind === 'task_wake') {
+      if (row.kind === 'task_queue') {
         const wakeId = JSON.parse(row.payload).wake_id;
-        this.db.prepare(`UPDATE rt_wakes SET state=?,turn_id=COALESCE(?,turn_id),evidence_ref=?
-          WHERE id=? AND state='claimed'`).run(outcome==='not_sent'?'reserved':state,native_result?.turn?.id??null,evidence_ref,wakeId);
+        const receipt=native_result?.queue_receipt;
+        if(outcome==='sent' && (receipt?.queued!==true||receipt.execution_verified!==false||receipt.thread_id!==JSON.parse(row.payload).thread_id||
+          !/^[0-9a-f-]{36}$/i.test(receipt.queue_id??'')))throw new Error('Native queue acceptance needs its exact receipt; it is not execution');
+        this.db.prepare(`UPDATE rt_wakes SET state=CASE WHEN state='claimed' THEN ? ELSE state END,queue_id=COALESCE(?,queue_id),evidence_ref=?
+          WHERE id=?`).run(outcome==='not_sent'?'reserved':outcome==='sent'?'queued':state,receipt?.queue_id??null,evidence_ref,wakeId);
         if (outcome==='not_sent' && !retryable) this.db.prepare("UPDATE rt_wakes SET state='not_sent',completed_at=? WHERE id=? AND state='reserved'").run(this.now(),wakeId);
       }
       if (row.kind === 'create_thread' && state === 'sent') {

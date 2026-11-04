@@ -1,43 +1,54 @@
 {
-  "version": "0.3.1",
-  "verified_at": "2026-11-04T13:56:56.499672+00:00",
-  "node": "v23.11.0",
-  "codex_cli": "0.166.0-alpha.5.1",
+  "version": "0.4.0",
+  "verified_at": "2026-11-04T16:41:32Z",
+  "client_timezone": "Asia/Shanghai",
+  "node": "v26.4.0",
   "command": "node workflow.mjs test",
   "exit_code": 0,
-  "runtime_tests": 252,
-  "portable_integration_tests": 4,
-  "passed": 256,
+  "runtime_tests": 248,
+  "portable_integration_tests": 5,
+  "passed": 253,
   "failed": 0,
-  "tested_sources_digest": "4d71870964232b69a8ed42b5eacd7e1f32b3a20511120a2a49182492b447d2e1",
-  "integrated_upstream_commit": "32d6e95f616ddcc766558bbe250eaf02ed71b7dc",
-  "coverage": [
-    "Existing authorization, scope, ownership, CI, feedback, review-window and merge guards",
-    "Immutable events, stale observation rejection, bounded coalescing and restart recovery",
-    "Contract-preserving plan replacement and user-sourced contract amendments",
-    "Wait invalidation, native job/result events and current-feedback review-request waiting",
-    "Exact wake prompt binding, stale-plan fencing and uncertain-send preservation",
-    "Shadow isolation, active/legacy driver exclusion, durable rollback handoff and immediate-human-trigger integration",
-    "Subprocess JSON-RPC adapter and portable init/adopt/probe/activate/run/pause integration",
-    "Immediate inbox receipt path and busy-user protection",
-    "Verified no-hosted-CI applicability preserves empty check lists, same-head local validation and all ordinary Gatekeeper/feedback/merge guards; unknown/required/nonempty/mismatched/stale cases reject."
-  ],
-  "native_probe": {
-    "current_host_shared_proxy": "not_run_in_package_validation",
-    "production_threads_created": 0,
-    "production_turns_started": 0,
-    "upstream_validation_ref": "32d6e95:VALIDATION.json"
+  "tested_sources_digest": "2f6c1a2be47e2b6ef930174dbb1532c1f3f58e9e0c0bd09dfc1f289b39fae1a5",
+  "integrated_upstream_commit": "e8eb53aec9a3ab874ba8d1b4d17027f0644368d9",
+  "native_queue_validation": {
+    "real_desktop": true,
+    "cli_version": "codex-cli 0.166.0-alpha.5.1",
+    "installed_desktop": {
+      "bundle_id": "com.openai.codex",
+      "version": "26.1027.61615",
+      "build": "24141"
+    },
+    "idle_consumption": "passed",
+    "busy_turn_preserved_and_queued_turn_executed_afterward": "passed",
+    "receiver_current_turn_proof": "passed",
+    "real_test_threads_created": 1,
+    "real_test_threads_archived": 1,
+    "queue_submissions": 5,
+    "compatibility_evidence_digest": "c231dbeb2441a193760eff58e60f53a945da4b1d3720c9e192c574682ab8394d",
+    "receiver_evidence_digest": "0fab5f2d58d5bb0bab6515f8fd957137def181a99dc6948be858068428983571",
+    "raw_evidence_exported": false,
+    "app_server_client_used": false,
+    "resume_flag_used": false,
+    "remote_flag_used": false
   },
-  "live_runtime_modified": false,
-  "production_automations_changed": 0,
+  "coverage": [
+    "Original scope, ownership, approval, CI, review and merge guards",
+    "Queue acceptance versus actual execution, uncertain sends, and consumption before transport ACK",
+    "Immutable events, typed waits, revisable plans and stale action contexts",
+    "Actual native desktop identity/message proofs and per-host queue validation gate",
+    "Schema-2 migration refuses a live old runtime, backs up configuration, pauses old active tasks and preserves receipts",
+    "Cross-instance isolation and legacy immediate-human-trigger behavior"
+  ],
+  "live_workflow_instances_modified": false,
   "models_or_permissions_changed": false,
-  "target_computer_installed": false,
-  "operational_data_exported": false,
   "credentials_exported": false,
+  "operational_data_exported": false,
   "limits": [
-    "Target-host shared App Server access and required observation APIs must pass runtime probe --task before activation",
-    "Actual model reasoning quality, deployment latency and production P95 are not measured",
-    "Native approvals require a working host approval interface; the runtime never grants them automatically",
-    "App-server idle checks are not an atomic CAS against concurrent user interaction"
-  ]
+    "Actual queue validation covers the current local desktop environment; revalidate after host, CLI or App changes",
+    "No production latency percentile or general task reasoning quality claim",
+    "Native approval dialogs were not deliberately triggered; runtime does not handle approval requests",
+    "Queue acceptance while offline or App closed is not proof of execution; unknown results are not automatically retried"
+  ],
+  "fixture_fix": "Pre-existing concurrent JSON request-log rewrites were replaced with append-only records; production collection remains parallel"
 }

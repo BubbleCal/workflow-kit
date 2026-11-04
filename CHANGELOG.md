@@ -1,5 +1,13 @@
 # Changes
 
+## 0.4.0
+
+Remove the direct App Server client and RPC test fixture. Submit event and inbox messages only through `codex queue`, without resume, remote endpoints, session-control calls or model/permission overrides. Require actual idle and busy desktop-consumption evidence before activation; distinguish queue acceptance from receiver execution and preserve uncertain sends.
+
+Keep goal contracts, revisable plans, source ingestion and existing action/CI/review guards. Add native-tool receiver proofs, safe schema-2 migration with backups and paused old tasks, and receipt-preserving recovery. Fix a pre-existing concurrent JSON log rewrite in the collector test fixture using append-only records; production collection stays parallel.
+
+Real desktop tests covered idle consumption, busy turn preservation followed by queued consumption, and current-turn proof verification. The temporary test conversation was archived after completion. See NATIVE_QUEUE_VALIDATION.md for the evidence boundary.
+
 ## 0.3.1
 
 Recognize verified absence of hosted CI for exact current repository/head/base with complete empty provider surfaces, an unprotected/rule-free base and matching local validation. Unknown or nonempty checks remain blocked; preserve Gatekeeper, semantic feedback and ordinary merge gates. Include the0.3.0 reactive runtime without changing existing task modes.

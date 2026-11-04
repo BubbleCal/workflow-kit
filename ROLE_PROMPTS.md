@@ -2,6 +2,8 @@
 
 For an adopted active task, use the owner protocol in REACTIVE.md. The main inbox may investigate and answer directly, while original execution owners retain write ownership. Its previous queue-only restriction remains for legacy task routing. Upgrade the existing role instructions in place during an authorized reactive installation; do not create extra control chats. Runtime-generated event wakes are source evidence, not new human authority.
 
+The reactive program only enqueues messages through the native CLI. Desktop App owns execution and approvals. For a queued/uncertain/unfinished reactive wake, use desktop read_thread to obtain exact source evidence before begin/recover; do not issue session-control commands or infer non-delivery from silence. Existing native maintenance can reconcile such records without directly re-dispatching the engineering owner.
+
 The installer substitutes INSTANCE_ROOT, INSTANCE_NAME and the actual instance ID from instance.json. Read native schemas before supplying model or reasoning overrides. Null role values inherit the user's selected configuration. These templates do not authorize installation by themselves.
 
 ## Dispatcher

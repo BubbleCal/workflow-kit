@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { activeScopeExclusions } from './scope-exclusions.mjs';
+import { verifyExecutionProof, verifyNativeBinding } from './native-queue.mjs';
 
 export const canonical = value => JSON.stringify(value && typeof value === 'object'
   ? Array.isArray(value) ? value.map(v => JSON.parse(canonical(v)))
@@ -8,7 +9,6 @@ export const canonical = value => JSON.stringify(value && typeof value === 'obje
 export const fingerprint = value => createHash('sha256').update(canonical(value)).digest('hex');
 const required = (value, name) => { if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required`); };
 const parse = value => value ? JSON.parse(value) : null;
-const terminal = new Set(['completed', 'failed', 'interrupted']);
 const liveAction = "state IN ('claimed','uncertain')";
 
 // The event log, current facts, plans and wake outbox share control.sqlite.
@@ -65,6 +65,12 @@ export class ReactiveState {
       CREATE TABLE IF NOT EXISTS rt_handoffs (
         key TEXT PRIMARY KEY, task_id TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL);
     `);
+    this.atomic(()=>{
+      const columns=new Set(db.prepare('PRAGMA table_info(rt_wakes)').all().map(c=>c.name));
+      if(!columns.has('transport'))db.exec("ALTER TABLE rt_wakes ADD COLUMN transport TEXT NOT NULL DEFAULT 'legacy_app_server'");
+      if(!columns.has('queue_id'))db.exec('ALTER TABLE rt_wakes ADD COLUMN queue_id TEXT');
+      db.exec("CREATE UNIQUE INDEX IF NOT EXISTS rt_one_pending_delivery ON rt_wakes(task_id) WHERE state IN ('reserved','claimed','sent','queued','uncertain','running')");
+    });
   }
   atomic(fn) {
     this.db.exec('BEGIN IMMEDIATE');
@@ -135,7 +141,7 @@ export class ReactiveState {
       return this.task(task_id);
     });
   }
-  setMode({ task_id, mode, source_message_id, actual_human_verified, observation, legacy_quiescent }) {
+  setMode({ task_id, mode, source_message_id, actual_human_verified, native_binding, queue_compatibility_verified, legacy_quiescent }) {
     if (!['shadow','active','paused','legacy'].includes(mode)) throw new Error('Unknown runtime mode');
     required(source_message_id, 'mode change source');
     if (actual_human_verified !== true) throw new Error('Mode changes require an actual user instruction');
@@ -143,7 +149,9 @@ export class ReactiveState {
       const task = this.task(task_id); if (!task) throw new Error('Unknown task');
       if (task.mode === mode) return task;
       if (mode !== 'paused') {
-        this.assertIdle(task, observation);
+        verifyNativeBinding(native_binding,{thread_id:task.owner_id,workspace:task.contract.workspace,now:this.now()});
+        if(mode==='active'&&queue_compatibility_verified!==true)throw new Error('Verify actual idle and busy desktop queue consumption before activation');
+        this.assertQueueOwner(task);
         if (legacy_quiescent !== true) throw new Error('Finish legacy batches and verify the existing driver before cutover');
         if (this.openWake(task_id) || this.db.prepare(`SELECT 1 FROM actions WHERE task_id=? AND ${liveAction}`).get(task_id))
           throw new Error('Reconcile in-flight deliveries before switching drivers');
@@ -160,21 +168,10 @@ export class ReactiveState {
       return this.task(task_id);
     });
   }
-  assertIdle(task, o) {
-    if (!o || o.thread_id !== task.owner_id || o.project_id !== task.contract.project_id || o.workspace !== task.contract.workspace ||
-        !['idle','notLoaded'].includes(o.status) || !terminal.has(o.turn_status) || !o.turn_id ||
-        o.turn_status==='interrupted' && o.interruption_reconciled!==true ||
-        o.queued_input !== false || o.background_job_running !== false || o.approval_pending !== false ||
-        o.permissions_preserved !== true || !Number.isFinite(o.checked_at) || o.checked_at > this.now()+5000 || this.now()-o.checked_at > 60000)
-      throw new Error('Fresh matching idle owner, empty queue and known jobs/permissions are required');
+  assertQueueOwner(task) {
     const registered = this.registry()?.task_registry?.items?.[task.task_id];
     if (registered && (registered.owner_thread_id !== task.owner_id || registered.hold || registered.recurring_service || registered.existing_driver || registered.existing_driver_owns_step))
       throw new Error('Registered owner, hold or existing driver prevents automatic work');
-    for(const source of task.contract.job_sources.filter(s=>s!=='native')) {
-      const f=this.db.prepare('SELECT * FROM rt_facts WHERE task_id=? AND subject=?').get(task.task_id,source);
-      if(!f || this.now()-f.checked_at>60000 || !['complete','failed','absent'].includes(parse(f.data)?.state))
-        throw new Error(`External job source is running or unknown: ${source}`);
-    }
   }
   ingest(input) { return this.atomic(() => this.ingestInside(input)); }
   ingestInside({ event_id, task_id, source, subject, type, observed_at, payload, evidence_ref, debounce_ms = 1000 }) {
@@ -248,12 +245,13 @@ export class ReactiveState {
       const task = this.task(task_id);
       if (!task || task.owner_id !== owner_thread_id || task.context_rev !== expected_context_rev || task.plan_rev !== expected_plan_rev)
         throw new Error('Task owner or context/plan changed; read a fresh checkpoint');
+      if(task.mode==='paused'&&['continue','revise'].includes(disposition))throw new Error('Paused task may checkpoint but cannot resume engineering');
       const wake = wake_id ? this.db.prepare('SELECT * FROM rt_wakes WHERE id=? AND task_id=?').get(wake_id,task_id) : null;
       if (task.mode === 'active' && (!wake || wake.state !== 'running')) throw new Error('An active task decision needs its acknowledged execution wake');
       let revision=task.plan_rev;
       if (plan) {
         this.validatePlan(task,plan);
-        if (this.db.prepare(`SELECT 1 FROM actions WHERE task_id=? AND kind<>'task_wake' AND ${liveAction}`).get(task_id))
+        if (this.db.prepare(`SELECT 1 FROM actions WHERE task_id=? AND kind NOT IN ('task_wake','task_queue') AND ${liveAction}`).get(task_id))
           throw new Error('Reconcile in-flight effects before replacing their plan');
         revision++;
         this.db.prepare("UPDATE rt_plans SET state='superseded' WHERE task_id=? AND state='current'").run(task_id);
@@ -264,7 +262,7 @@ export class ReactiveState {
       if (disposition === 'complete') {
         if (!Array.isArray(acceptance) || task.contract.requirements.some(r=>!acceptance.some(a=>a.requirement_id===r.id && a.passed===true && a.evidence_ref)))
           throw new Error('Completion requires evidence for every contract requirement');
-        if (this.db.prepare(`SELECT 1 FROM actions WHERE task_id=? AND kind<>'task_wake' AND ${liveAction}`).get(task_id))
+        if (this.db.prepare(`SELECT 1 FROM actions WHERE task_id=? AND kind NOT IN ('task_wake','task_queue') AND ${liveAction}`).get(task_id))
           throw new Error('Uncertain external effects prevent whole-task completion');
       }
       const id=randomUUID(), data={reason,evidence_refs,alternatives_considered,acceptance,wait};
@@ -299,31 +297,34 @@ export class ReactiveState {
     }
   }
   openWake(task_id) {
-    const w=this.db.prepare("SELECT * FROM rt_wakes WHERE task_id=? AND state IN ('reserved','claimed','sent','uncertain','running')").get(task_id);
+    const w=this.db.prepare("SELECT * FROM rt_wakes WHERE task_id=? AND state IN ('reserved','claimed','sent','queued','uncertain','running')").get(task_id);
     return w?{...w,event_ids:parse(w.event_ids)}:null;
   }
-  reserveWake(task_id, observation) {
+  reserveQueuedWake(task_id) {
     return this.atomic(()=>{
       const task=this.task(task_id);
       if (!task || task.mode!=='active' || task.wake_at===null || task.wake_at>this.now()) return {reserved:false,reason:'not_due'};
       const old=this.openWake(task_id); if(old)return {reserved:false,reason:'wake_in_flight',wake:old};
-      this.assertIdle(task,observation);
+      this.assertQueueOwner(task);
       const events=this.db.prepare('SELECT event_id FROM rt_events WHERE task_id=? AND disposition IS NULL ORDER BY context_rev,event_id').all(task_id).map(e=>e.event_id);
       const id=`runtime:${task_id}:wake:${task.wake_seq+1}`;
-      this.db.prepare("INSERT INTO rt_wakes(id,task_id,context_rev,plan_rev,event_ids,state,preflight_turn,created_at) VALUES (?,?,?,?,?,'reserved',?,?)")
-        .run(id,task_id,task.context_rev,task.plan_rev,canonical(events),observation.turn_id,this.now());
+      this.db.prepare("INSERT INTO rt_wakes(id,task_id,context_rev,plan_rev,event_ids,state,transport,created_at) VALUES (?,?,?,?,?,'reserved','native_queue',?)")
+        .run(id,task_id,task.context_rev,task.plan_rev,canonical(events),this.now());
       this.db.prepare('UPDATE rt_tasks SET wake_seq=wake_seq+1 WHERE task_id=?').run(task_id);
       return {reserved:true,wake:this.openWake(task_id)};
     });
   }
-  begin({ task_id, wake_id, owner_thread_id, turn_id, evidence_ref }) {
-    required(turn_id,'actual turn'); required(evidence_ref,'actual execution evidence');
+  begin({ task_id, wake_id, native_proof }) {
     return this.atomic(()=>{
       const task=this.task(task_id),wake=this.openWake(task_id);
-      if(!task || task.mode!=='active' || task.owner_id!==owner_thread_id || wake?.id!==wake_id ||
-        !['claimed','sent','uncertain','running'].includes(wake.state) || turn_id===wake.preflight_turn || wake.turn_id && wake.turn_id!==turn_id)
+      if(!task || task.mode!=='active' || wake?.id!==wake_id || wake.transport!=='native_queue' ||
+        !['claimed','queued','uncertain','running'].includes(wake.state))
         throw new Error('Execution must match the original task, wake and actual new turn');
+      const {turn_id,evidence_ref}=verifyExecutionProof(native_proof,{thread_id:task.owner_id,workspace:task.contract.workspace,prompt:wake.prompt,now:this.now()});
+      if(wake.turn_id&&wake.turn_id!==turn_id)throw new Error('A different turn already owns this wake');
       this.db.prepare("UPDATE rt_wakes SET state='running',turn_id=?,started_at=COALESCE(started_at,?),evidence_ref=? WHERE id=?").run(turn_id,this.now(),evidence_ref,wake_id);
+      this.db.prepare("UPDATE actions SET state='sent',receipt=?,updated_at=? WHERE action_key=? AND kind='task_queue' AND state IN ('claimed','uncertain')")
+        .run(canonical({outcome:'sent',native_consumption:{turn_id,evidence_ref}}),this.now(),wake_id);
       return this.checkpoint(task_id);
     });
   }
@@ -339,14 +340,16 @@ export class ReactiveState {
     });
   }
   actionReasons(kind,task_id,payload) {
+    if(kind==='task_wake')return ['direct_app_server_transport_removed'];
     const owned=payload?.thread_id?this.db.prepare("SELECT task_id FROM rt_tasks WHERE owner_id=? AND mode IN ('active','paused')").get(payload.thread_id):null;
-    if(owned && owned.task_id!==task_id && ['dispatch','task_wake'].includes(kind))return ['reactive_owner_has_another_task'];
+    if(owned && owned.task_id!==task_id && ['dispatch','task_queue'].includes(kind))return ['reactive_owner_has_another_task'];
     const task=this.task(task_id);
-    if(kind==='task_wake' && !task)return ['reactive_task_not_registered'];
-    if(!task || !['active','paused'].includes(task.mode))return kind==='task_wake'?['reactive_task_not_active']:[];
-    if(kind==='task_wake') {
+    if(kind==='task_queue' && !task)return ['reactive_task_not_registered'];
+    if(!task || !['active','paused'].includes(task.mode))return kind==='task_queue'?['reactive_task_not_active']:[];
+    if(kind==='task_queue') {
+      try{this.assertQueueOwner(task);}catch{return ['registered_owner_or_hold_changed'];}
       const wake=this.openWake(task_id);
-      return task.mode==='active' && wake?.id===payload.wake_id && ['reserved','claimed'].includes(wake.state) &&
+      return task.mode==='active' && wake?.id===payload.wake_id && wake.transport==='native_queue' && ['reserved','claimed'].includes(wake.state) &&
         task.context_rev===wake.context_rev && task.owner_id===payload.thread_id && !!wake.prompt && wake.prompt===payload.prompt &&
         canonical(payload.scope_keys??[])===canonical(task.contract.scope_keys??[]) ? [] : ['reactive_wake_changed_or_paused'];
     }

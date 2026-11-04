@@ -22,12 +22,12 @@ export function stageScopeExclusion(registry, goal, stage) {
 }
 
 export function scopeActionReasons(registry, kind, taskId, payload={}, evidence={}) {
-  if(!['task_wake','dispatch','create_thread','pr_ready','slack_pr','merge'].includes(kind))return [];
+  if(!['task_queue','task_wake','dispatch','create_thread','pr_ready','slack_pr','merge'].includes(kind))return [];
   const rules=activeScopeExclusions(registry,taskId);if(!rules.length)return [];
   const scopes=[...(Array.isArray(payload.scope_keys)?payload.scope_keys:[]),...(Array.isArray(evidence.scope_keys)?evidence.scope_keys:[])], url=payload.pr_url??payload.message;
   if(rules.some(r=>(Array.isArray(scopes)&&scopes.some(k=>k===r.key||(r.targets?.scope_keys??[]).includes(k))) ||
     url && (r.targets?.pr_urls??[]).includes(url)))return ['scope_excluded_by_actual_user'];
-  if(['task_wake','dispatch','create_thread'].includes(kind) || !rules.every(r=>Array.isArray(r.targets?.pr_urls)))
+  if(['task_queue','task_wake','dispatch','create_thread'].includes(kind) || !rules.every(r=>Array.isArray(r.targets?.pr_urls)))
     if(!Array.isArray(scopes)||!scopes.length||scopes.some(k=>typeof k!=='string'||!k.trim()))return ['explicit_remaining_scope_binding_required'];
   return [];
 }

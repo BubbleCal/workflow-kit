@@ -302,9 +302,38 @@ export class Mailbox {
     const r = this.db.prepare("UPDATE batches SET prompt=? WHERE id=? AND state='reserved' AND prompt IS NULL").run(prompt, id);
     if (!r.changes && this.get(id)?.prompt !== prompt) throw new Error('A batch prompt cannot change after reservation');
   }
+  reserveQueuedInbox(taskIds) {
+    return this.atomic(()=>{
+      const lane='inbox',s=this.db.prepare('SELECT * FROM lane_state WHERE lane=?').get(lane);
+      if(!s.enabled)return {reserved:false,reason:'lane_paused'};
+      const current=this.db.prepare("SELECT id,state FROM batches WHERE lane=? AND state IN ('reserved','sending','sent','uncertain','running')").get(lane);
+      if(current)return {reserved:false,reason:'batch_in_flight',batch:current};
+      const rows=this.db.prepare("SELECT * FROM mail WHERE lane='inbox' AND state='pending' ORDER BY seq").all()
+        .filter(r=>taskIds.has(JSON.parse(r.payload).task_id)).slice(0,5);
+      if(!rows.length)return {reserved:false,reason:'nothing_due'};
+      const id=randomUUID(),snapshot={id,lane,run_id:id,delivery_transport:'native_queue',transition_contract_version:this.transitionVersion(),
+        created_at:new Date(this.now()).toISOString(),signal_generation:s.generation,intake_due:false,budget_minutes:5,
+        items:rows.map(r=>({key:r.item_key,kind:r.kind,payload:JSON.parse(r.payload),seq:r.seq}))};
+      this.db.prepare("INSERT INTO batches(id,lane,state,item_ids,signal_generation,intake_due,snapshot,created_at) VALUES (?,?,'reserved',?,?,0,?,?)")
+        .run(id,lane,JSON.stringify(rows.map(r=>r.seq)),s.generation,JSON.stringify(snapshot),this.now());
+      for(const row of rows)this.db.prepare("UPDATE mail SET state='in_batch',batch_id=? WHERE seq=? AND state='pending'").run(id,row.seq);
+      return {reserved:true,batch:this.get(id)};
+    });
+  }
+  authorizeQueueSend(id) {
+    return this.atomic(()=>{
+      const b=this.get(id);
+      if(!b||b.lane!=='inbox'||b.snapshot.delivery_transport!=='native_queue'||b.state!=='reserved'||!b.prompt)
+        return {send:false,reason:'native_queue_batch_required'};
+      if(!this.db.prepare("SELECT enabled FROM lane_state WHERE lane='inbox'").get().enabled)return {send:false,reason:'lane_paused'};
+      this.db.prepare("UPDATE batches SET state='sending',dispatched_at=? WHERE id=?").run(this.now(),id);
+      return {send:true,transport:'native_queue',prompt:b.prompt};
+    });
+  }
   authorizeSend(id, observation) {
     return this.atomic(() => {
       const b = this.get(id); if (!b) throw new Error('Unknown batch');
+      if(b.snapshot.delivery_transport==='native_queue')return {send:false,reason:'native_queue_transport_only'};
       if (b.state !== 'reserved') return { send: false, reason: b.state };
       if (!isIdle(observation, this.now()) || observation.thread.id !== laneThread[b.lane] || observation.latestTurn.id !== b.preflight_turn) {
         return { send: false, reason: 'target_changed_or_busy' };
