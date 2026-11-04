@@ -176,3 +176,12 @@ excluded work cannot revive through expiring waits or automatic recovery. Record
 quiescent excluded stages as skipped, never passed. Preserve active/uncertain
 receipts, completed history and mandatory CI. Explicit remaining scope lets
 independent work continue; only a new actual user source can lift the exclusion.
+
+## Immediate human producer integration
+
+Follow IMMEDIATE_HUMAN_TRIGGER.md. Authenticated actionable human admission now
+returns a durable immediate intent and guarded native service-call sequence.
+Follow it before ending; original coordinator direct-send prohibition remains.
+Busy service intents coalesce, plan watermarks prove actual opportunity, and
+uncertain transport receipts remain separate. Pure answers/machine events do not
+trigger. Preserve cadence, native settings and existing task ownership.

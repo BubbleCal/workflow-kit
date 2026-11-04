@@ -1,3 +1,4 @@
+import { ImmediateTriggers } from './immediate-trigger.mjs';
 import { readTaskRegistry } from './task-ownership.mjs';
 import { stageScopeExclusion } from './scope-exclusions.mjs';
 import { bindings, INSTANCE_ROOT, requireBindings, shellQuote } from './instance.mjs';
@@ -84,6 +85,7 @@ export class Mailbox {
       INSERT OR IGNORE INTO lane_state(lane) VALUES ('coordinator'),('inbox'),('maintenance');`);
     this.db.exec(`CREATE TABLE IF NOT EXISTS transition_settings (id INTEGER PRIMARY KEY, version INTEGER NOT NULL, source_message_id TEXT);
       INSERT OR IGNORE INTO transition_settings VALUES (1,1,NULL);`);
+    this.immediate = new ImmediateTriggers(this.db,{now:this.now,registry:this.taskRegistry});
     this.progress = new ProgressLedger(this.db, this.now, {scopeExclusion:(g,s)=>stageScopeExclusion(this.taskRegistry(),g,s)});
     this.waits = new WaitLedger(this.db,{now:this.now,scopeExclusion:(g,s)=>stageScopeExclusion(this.taskRegistry(),g,s),checkPr:condition=>
       this.lifecycleAccess(l=>l.checkWait(condition)) ?? {valid:false,reason:'PR_source_unavailable'},checkHuman:data=>{
@@ -142,7 +144,7 @@ export class Mailbox {
     try { const r = fn(); this.db.exec('COMMIT'); return r; }
     catch (e) { this.db.exec('ROLLBACK'); throw e; }
   }
-  enqueue({ key, lane, kind, payload }) {
+  enqueue({ key, lane, kind, payload, human_trigger }) {
     required(key, 'key');
     if (!laneThread[lane]) throw new Error(`Unknown lane: ${lane}`);
     if (lane === 'inbox' && !['decision', 'action_required', 'important_completion', 'answer'].includes(kind)) throw new Error('Routine inbox notifications are forbidden');
@@ -157,14 +159,16 @@ export class Mailbox {
       const old = this.db.prepare('SELECT * FROM mail WHERE item_key=?').get(key);
       if (old) {
         if (old.digest !== d) throw new Error(`Immutable mailbox item changed: ${key}`);
-        return { queued: false, key, state: old.state, seq: old.seq, reason: 'duplicate' };
+        const immediate=human_trigger?this.immediate.admit(old,human_trigger):null;
+        return { queued: false, key, state: old.state, seq: old.seq, reason: 'duplicate',...(immediate?{immediate_trigger:immediate}:{}) };
       }
       if (lane === 'maintenance' && kind === 'daily_review' && payload?.manual_request !== true) {
         const pending = this.db.prepare("SELECT item_key FROM mail WHERE lane='maintenance' AND kind='daily_review' AND COALESCE(json_extract(payload,'$.manual_request'),0)<>1 AND state IN ('pending','in_batch') LIMIT 1").get();
         if (pending) return { queued: false, key, reason: 'previous_review_unfinished', pending_key: pending.item_key };
       }
       const r = this.db.prepare('INSERT INTO mail(item_key,lane,kind,payload,digest,created_at) VALUES (?,?,?,?,?,?)').run(key, lane, kind, stable(payload), d, this.now());
-      return { queued: true, key, state: 'pending', seq: Number(r.lastInsertRowid), wake_sent: false };
+      const immediate=human_trigger?this.immediate.admit(this.db.prepare('SELECT * FROM mail WHERE seq=?').get(Number(r.lastInsertRowid)),human_trigger):null;
+      return { queued: true, key, state: 'pending', seq: Number(r.lastInsertRowid), wake_sent: false,...(immediate?{immediate_trigger:immediate}:{}) };
     });
   }
   signal(reason = 'periodic') {
@@ -507,7 +511,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     if (input.op === 'enqueue') result = mailbox.enqueue(input);
     else if (input.op === 'signal') result = mailbox.signal(input.reason);
     else if (input.op === 'tick') result = mailbox.tick();
+    else if (input.op === 'human_trigger_status') result = mailbox.immediate.status(input.source_message_id);
     else if (input.op === 'plan') {
+      const triggerWatermark=mailbox.db.prepare('SELECT COALESCE(MAX(seq),0) n FROM mail').get().n;
       mailbox.tick(); result = { deliveries: [], skips: [] };
       result.transitions = mailbox.reconcileTransitions(JSON.parse(readFileSync(resolve(BASE,'registry.json'),'utf8')));
       if (input.watchdog_round_id !== undefined) result.watchdog = mailbox.observeWatchdog({ round_id: input.watchdog_round_id, snapshots: input.snapshots,
@@ -526,6 +532,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
         writeFileSync(`${file}.tmp`, JSON.stringify(mailbox.get(r.batch.id), null, 2) + '\n'); renameSync(`${file}.tmp`, file);
         result.deliveries.push({ batch_id: r.batch.id, lane, thread_id: laneThread[lane], prompt, preflight_turn: r.batch.preflight_turn });
       }
+      const coordinator=(input.snapshots??[]).find(s=>s.thread?.id===COORDINATOR);
+      const at=Date.parse(coordinator?.checked_at);
+      result.immediate_triggers=mailbox.atomic(()=>mailbox.immediate.cover(triggerWatermark,{coordinator_snapshot_verified:!!coordinator&&!coordinator.error&&Number.isFinite(at)&&at<=Date.now()+5000&&Date.now()-at<=60000&&['idle','active','notLoaded','awaiting_input'].includes(coordinator.thread.status?.type),coordinator_status:coordinator?.thread?.status?.type,deliveries:result.deliveries.map(d=>d.batch_id),skips:result.skips.map(s=>({lane:s.lane,reason:s.reason}))}));
     } else if (input.op === 'authorize_send') result = mailbox.authorizeSend(input.batch_id, input.snapshot);
     else if (input.op === 'watchdog_targets') result = mailbox.atomic(() => mailbox.watchdog.select(JSON.parse(readFileSync(resolve(BASE, 'registry.json'), 'utf8')), input.limit));
     else if (input.op === 'watchdog_resolve') result = mailbox.atomic(() => {

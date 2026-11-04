@@ -1,5 +1,9 @@
 # Changes
 
+## 0.2.22
+
+Connect authenticated human admission to durable immediate dispatcher intents, guarded native call preparation/claim and existing transport receipts. Coalesce busy service work, persist actual plan coverage watermarks, retain late inputs and uncertain sends, and preserve pure-answer/machine exclusions and all engineering ownership rules.
+
 ## 0.2.21
 
 Enforce durable user exclusions for exact stages, scopes and PRs. Preserve explicit skipped state separately from passed work, independent successors, actual dependencies, completed history and active/uncertain receipts. Recheck scope at prepare/claim/final delivery; only a new actual user source lifts an exclusion.

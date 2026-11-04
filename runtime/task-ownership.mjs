@@ -7,8 +7,20 @@ export function readTaskRegistry(databasePath) {
   const path = resolve(dirname(databasePath), 'registry.json');
   return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : { task_registry: { items: {} } };
 }
-export function ownershipReasons(kind, taskId, payload, evidence, registry, db) {
+export function ownershipReasons(kind, taskId, payload, evidence, registry, db, actionKey) {
   if (!registry || !['dispatch', 'human_input'].includes(kind)) return [];
+  const dispatcher = registry.queue_transport?.dispatcher_thread_id;
+  if (kind === 'human_input' && payload.thread_id === dispatcher && payload.intent === 'invoke_dispatcher') {
+    const rule = registry.queue_transport?.immediate_human_trigger;
+    const expectedKey = `human-trigger:${payload.source_message_id}:dispatcher`;
+    const authenticated = rule?.enabled === true && evidence.trigger_rule_source_id === rule.source_message_id &&
+      evidence.service_invocation_authorized === true && evidence.actual_human_message_verified === true &&
+      evidence.source_actor_verified === true && payload.source_message_id === evidence.source_message_id &&
+      payload.trigger_action_key === expectedKey && actionKey === expectedKey;
+    const idle = evidence.thread_status === 'idle' && evidence.queued_input === false &&
+      evidence.pending_dispatch === false && evidence.underlying_job_running === false;
+    return authenticated && idle ? [] : ['authenticated_idle_dispatcher_invocation_required'];
+  }
   const controls = [registry.coordinator_thread_id,registry.hub_thread_id,registry.decision_inbox_thread_id,registry.setup_thread_id];
   if (controls.includes(payload.thread_id)) return [];
   const tasks=registry.task_registry?.items??{},task=tasks[taskId];

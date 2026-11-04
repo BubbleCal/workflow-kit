@@ -1,15 +1,15 @@
 {
-  "version": "0.2.21",
-  "verified_at": "2026-11-04T08:51:49.350217+00:00",
+  "version": "0.2.22",
+  "verified_at": "2026-11-04T12:46:20.607008+00:00",
   "environment": {
     "platform": "darwin",
     "architecture": "arm64",
     "node": "v23.11.0"
   },
   "tests": {
-    "runtime": 208,
+    "runtime": 220,
     "portable_integration": 3,
-    "passed": 211,
+    "passed": 223,
     "failed": 0
   },
   "verified": [
@@ -55,7 +55,8 @@
     "Protected result-slot rotation uses only prior first-non-human opportunities; unprocessed tail results retain eligibility, newer arrivals cannot reset it, and human order, ordinary rotation, immutable batches and progress-before-ACK remain protected.",
     "Exact non-blocking-risk Gatekeeper approval is recognized without accepting quoted/conditional/unknown verdicts. Old-head, stale, changed-head, dismissed and later negative/unknown reviews block. Full semantic feedback blocks prepare/claim/final send until explicitly assessed and resolved; CI and ordinary merge guards remain.",
     "Canonical continuation_recovery enters urgent non-human priority immediately; actual-human precedence, protected result slot, retry rotation, fixed-batch immutability and all ordinary dispatch/job/hold/permission/uncertainty guards remain. Generic recovery priorities are unchanged.",
-    "Durable exact stage/scope/PR exclusions survive expired waits and recovery, preserve independent work and explicit skipped-not-passed state, do not satisfy real dependencies or waive CI, and guard prepared/claimed/final review actions. Historical completed and active/uncertain receipts remain; a new actual source is required to lift scope."
+    "Durable exact stage/scope/PR exclusions survive expired waits and recovery, preserve independent work and explicit skipped-not-passed state, do not satisfy real dependencies or waive CI, and guard prepared/claimed/final review actions. Historical completed and active/uncertain receipts remain; a new actual source is required to lift scope.",
+    "Actionable authenticated human admission creates durable immediate service intent and guarded native arguments. Busy/changed service snapshots coalesce; plan watermarks do not cover late arrivals; uncertain sends retain receipts. Pure answers/machine events and unrelated targets cannot trigger. Existing consumed/manual source remains once-only."
   ],
   "operational_data_exported": false,
   "credentials_exported": false,
@@ -82,11 +83,11 @@
   "unloaded_owner_recovery_verified": true,
   "outcome_projection_guards_verified": true,
   "baseline_full_suite": {
-    "version": "0.2.21",
-    "runtime": 208,
+    "version": "0.2.22",
+    "runtime": 220,
     "portable_integration": 3,
-    "passed": 211,
+    "passed": 223,
     "failed": 0
   },
-  "validation_scope": "Full live221 and portable211 suites passed, original expired-wait revival reproduced in isolated pre-fix runtime, and actual source-bound restricted goal replay verified without operational state mutation."
+  "validation_scope": "Full live233 and portable223 suites; real admitted/consumed source replay preserves its existing native invocation and suppresses duplicates. Native heartbeat prompt-only update was guarded and read back; schedule/target/settings unchanged. First new post-install automatic source invocation not yet observed."
 }

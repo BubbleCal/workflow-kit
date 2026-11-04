@@ -388,7 +388,7 @@ export class ControlStore {
     const key = required(input.key, 'action key');
     const scopeReasons=scopeActionReasons(this.taskRegistry(),input.kind,input.task_id,input.payload,input.evidence);
     if(scopeReasons.length)return {prepared:false,allowed:false,reasons:scopeReasons};
-    const ownership = ownershipReasons(input.kind,input.task_id,input.payload,input.evidence,this.taskRegistry(),this.db);
+    const ownership = ownershipReasons(input.kind,input.task_id,input.payload,input.evidence,this.taskRegistry(),this.db,input.key);
     const handoff = input.kind==='create_thread' ? scopedHandoffReasons(input.task_id,input.payload,input.evidence) : [];
     if(ownership.length || handoff.length)return {prepared:false,allowed:false,reasons:[...ownership,...handoff]};
     const prior = this.db.prepare('SELECT payload FROM actions WHERE action_key=?').get(key);
@@ -460,7 +460,7 @@ export class ControlStore {
       const payload = JSON.parse(row.payload);
       const scopeReasons=scopeActionReasons(this.taskRegistry(),row.kind,row.task_id,payload,evidence);
       if(scopeReasons.length)return {claimed:false,allowed:false,reasons:scopeReasons};
-      const ownership = ownershipReasons(row.kind,row.task_id,payload,evidence,this.taskRegistry(),this.db);
+      const ownership = ownershipReasons(row.kind,row.task_id,payload,evidence,this.taskRegistry(),this.db,key);
       const handoff = row.kind==='create_thread' ? scopedHandoffReasons(row.task_id,payload,evidence) : [];
       if(ownership.length || handoff.length)return {claimed:false,allowed:false,reasons:[...ownership,...handoff]};
       if (row.kind === 'archive' && payload.purpose !== 'explicit_owner_replacement' && this.progress?.unfinishedForOwner(payload.thread_id))
@@ -680,8 +680,9 @@ export function routeControlPreparation(input, control, mailbox, now = Date.now(
   }
   const preparation = control.prepare(input);
   if (preparation.allowed === false) return preparation;
+  const triggerProof=notification?null:{actual_human_message_verified:input.evidence.actual_human_message_verified,source_actor_verified:input.evidence.source_actor_verified,source_message_id:input.payload.source_message_id,action_required:input.payload.action_required!==false};
   const queued = existingMail ?? mailbox.enqueue({ key: input.key, lane: notification ? 'inbox' : 'coordinator',
-    kind: notification ? input.payload.category : 'human_command', payload: {
+    kind: notification ? input.payload.category : 'human_command', human_trigger:triggerProof, payload: {
       text, task_id: input.task_id, control_action_key: input.key,
       source_message_id: input.payload.source_message_id ?? null,
       source_thread_id: input.payload.source_thread_id ?? null,
@@ -694,7 +695,8 @@ export function routeControlPreparation(input, control, mailbox, now = Date.now(
     } });
   control.db.prepare("UPDATE actions SET state='queued',receipt=?,updated_at=? WHERE action_key=? AND state IN ('prepared','queued')")
     .run(JSON.stringify({ mailbox_key: input.key, sequence: queued.seq }), now, input.key);
-  return { prepared: false, queued: true, key: input.key, mailbox_state: queued.state, send_tool_forbidden: true, next: 'End this turn; the dispatcher delivers only after the destination is idle.' };
+  const immediate=queued.immediate_trigger ?? (triggerProof?mailbox.atomic(()=>mailbox.immediate.admit(mailbox.db.prepare('SELECT * FROM mail WHERE item_key=?').get(input.key),triggerProof)):null);
+  return { prepared: false, queued: true, key: input.key, mailbox_state: queued.state, send_tool_forbidden: true, ...(immediate?.length?{immediate_trigger:immediate}:{}), next: immediate?.some(x=>!x.covered)?'Immediately read the registered dispatcher native snapshot and call control human_trigger_prepare, then a second snapshot and human_trigger_claim. Only send its returned native_arguments on send=true; settle exact receipt. Never directly send to coordinator.':'End this turn; queued input remains durable.' };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -715,7 +717,11 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       if (existsSync(registry)) control.importLegacy(JSON.parse(readFileSync(registry, 'utf8')).outbox ?? []);
     }
     const operations = {
-      observe: () => control.observe(input), prepare: () => {
+      observe: () => control.observe(input),
+      human_trigger_status: () => {mailbox ??= new Mailbox(resolve(base,'mailbox.sqlite'));return mailbox.immediate.status(input.source_message_id,control);},
+      human_trigger_prepare: () => {mailbox ??= new Mailbox(resolve(base,'mailbox.sqlite'));return mailbox.immediate.invocation(input.source_message_id,input.snapshot,control);},
+      human_trigger_claim: () => {mailbox ??= new Mailbox(resolve(base,'mailbox.sqlite'));return mailbox.immediate.invocation(input.source_message_id,input.snapshot,control,true);},
+      prepare: () => {
         if (input.kind === 'notify' || input.kind === 'human_input' && input.payload?.thread_id === COORDINATOR) {
           mailbox ??= new Mailbox(resolve(base, 'mailbox.sqlite'));
           return routeControlPreparation(input, control, mailbox);
