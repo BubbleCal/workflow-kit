@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { reviewWindowAt, REVIEW_WINDOW } from './review-window.mjs';
+import { reviewWindowAt, readReviewWindow } from './review-window.mjs';
 import { readDependencyPolicy, forkRoute, releaseSuccessorVerified } from './dependency-provenance.mjs';
 import { ciFailures } from './ci-state.mjs';
 import { reviewStageReasons } from './pr-review-gates.mjs';
@@ -126,7 +126,7 @@ export class LifecycleLedger {
         {pr_url:url,expected_head_sha:s.head_sha},s,this.now(),20*60000);
       if(stageReasons.length) return answer(stageReasons.some(r=>r.includes('CI'))?'review_ci_pending':'gatekeeper_pending',
         stageReasons.some(r=>r.includes('CI'))?'verify_review_ci':'verify_gatekeeper',{gate_reasons:stageReasons});
-      const window = reviewWindowAt(this.now(), REVIEW_WINDOW);
+      const window = reviewWindowAt(this.now(), readReviewWindow());
       if (window.blocked) return answer('review_window', null, { due_at: window.next_eligible_at });
       return answer('ready_undelivered', 'deliver_review', { draft: s.draft });
     }

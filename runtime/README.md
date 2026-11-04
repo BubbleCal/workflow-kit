@@ -116,7 +116,7 @@ It is a required workflow check, not an OS/network security boundary.
 ## PR review delivery window
 
 The actual human restriction in pr-review-window.json blocks review delivery
-every day during Asia/Shanghai [04:00,12:00). The runtime reads this persisted
+every day during Asia/Shanghai [03:00,10:00). The runtime reads this persisted
 rule at prepare, claim and immediately before send. Invalid configuration fails
 closed for review delivery. It does not pause development, tests, internal review,
 repairs or existing merge gates.
@@ -129,11 +129,11 @@ bypass the review-delivery window. Worker milestones queue readiness evidence to
 the existing coordinator. New necessary worker dispatches include this rule;
 never interrupt running owners merely to broadcast it.
 
-A valid prepare inside the window persists state=deferred and due=noon, returning
+A valid prepare inside the window persists state=deferred and due=the saved window end, returning
 deferred=true and send_tool_forbidden=true. This is saved work, not a failure or
 human-decision blocker. status exposes deferred_reviews and prepared_reviews,
 including earlier prepared actions. Each existing coordinator round checks them;
-before noon leave them quiet and do independent work. At/after noon, obtain fresh
+before 10:00 leave them quiet and do independent work. At/after 10:00, obtain fresh
 head/readiness/hold/dedup evidence and claim the same key. If its head changed,
 cancel only the verified unsent old action and prepare the current cycle once;
 never mutate its immutable payload or replay a sent URL.
@@ -142,7 +142,7 @@ For either review kind, immediately before invoking the external tool call
 authorize_review_send with key, attempt_id, owner, fresh evidence and
 operation_not_started=true. That last assertion must be true for this attempt.
 Only send=true permits the exact returned payload, once, immediately and strictly
-before valid_until. A pre-04:00 claim crossing into the window is returned to
+before valid_until. A pre-03:00 claim crossing into the window is returned to
 durable deferred state. An already authorized attempt is never silently released:
 if its outcome is unknown, retain it for normal reconciliation. If a permit
 expires before invocation, prove non-delivery and reconcile; never reuse it.
@@ -377,3 +377,9 @@ inbox rendering use this path; only the coordinator saves question/page state.
 
 TASK_OWNERSHIP_AND_PR_GATES.md defines canonical chat checks, scoped checkpoint
 handoff, applicable_ci/gatekeeper evidence and actual ready/send gates.
+
+Review-window hours are validated same-day HH:MM:SS in Asia/Shanghai and used
+for boundary arithmetic. New guidance uses the saved rule; re-preparing old
+action keys keeps their historical guidance bytes. Actual send gates always
+read the current rule. Existing deferred review due times are interpreted using
+the current window, without resetting claimed/uncertain/sent actions.

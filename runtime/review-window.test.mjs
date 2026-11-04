@@ -23,23 +23,23 @@ function refreshFeedback(c,now) {
 }
 
 test('review delivery obeys Beijing boundaries for Slack and draft-to-ready', () => {
-  for (const kind of ['slack_pr','pr_ready']) for (const [time, allowed] of [['03:59:59',true],['04:00:00',false],['11:59:59',false],['12:00:00',true]]) {
+  for (const kind of ['slack_pr','pr_ready']) for (const [time, allowed] of [['02:59:59',true],['03:00:00',false],['09:59:59',false],['10:00:00',true]]) {
     const now = at(time), a = action(now, kind);
     assert.equal(assess(kind, a.payload, a.evidence, now).allowed, allowed, kind + ':' + time);
   }
 });
 
-test('deferred review survives restart, requires fresh matching evidence at noon, and sends only once', () => {
+test('deferred review survives restart, requires fresh matching evidence at the window end, and sends only once', () => {
   const dir = mkdtempSync(join(tmpdir(),'review-window-')), path = join(dir,'actions.sqlite');
-  let now = at('04:00:00'), c = refreshFeedback(new ControlStore(path, { now: () => now }),now);
+  let now = at('03:00:00'), c = refreshFeedback(new ControlStore(path, { now: () => now }),now);
   const a = action(now);
   try {
     assert.equal(c.prepare(a).deferred, true);
-    assert.equal(c.status().deferred_reviews[0].due, at('12:00:00'));
+    assert.equal(c.status().deferred_reviews[0].due, at('10:00:00'));
     c.close(); c = new ControlStore(path, { now: () => now });
     assert.equal(c.prepare(a).state, 'deferred');
     assert.equal(c.claim({ key: a.key, owner: 'coordinator', evidence: evidence(now) }).claimed, false);
-    now = at('12:00:00');
+    now = at('10:00:00');
     refreshFeedback(c,now);
     assert.equal(c.claim({ key: a.key, owner: 'coordinator', evidence: a.evidence }).claimed, false);
     assert.equal(c.claim({ key: a.key, owner: 'coordinator', evidence: { ...evidence(now), current_head_sha: 'b'.repeat(40) } }).claimed, false);
@@ -53,22 +53,22 @@ test('deferred review survives restart, requires fresh matching evidence at noon
   } finally { c.close(); rmSync(dir,{recursive:true,force:true}); }
 });
 
-test('both prepared and claimed actions are stopped when the send crosses 04:00', () => {
+test('both prepared and claimed actions are stopped when the send crosses 03:00', () => {
   for (const claimed of [false,true]) {
-    let now = at('03:59:59'); const c = new ControlStore(':memory:',{now:()=>now}), a = action(now);
+    let now = at('02:59:59'); const c = new ControlStore(':memory:',{now:()=>now}), a = action(now);
     refreshFeedback(c,now);c.prepare(a); const claim = claimed ? c.claim({ key:a.key, owner:'coordinator', evidence:evidence(now) }) : null;
-    now = at('04:00:00');
+    now = at('03:00:00');
     const result = claimed ? c.authorizeReviewSend({ key:a.key, attempt_id:claim.attempt_id, owner:'coordinator', evidence:evidence(now), operation_not_started:true }) : c.claim({key:a.key,owner:'coordinator',evidence:evidence(now)});
     assert.equal(result.deferred,true); assert.equal(c.status().deferred_reviews.length,1); c.close();
   }
 });
 
 test('an already authorized but uncertain send is not silently reset across the boundary', () => {
-  let now = at('03:59:59'); const c = new ControlStore(':memory:',{now:()=>now}), a=action(now);
+  let now = at('02:59:59'); const c = new ControlStore(':memory:',{now:()=>now}), a=action(now);
   refreshFeedback(c,now);c.prepare(a); const claim=c.claim({key:a.key,owner:'coordinator',evidence:evidence(now)});
   const args={key:a.key,attempt_id:claim.attempt_id,owner:'coordinator',evidence:evidence(now),operation_not_started:true};
-  const permit=c.authorizeReviewSend(args);assert.equal(permit.send,true);assert.equal(permit.valid_until,at('04:00:00'));
-  now=at('04:00:00'); assert.equal(c.authorizeReviewSend({...args,evidence:evidence(now)}).send,false);
+  const permit=c.authorizeReviewSend(args);assert.equal(permit.send,true);assert.equal(permit.valid_until,at('03:00:00'));
+  now=at('03:00:00'); assert.equal(c.authorizeReviewSend({...args,evidence:evidence(now)}).send,false);
   assert.equal(c.db.prepare('SELECT state FROM actions WHERE action_key=?').get(a.key).state,'claimed');c.close();
 });
 

@@ -399,8 +399,8 @@ export class ControlStore {
     }
     if (!prior || JSON.parse(prior.payload).engineering_guidance_version === 1)
       input = { ...input, payload: withEngineeringPrinciples(input.kind, input.payload) };
-    if (!prior || JSON.parse(prior.payload).review_window_guidance_version === 1)
-      input = { ...input, payload: withReviewWindowGuidance(input.kind, input.payload) };
+    if (!prior || [1,2].includes(JSON.parse(prior.payload).review_window_guidance_version))
+      input = { ...input, payload: withReviewWindowGuidance(input.kind, input.payload, prior ? JSON.parse(prior.payload) : undefined) };
     const kind = required(input.kind, 'kind');
     const task = required(input.task_id, 'task_id');
     if (!KINDS.has(kind)) throw new Error(`Unsupported action kind: ${kind}`);
@@ -450,7 +450,8 @@ export class ControlStore {
       if (!['prepared','deferred'].includes(row.state)) return { claimed: false, reason: row.state };
       if (isReviewDelivery(row.kind) && reviewWindowAt(this.now(),this.reviewRule()).blocked)
         return { claimed: false, ...this.deferReview(key,this.reviewRule()) };
-      if (row.due > this.now()) return { claimed: false, reason: 'backoff', due: row.due };
+      if (row.due > this.now() && !(isReviewDelivery(row.kind) && row.state==='deferred' && row.last_error==='review_delivery_blackout'))
+        return { claimed: false, reason: 'backoff', due: row.due };
       const blocked = this.db.prepare("SELECT action_key FROM actions WHERE scope_key=? AND state IN ('claimed','uncertain') AND action_key<>? LIMIT 1").get(row.scope_key, key);
       if (blocked) return { claimed: false, reason: 'scope_in_use', blocking_key: blocked.action_key };
       const payload = JSON.parse(row.payload);
@@ -621,12 +622,17 @@ export class ControlStore {
     return { processing: enabled, running_work_interrupted: false };
   }
   status() {
+    const window=reviewWindowAt(this.now(),this.reviewRule());
     return {
       processing: this.db.prepare("SELECT value FROM settings WHERE key='processing'").get().value === 'on',
       capacity_limits: this.capacity,
-      review_window: reviewWindowAt(this.now(),this.reviewRule()),
+      review_window: window,
       deferred_reviews: this.db.prepare("SELECT action_key,kind,task_id,payload,due,last_error FROM actions WHERE state='deferred' ORDER BY due,created_at").all()
-        .map(row => ({ ...row, payload: JSON.parse(row.payload), due_now: row.due <= this.now() })),
+        .map(row => {
+          const due=isReviewDelivery(row.kind) && row.last_error==='review_delivery_blackout' ?
+            window.blocked?window.next_eligible_at:Math.min(row.due,this.now()):row.due;
+          return { ...row, recorded_due:row.due, due, payload: JSON.parse(row.payload), due_now: due <= this.now() };
+        }),
       prepared_reviews: this.db.prepare("SELECT action_key,kind,task_id,due FROM actions WHERE kind IN ('slack_pr','pr_ready') AND state='prepared' ORDER BY due,created_at").all(),
       events: this.db.prepare('SELECT COUNT(*) AS count FROM events').get().count,
       review_feedback_snapshots: this.db.prepare('SELECT * FROM feedback_snapshots ORDER BY checked_at DESC LIMIT 20').all(),

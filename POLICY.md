@@ -10,7 +10,7 @@ For operation kinds dispatch/create_thread/assign_project/archive/unarchive, the
 
 External comments, replies, reviews, approval submissions and reviewer requests are forbidden. External delivery features are disabled by default. Enable only explicitly authorized features in instance.json, with verified repository allowlist and relevant identity/destination. Disabled features mean use local artifacts and the instance inbox; they are not permission blockers requiring repetitive user questions. Slack, if enabled, allows only the configured canonical PR URL operation. Notion, if enabled, is confined to the configured page and preserved manual content. Automatic merge, if enabled, requires the configured approver's actual approval valid for the current PR, required CI and repository rules.
 
-New review delivery and draft-to-ready transitions are deferred every day in Asia/Shanghai [04:00,12:00). Development, tests, repairs and internal review continue. Review actions use prepare, claim, then authorize_review_send immediately before the external operation. A claim alone is insufficient. Preserve deferred records and recheck current head/readiness/receipts after noon. Unknown outcomes are never blind-retried. Do not create another timer or alternate communication channel.
+New review delivery and draft-to-ready transitions are deferred every day in Asia/Shanghai [03:00,10:00). Development, tests, repairs and internal review continue. Review actions use prepare, claim, then authorize_review_send immediately before the external operation. A claim alone is insufficient. Preserve deferred records and recheck current head/readiness/receipts after 10:00. Unknown outcomes are never blind-retried. Do not create another timer or alternate communication channel.
 
 Use durable goal/stage records and concrete successors before ACKing stage results. Never mark a whole task complete just because a turn ended or a child PR merged. Preserve explicit holds and current jobs. Only archive execution chats after whole-task acceptance, saved deliverables, completed delivery and cleanup. Do not archive control or ongoing service roles.
 
@@ -131,3 +131,13 @@ PR sequence is draft -> current applicable CI pass -> ready -> automatic
 Gatekeeper review/valid fixes -> current CI pass plus applicable Gatekeeper
 approval -> canonical URL delivery. This supersedes earlier delivery-before-CI
 prose. Preserve blackout, technical review, Xuanwo merge and all external gates.
+
+## Current review blackout: 03:00–10:00 Beijing
+
+The latest actual user window change takes effect immediately: every day in
+Asia/Shanghai, block new review delivery and review-intended ready transitions
+from03:00 inclusive to10:00 exclusive. The saved pr-review-window.json governs
+prepare, claim, final-send and lifecycle waiting; old04:00–12:00 timing is
+historical. Opening the window does not waive CI/Gatekeeper/feedback or merge
+gates. Old deferred records become eligible under the current saved window,
+while claimed/uncertain/sent receipts remain protected. No new schedule.

@@ -20,7 +20,7 @@ The installer substitutes INSTANCE_ROOT, INSTANCE_NAME and the actual instance I
 
 五分钟软预算到安全边界后finish。深度实现、review和研究交原执行owner；不等待工程或CI完成。未经用户明确要求不创建新的用户可见工作chat。dispatch/create/archive等必须提供operation_project_verified与operation_project_id，不能将其他项目读回证据改写成当前项目。
 
-外部功能默认关闭：按本地成果和本实例inbox交付，不反复询问启用。启用的PR操作遵守仓库allowlist、当前head授权/验证/批准和送审窗口；slack_pr/pr_ready必须claim后authorize_review_send再立即调用。新PR先draft。12点后由当前轮次重新验证，不新timer、不绕频道。
+外部功能默认关闭：按本地成果和本实例inbox交付，不反复询问启用。启用的PR操作遵守仓库allowlist、当前head授权/验证/批准和送审窗口；slack_pr/pr_ready必须claim后authorize_review_send再立即调用。新PR先draft。10点后由当前轮次重新验证，不新timer、不绕频道。
 
 只把真实决策、请求的答案和重要完成通过notify入队到本实例inbox。配置／日常状态留本地，不send_message_to_thread到决策中心。技术问题路由给原owner，收到答复后按原问题ID去重。只有完整任务验收和收尾之后才归档执行chat，控制角色持续保留。
 
