@@ -1,6 +1,6 @@
 {
-  "version": "0.3.0",
-  "verified_at": "2026-11-04T13:45:22Z",
+  "version": "0.3.1",
+  "verified_at": "2026-11-04T13:56:56.499672+00:00",
   "entry_point": "REACTIVE.md",
   "portable_runtime_cli_tested": true,
   "legacy_setup_preserved": true,

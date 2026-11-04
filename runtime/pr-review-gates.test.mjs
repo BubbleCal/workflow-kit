@@ -7,6 +7,36 @@ function proof(kind='slack_pr') { return {
   applicable_ci:{pr_url:url,head_sha:head,head_before:head,head_after:head,checked_at:new Date(NOW).toISOString(),evidence_ref:'provider-checks',policy_ref:'actual-applicability',complete:true,phase:kind==='pr_ready'?'pre_ready':'pre_delivery',checks:[{id:'ci1',name:'unit',head_sha:head,applicable:true,status:'completed',conclusion:'success'}]},
   gatekeeper:{pr_url:url,head_sha:head,head_before:head,head_after:head,checked_at:new Date(NOW).toISOString(),evidence_ref:'complete-reviews',semantic_assessment_ref:'current-feedback-disposition',identity:{kind:'github_app',login:'example-reviewer',app_id:123,verified:true,evidence_ref:'actual-app-surface'},reviews_complete:true,reviews:[{id:1,user:{login:'example-reviewer[bot]'},state:'COMMENTED',commit_id:head,submitted_at:new Date(NOW-1000).toISOString(),body:'✅ **Gate recommendation: approve.**\nReviewed current code.'}]},
 }; }
+function noCI(kind='pr_ready') {
+  const e=proof(kind),ci=e.applicable_ci,base='b'.repeat(40);ci.checks=[];ci.mode='verified_no_hosted_ci';
+  ci.local_validation={head_sha:head,passed:true,evidence_ref:'actual-local-validation'};
+  ci.no_hosted_ci={repository:'example/project',pr_number:1,head_sha:head,checked_at:new Date(NOW).toISOString(),evidence_ref:'complete-source-absence',complete:true,
+    base_ref:'main',base_before:base,base_after:base,base_ref_before:'main',base_ref_after:'main',
+    check_runs:{complete:true,count:0},statuses:{complete:true,count:0},workflows:{complete:true,count:0},
+    workflow_files:{complete:true,head:[],base:[]},branch_policy:{complete:true,protected:false,effective_rules:[]}};
+  return e;
+}
+test('verified no-hosted-CI permits Ready without inventing a passing check',()=>{
+  const e=noCI();delete e.gatekeeper;assert.deepEqual(reviewStageReasons('pr_ready',payload,e,NOW),[]);
+  assert.deepEqual(e.applicable_ci.checks,[]);
+  const delivery=noCI('slack_pr');delete delivery.gatekeeper;
+  assert.ok(reviewStageReasons('slack_pr',payload,delivery,NOW).includes('fresh_verified_Gatekeeper_surface_required'));
+  assert.deepEqual(reviewStageReasons('slack_pr',payload,noCI('slack_pr'),NOW),[]);
+});
+test('unknown, incomplete, required, stale or mismatched CI absence never qualifies',()=>{
+  const changes=[e=>delete e.applicable_ci.no_hosted_ci,e=>delete e.applicable_ci.policy_ref,e=>e.applicable_ci.no_hosted_ci.complete=false,
+    e=>e.applicable_ci.no_hosted_ci.repository='other/project',e=>e.applicable_ci.no_hosted_ci.pr_number=2,
+    e=>e.applicable_ci.no_hosted_ci.head_sha='c'.repeat(40),e=>e.applicable_ci.no_hosted_ci.base_after='c'.repeat(40),
+    e=>e.applicable_ci.no_hosted_ci.base_ref_after='release',e=>e.applicable_ci.no_hosted_ci.checked_at=new Date(NOW-61000).toISOString(),
+    e=>e.applicable_ci.no_hosted_ci.branch_policy.protected=true,e=>e.applicable_ci.no_hosted_ci.branch_policy.effective_rules=[{type:'required_status_checks'}],
+    e=>e.applicable_ci.no_hosted_ci.branch_policy.complete=false,e=>e.applicable_ci.no_hosted_ci.workflow_files.head=['ci.yml'],
+    e=>e.applicable_ci.no_hosted_ci.workflow_files.base=['ci.yml'],e=>e.applicable_ci.local_validation.passed=false,
+    e=>e.applicable_ci.local_validation.head_sha='c'.repeat(40),e=>delete e.applicable_ci.local_validation.evidence_ref];
+  for(const source of ['check_runs','statuses','workflows'])changes.push(e=>e.applicable_ci.no_hosted_ci[source].count=1,e=>e.applicable_ci.no_hosted_ci[source].complete=false);
+  for(const mutate of changes){const e=noCI();mutate(e);assert.ok(reviewStageReasons('pr_ready',payload,e,NOW).length);}
+  for(const conclusion of ['failure',null,'success']){const e=noCI();e.applicable_ci.checks=[{id:'actual-check',name:'test',head_sha:head,applicable:true,status:conclusion?'completed':'in_progress',conclusion}];assert.ok(reviewStageReasons('pr_ready',payload,e,NOW).length);}
+  const e=proof('pr_ready');e.applicable_ci.checks=[];assert.ok(reviewStageReasons('pr_ready',payload,e,NOW).length);
+});
 test('CI permits first ready without requiring the Gatekeeper review it triggers',()=>{
   const e=proof('pr_ready');delete e.gatekeeper;assert.deepEqual(reviewStageReasons('pr_ready',payload,e,NOW),[]);
   e.applicable_ci.checks.push({id:'gk',name:'Gatekeeper',head_sha:head,applicable:false,status:'completed',conclusion:'skipped',exclusion_reason:'Starts only after ready',applicability_ref:'actual-trigger'});

@@ -1,5 +1,9 @@
 # Changes
 
+## 0.3.1
+
+Recognize verified absence of hosted CI for exact current repository/head/base with complete empty provider surfaces, an unprotected/rule-free base and matching local validation. Unknown or nonempty checks remain blocked; preserve Gatekeeper, semantic feedback and ordinary merge gates. Include the0.3.0 reactive runtime without changing existing task modes.
+
 ## 0.3.0
 
 Add an opt-in reactive runtime for existing instances: durable source events, bounded coalescing, direct owner wakeups, per-task shadow/active/paused/legacy modes, native Codex RPC observation, GitHub polling, immediate inbox delivery and a macOS service entry point. Existing tasks stay on their current driver until explicit cutover.

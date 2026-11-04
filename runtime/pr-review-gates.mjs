@@ -4,6 +4,19 @@ const approvalHeaders = new Set([
   '⚠️ **Gate recommendation: approve with a non-blocking risk.**',
 ]);
 
+function verifiedNoHostedCI(ci, url, head, now, age) {
+  const identity=url?.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/([1-9]\d*)$/),p=ci.no_hosted_ci;
+  return ci.mode==='verified_no_hosted_ci' && !!identity && !!p && p.complete===true &&
+    p.repository===identity[1] && p.pr_number===Number(identity[2]) && p.head_sha===head &&
+    fresh(p.checked_at,now,age) && !!p.evidence_ref && typeof p.base_ref==='string' && !!p.base_ref &&
+    p.base_ref_before===p.base_ref && p.base_ref_after===p.base_ref && /^[a-f0-9]{40,64}$/.test(p.base_before??'') && p.base_after===p.base_before &&
+    ['check_runs','statuses','workflows'].every(k=>p[k]?.complete===true && p[k].count===0) &&
+    p.workflow_files?.complete===true && ['head','base'].every(k=>Array.isArray(p.workflow_files[k]) && p.workflow_files[k].length===0) &&
+    p.branch_policy?.complete===true && p.branch_policy.protected===false &&
+    Array.isArray(p.branch_policy.effective_rules) && p.branch_policy.effective_rules.length===0 &&
+    ci.local_validation?.head_sha===head && ci.local_validation.passed===true && !!ci.local_validation.evidence_ref;
+}
+
 // CI applicability is an explicit source-backed selection. The gate never
 // turns a missing/skipped check or a generic green summary into CI success.
 export function reviewStageReasons(kind, payload, evidence, now, age = 60000) {
@@ -13,10 +26,13 @@ export function reviewStageReasons(kind, payload, evidence, now, age = 60000) {
   const phase = kind === 'pr_ready' ? 'pre_ready' : 'pre_delivery';
   if (!ci || ci.pr_url !== url || ci.head_sha !== head || ci.head_before !== head || ci.head_after !== head ||
       !fresh(ci.checked_at, now, age) || !ci.evidence_ref || !ci.policy_ref || ci.complete !== true || ci.phase !== phase ||
-      !Array.isArray(ci.checks) || !ci.checks.length || ci.checks.some(c => !c.id || !c.name || c.head_sha !== head ||
+      !Array.isArray(ci.checks) || ci.checks.some(c => !c.id || !c.name || c.head_sha !== head ||
         typeof c.applicable !== 'boolean' || !c.applicable && (!c.exclusion_reason || !c.applicability_ref))) {
     reasons.push('fresh_complete_applicable_CI_evidence_required');
-  } else if (!ci.checks.some(c => c.applicable) || ci.checks.some(c => c.applicable &&
+  } else if (!ci.checks.length) {
+    if(!verifiedNoHostedCI(ci,url,head,now,age))reasons.push('fresh_complete_applicable_CI_evidence_required');
+  } else if (ci.mode==='verified_no_hosted_ci') reasons.push('no_hosted_CI_conflicts_with_observed_checks');
+  else if (!ci.checks.some(c => c.applicable) || ci.checks.some(c => c.applicable &&
     (c.status !== 'completed' || c.conclusion !== 'success'))) reasons.push('current_applicable_CI_not_passed');
   if (kind === 'pr_ready') return reasons;
   const g = evidence.gatekeeper;

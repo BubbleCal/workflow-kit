@@ -75,3 +75,9 @@ The per-task migration and provider evidence/projection are coordinator work.
 A guard implementation is not proof the three new native chats were created or
 that a particular PR passed these gates. The source checkpoint and old chat scope
 must remain available until the actual native handoff is verified.
+
+## Verified repositories without hosted CI
+
+Follow NO_HOSTED_CI.md for the narrow source-backed absence contract. Empty
+checks alone still fail. Keep actual local validation, fresh exact repository/
+head/base/rules/workflow evidence and independent Gatekeeper/merge requirements.

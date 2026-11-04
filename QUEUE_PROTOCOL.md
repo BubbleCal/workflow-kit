@@ -174,3 +174,10 @@ Follow it before ending; original coordinator direct-send prohibition remains.
 Busy service intents coalesce, plan watermarks prove actual opportunity, and
 uncertain transport receipts remain separate. Pure answers/machine events do not
 trigger. Preserve cadence, native settings and existing task ownership.
+
+## Verified no-hosted-CI applicability
+
+Follow NO_HOSTED_CI.md. A confirmed absence of checks/workflows and target-branch
+CI policy may permit Ready using same-head local validation, without inventing
+a passing check. Missing/stale/partial facts never qualify. Gatekeeper, full
+feedback, Xuanwo/rules and expected-head merge remain unchanged.

@@ -1,16 +1,16 @@
 {
-  "version": "0.3.0",
-  "verified_at": "2026-11-04T13:45:22Z",
-  "node": "v26.4.0",
+  "version": "0.3.1",
+  "verified_at": "2026-11-04T13:56:56.499672+00:00",
+  "node": "v23.11.0",
   "codex_cli": "0.166.0-alpha.5.1",
   "command": "node workflow.mjs test",
   "exit_code": 0,
-  "runtime_tests": 250,
+  "runtime_tests": 252,
   "portable_integration_tests": 4,
-  "passed": 254,
+  "passed": 256,
   "failed": 0,
-  "tested_sources_digest": "461ea39e00a6c64c8e929ff5480ea0ab4c79309e6cc60e9ee67b1cc592eb37cc",
-  "integrated_upstream_commit": "0605b16f6c31393e36fadeddc0cbdb426994e9b5",
+  "tested_sources_digest": "4d71870964232b69a8ed42b5eacd7e1f32b3a20511120a2a49182492b447d2e1",
+  "integrated_upstream_commit": "32d6e95f616ddcc766558bbe250eaf02ed71b7dc",
   "coverage": [
     "Existing authorization, scope, ownership, CI, feedback, review-window and merge guards",
     "Immutable events, stale observation rejection, bounded coalescing and restart recovery",
@@ -19,15 +19,14 @@
     "Exact wake prompt binding, stale-plan fencing and uncertain-send preservation",
     "Shadow isolation, active/legacy driver exclusion, durable rollback handoff and immediate-human-trigger integration",
     "Subprocess JSON-RPC adapter and portable init/adopt/probe/activate/run/pause integration",
-    "Immediate inbox receipt path and busy-user protection"
+    "Immediate inbox receipt path and busy-user protection",
+    "Verified no-hosted-CI applicability preserves empty check lists, same-head local validation and all ordinary Gatekeeper/feedback/merge guards; unknown/required/nonempty/mismatched/stale cases reject."
   ],
   "native_probe": {
-    "standalone_stdio_initialize": "passed",
-    "shared_proxy_initialize": "failed: transport closed (1)",
-    "existing_thread_execution": "not_tested",
+    "current_host_shared_proxy": "not_run_in_package_validation",
     "production_threads_created": 0,
     "production_turns_started": 0,
-    "probed_at": "2026-11-04T13:45:22Z"
+    "upstream_validation_ref": "32d6e95:VALIDATION.json"
   },
   "live_runtime_modified": false,
   "production_automations_changed": 0,
