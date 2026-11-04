@@ -1,4 +1,5 @@
 import { bindings, INSTANCE_ROOT, requireBindings, instancePolicyReasons } from './instance.mjs';
+import { scopeActionReasons } from './scope-exclusions.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, existsSync, realpathSync } from 'node:fs';
@@ -337,7 +338,7 @@ export class ControlStore {
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       INSERT OR IGNORE INTO settings VALUES ('processing', 'on');`);
     this.feedback = new ReviewFeedback(this.db,this.now);
-    this.lifecycle = new LifecycleLedger(this.db, { now: this.now, dependencyPolicy:this.dependencyPolicy, deliveryMode:bindings.delivery.slack_enabled?'slack':'local', unacknowledged:()=>{
+    this.lifecycle = new LifecycleLedger(this.db, { now: this.now, scopeRegistry:this.taskRegistry, dependencyPolicy:this.dependencyPolicy, deliveryMode:bindings.delivery.slack_enabled?'slack':'local', unacknowledged:()=>{
       const file=path === ':memory:' ? null : resolve(dirname(path),'mailbox.sqlite');
       if (!file || !existsSync(file)) return new Set();
       const m=new DatabaseSync(file,{readOnly:true});
@@ -385,6 +386,8 @@ export class ControlStore {
   }
   prepare(input) {
     const key = required(input.key, 'action key');
+    const scopeReasons=scopeActionReasons(this.taskRegistry(),input.kind,input.task_id,input.payload,input.evidence);
+    if(scopeReasons.length)return {prepared:false,allowed:false,reasons:scopeReasons};
     const ownership = ownershipReasons(input.kind,input.task_id,input.payload,input.evidence,this.taskRegistry(),this.db);
     const handoff = input.kind==='create_thread' ? scopedHandoffReasons(input.task_id,input.payload,input.evidence) : [];
     if(ownership.length || handoff.length)return {prepared:false,allowed:false,reasons:[...ownership,...handoff]};
@@ -455,6 +458,8 @@ export class ControlStore {
       const blocked = this.db.prepare("SELECT action_key FROM actions WHERE scope_key=? AND state IN ('claimed','uncertain') AND action_key<>? LIMIT 1").get(row.scope_key, key);
       if (blocked) return { claimed: false, reason: 'scope_in_use', blocking_key: blocked.action_key };
       const payload = JSON.parse(row.payload);
+      const scopeReasons=scopeActionReasons(this.taskRegistry(),row.kind,row.task_id,payload,evidence);
+      if(scopeReasons.length)return {claimed:false,allowed:false,reasons:scopeReasons};
       const ownership = ownershipReasons(row.kind,row.task_id,payload,evidence,this.taskRegistry(),this.db);
       const handoff = row.kind==='create_thread' ? scopedHandoffReasons(row.task_id,payload,evidence) : [];
       if(ownership.length || handoff.length)return {claimed:false,allowed:false,reasons:[...ownership,...handoff]};
@@ -515,6 +520,8 @@ export class ControlStore {
       if (this.db.prepare('SELECT 1 FROM review_send_permits WHERE attempt_id=?').get(attempt_id))
         return { send: false, reason: 'send_already_authorized_reconcile_outcome' };
       if (operation_not_started !== true) return { send: false, reason: 'unstarted_operation_evidence_required' };
+      const scopeReasons=scopeActionReasons(this.taskRegistry(),row.kind,row.task_id,JSON.parse(row.payload),evidence);
+      if(scopeReasons.length)return {send:false,allowed:false,reasons:scopeReasons};
       const rule = this.reviewRule(), window = reviewWindowAt(this.now(),rule);
       if (window.blocked) return { send: false, ...this.deferReview(key,rule) };
       if (this.db.prepare("SELECT value FROM settings WHERE key='processing'").get().value !== 'on') return { send: false, reason: 'processing_paused' };

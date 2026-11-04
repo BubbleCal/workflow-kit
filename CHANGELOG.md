@@ -1,5 +1,9 @@
 # Changes
 
+## 0.2.21
+
+Enforce durable user exclusions for exact stages, scopes and PRs. Preserve explicit skipped state separately from passed work, independent successors, actual dependencies, completed history and active/uncertain receipts. Recheck scope at prepare/claim/final delivery; only a new actual user source lifts an exclusion.
+
 ## 0.2.20
 
 Admit canonical terminal-owner continuation recovery to urgent non-human priority immediately. Preserve human precedence, the protected result slot, retry rotation, fixed batches and all existing guarded-resume checks; generic recovery and diagnostics retain their priorities.

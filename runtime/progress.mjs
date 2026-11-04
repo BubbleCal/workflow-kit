@@ -36,25 +36,27 @@ function validateGoal(goal) {
   if (ids.size !== goal.stages.length) throw new Error('Duplicate stage ID');
   for (const s of goal.stages) {
     for (const field of ['id', 'task_id', 'owner_thread_id', 'scope_key']) required(s[field], `stage.${field}`);
-    if (!['pending', 'running', 'blocked', 'complete'].includes(s.state)) throw new Error('Stage needs running, pending, blocked or complete state');
+    if (!['pending', 'running', 'blocked', 'complete', 'skipped'].includes(s.state)) throw new Error('Stage needs running, pending, blocked, complete or skipped state');
     if (s.state === 'pending') { required(s.step_id, 'stage.step_id'); required(s.action, 'concrete next action'); }
     if (s.state === 'running' && (!s.running_evidence_ref || !s.turn_id && !s.job_id)) throw new Error('Running stage needs actual turn/job evidence');
     if (s.state === 'blocked' && (!s.blocker?.reason || !s.blocker?.resume_condition || !s.blocker?.evidence_ref)) throw new Error('Blocked stage needs a real blocker and resume condition');
     if (s.state === 'complete') required(s.completion_evidence_ref, 'stage completion evidence');
+    if (s.state === 'skipped' && (!s.scope_exclusion?.key || !s.scope_exclusion.source_message_id || !s.scope_exclusion.evidence_ref || s.completion_evidence_ref)) throw new Error('Skipped stage needs explicit user scope evidence, not completion proof');
     if (!Array.isArray(s.depends_on) || s.depends_on.some(id => !ids.has(id))) throw new Error('Stage dependencies must be explicit and known');
   }
   const visiting = new Set(), visited = new Set(), byId = new Map(goal.stages.map(s => [s.id, s]));
   const visit = id => { if (visiting.has(id)) throw new Error('Cyclic stage dependencies'); if (visited.has(id)) return; visiting.add(id); for (const d of byId.get(id).depends_on) visit(d); visiting.delete(id); visited.add(id); };
   for (const id of ids) visit(id);
-  const allComplete = goal.stages.every(s => s.state === 'complete');
+  const allComplete = goal.stages.every(s => ['complete','skipped'].includes(s.state));
+  if (goal.complete && goal.stages.some(s=>s.state==='skipped') && !goal.scope_acceptance_ref) throw new Error('Whole acceptance must account for explicitly skipped scope');
   if (goal.complete && (!allComplete || goal.acceptance_verified !== true || !goal.completion_evidence_ref)) throw new Error('A child completion is not whole-goal acceptance');
   if (!goal.complete && allComplete) throw new Error('Unfinished goal needs a concrete acceptance/follow-through stage');
 }
 
 // All mutations run inside the owning Mailbox transaction, including event ACK.
 export class ProgressLedger {
-  constructor(db, now = () => Date.now()) {
-    this.db = db; this.now = now;
+  constructor(db, now = () => Date.now(), { scopeExclusion = () => null } = {}) {
+    this.db = db; this.now = now; this.scopeExclusion = scopeExclusion;
     db.exec(`CREATE TABLE IF NOT EXISTS progress_goals (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, data TEXT NOT NULL, updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS progress_events (event_key TEXT PRIMARY KEY, digest TEXT NOT NULL, evidence_ref TEXT NOT NULL, recorded_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS progress_event_tasks (event_key TEXT NOT NULL, task_id TEXT NOT NULL, PRIMARY KEY(event_key,task_id));
@@ -78,6 +80,15 @@ export class ProgressLedger {
       if (old && old.stages.some(s => !goal.stages.some(n => n.id === s.id))) throw new Error('Cannot drop a requested stage');
       for (const s of goal.stages) {
         const before = old?.stages.find(x => x.id === s.id);
+        if (before?.state === 'skipped' && (s.state !== 'skipped' || stable(s.scope_exclusion)!==stable(before.scope_exclusion))) throw new Error('Skipped scope needs a newly authorized stage, not reactivation');
+        const exclusion=this.scopeExclusion(goal,{...s,state:['skipped','complete'].includes(s.state)?'pending':s.state});
+        if(exclusion && (s.state==='pending' || s.state==='complete' && before?.state!=='complete')) throw new Error('Excluded scope cannot resume or count as passed');
+        if(s.state==='skipped' && before?.state!=='skipped') {
+          if(!exclusion || stable(exclusion)!==stable(s.scope_exclusion)) throw new Error('Current registered user scope exclusion required');
+          if(before?.state==='running' || this.db.prepare("SELECT 1 FROM continuation_actions WHERE goal_id=? AND stage_id=? AND state IN ('reserved','sent','uncertain','running')").get(goal.id,s.id)) throw new Error('Preserve and reconcile active or uncertain work before recording a skip');
+          this.db.prepare("UPDATE continuation_actions SET state='scope_excluded',updated_at=? WHERE goal_id=? AND stage_id=? AND state='pending'").run(this.now(),goal.id,s.id);
+        }
+
         if (before?.state === 'complete' && s.state !== 'complete') throw new Error('Completed stage needs a new scoped stage, not replay');
         if (before && before.step_id !== s.step_id && !s.progress_evidence_ref && s.state !== 'complete') throw new Error('New step needs verified progress evidence');
         if (before && (s.state === 'complete' || before.step_id !== s.step_id)) {
@@ -106,15 +117,17 @@ export class ProgressLedger {
     const eligible = [], waiting = [];
     for (const g of this.goals().filter(g => !g.complete)) for (const s of g.stages.filter(s => s.state === 'running')) {
       const o = observations.find(o => o.thread_id === s.owner_thread_id);
-      const ended = o && fresh(o.checked_at, this.now()) && ['idle','notLoaded'].includes(o.status) && ['completed','failed','interrupted'].includes(o.turn_status) && o.background_job_running === false;
+      const excluded=this.scopeExclusion(g,s);
+      const ended = !excluded && o && fresh(o.checked_at, this.now()) && ['idle','notLoaded'].includes(o.status) && ['completed','failed','interrupted'].includes(o.turn_status) && o.background_job_running === false;
       waiting.push({ goal_id: g.id, stage_id: s.id, task_id: s.task_id, owner_thread_id: s.owner_thread_id,
-        reason: ended ? 'ended_owner_needs_result_reconciliation' : 'preserve_or_observe_running_stage' });
+        reason: excluded ? 'scope_excluded_preserve_existing_work' : ended ? 'ended_owner_needs_result_reconciliation' : 'preserve_or_observe_running_stage' });
     }
     for (const goal of this.goals().filter(g => !g.complete)) for (const s of goal.stages.filter(s => s.state === 'pending')) {
       const key = continuationKey(goal, s), action = this.db.prepare('SELECT * FROM continuation_actions WHERE action_key=?').get(key);
       const o = observations.find(o => o.thread_id === s.owner_thread_id);
       let reason;
-      if (!action || action.state !== 'pending') reason = action?.state === 'running' && o && fresh(o.checked_at, this.now()) && ['idle','notLoaded'].includes(o.status) && o.background_job_running === false ? 'ended_owner_needs_result_reconciliation' : action?.state ?? 'missing_action';
+      if (this.scopeExclusion(goal,s)) reason = 'scope_excluded_by_actual_user';
+      else if (!action || action.state !== 'pending') reason = action?.state === 'running' && o && fresh(o.checked_at, this.now()) && ['idle','notLoaded'].includes(o.status) && o.background_job_running === false ? 'ended_owner_needs_result_reconciliation' : action?.state ?? 'missing_action';
       else if (s.depends_on.some(id => goal.stages.find(x => x.id === id).state !== 'complete')) reason = 'dependency';
       else if (!o || !fresh(o.checked_at, this.now())) reason = 'fresh_owner_observation_required';
       else if (!['idle', 'notLoaded'].includes(o.status) || !['completed','failed','interrupted'].includes(o.turn_status)) reason = 'owner_busy';
@@ -152,7 +165,7 @@ export class ProgressLedger {
       .run(observation.turn_id, stable({ ...JSON.parse(a.receipt ?? '{}'), work_evidence_ref }), this.now(), key);
     return { key, execution_started: true, turn_id: observation.turn_id };
   }
-  unfinishedForOwner(owner) { return this.goals().some(g => !g.complete && g.stages.some(s => s.owner_thread_id === owner && s.state !== 'complete')); }
+  unfinishedForOwner(owner) { return this.goals().some(g => !g.complete && g.stages.some(s => s.owner_thread_id === owner && !['complete','skipped'].includes(s.state))); }
   reconcile({ key, control_action, owner_quiescent, verified_at, evidence_ref }) {
     required(evidence_ref, 'recovery evidence');
     if (owner_quiescent !== true || !fresh(verified_at, this.now())) throw new Error('Fresh quiescent dispatcher evidence required');

@@ -1,3 +1,5 @@
+import { readTaskRegistry } from './task-ownership.mjs';
+import { stageScopeExclusion } from './scope-exclusions.mjs';
 import { bindings, INSTANCE_ROOT, requireBindings, shellQuote } from './instance.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
@@ -40,8 +42,9 @@ export function isIdle(snapshot, now = Date.now()) {
 }
 
 export class Mailbox {
-  constructor(path, { now = () => Date.now(), lifecycleAccess } = {}) {
+  constructor(path, { now = () => Date.now(), lifecycleAccess, taskRegistry = () => readTaskRegistry(path) } = {}) {
     this.now = now;
+    this.taskRegistry = taskRegistry;
     this.lifecycleAccess = lifecycleAccess ?? (fn => {
       if (path === ':memory:') return null;
       const file = resolve(dirname(path),'control.sqlite');
@@ -50,7 +53,7 @@ export class Mailbox {
       db.exec('PRAGMA busy_timeout=5000');
       try {
         if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='lifecycle_prs'").get()) return null;
-        return fn(new LifecycleLedger(db,{now:this.now,readOnly:true,deliveryMode:bindings.delivery.slack_enabled?'slack':'local',unacknowledged:()=>new Set(this.db.prepare(
+        return fn(new LifecycleLedger(db,{now:this.now,readOnly:true,scopeRegistry:this.taskRegistry,deliveryMode:bindings.delivery.slack_enabled?'slack':'local',unacknowledged:()=>new Set(this.db.prepare(
           "SELECT item_key FROM mail WHERE state IN ('pending','in_batch') AND json_extract(payload,'$.event')='pr_lifecycle_action'").all().map(x=>x.item_key))}));
       } finally { db.close(); }
     });
@@ -81,8 +84,8 @@ export class Mailbox {
       INSERT OR IGNORE INTO lane_state(lane) VALUES ('coordinator'),('inbox'),('maintenance');`);
     this.db.exec(`CREATE TABLE IF NOT EXISTS transition_settings (id INTEGER PRIMARY KEY, version INTEGER NOT NULL, source_message_id TEXT);
       INSERT OR IGNORE INTO transition_settings VALUES (1,1,NULL);`);
-    this.progress = new ProgressLedger(this.db, this.now);
-    this.waits = new WaitLedger(this.db,{now:this.now,checkPr:condition=>
+    this.progress = new ProgressLedger(this.db, this.now, {scopeExclusion:(g,s)=>stageScopeExclusion(this.taskRegistry(),g,s)});
+    this.waits = new WaitLedger(this.db,{now:this.now,scopeExclusion:(g,s)=>stageScopeExclusion(this.taskRegistry(),g,s),checkPr:condition=>
       this.lifecycleAccess(l=>l.checkWait(condition)) ?? {valid:false,reason:'PR_source_unavailable'},checkHuman:data=>{
       if (path === ':memory:') return null;
       const file=resolve(dirname(path),data.decision_id?'decisions.json':'registry.json');

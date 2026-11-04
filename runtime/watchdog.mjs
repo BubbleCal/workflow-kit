@@ -1,3 +1,4 @@
+import { stageScopeExclusion } from './scope-exclusions.mjs';
 import { createHash } from 'node:crypto';
 import { registeredContinuationCandidates } from './progress.mjs';
 
@@ -29,8 +30,11 @@ export class ContinuationWatchdog {
     if (/service|reference|informational|workflow_maintenance|meeting|standup|daily_plan|scheduled/.test(task.role ?? '') ||
         task.existing_driver_owns_step === true) return 'existing_driver_or_non_work_role';
     if (task.archived === true || task.thread_archived === true || /^archived/.test(task.status ?? '')) return 'archived';
-    const stages = this.progress.goals().filter(g => !g.complete).flatMap(g => g.stages)
+    const stages = this.progress.goals().filter(g => !g.complete).flatMap(g => g.stages.map(s=>({...s,scope_goal_id:g.id})))
       .filter(s => s.task_id === taskId && s.owner_thread_id === ownerId && s.state !== 'complete');
+    const available=stages.filter(s=>!stageScopeExclusion(registry,{id:s.scope_goal_id},s));
+    if(stages.length && !available.length)return 'explicit_stage_scope_exclusion';
+    stages.splice(0,stages.length,...available);
     if (stages.length && stages.every(s => ['human_hold','native_approval'].includes(s.blocker?.kind))) return 'held_goal_stages';
     // Reuse the same source/freshness checks as wait reconciliation. One valid
     // wait cannot hide another stage that still has authorized work to do.

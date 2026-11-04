@@ -3,8 +3,8 @@ const required = (v, name) => { if (typeof v !== 'string' || !v.trim()) throw ne
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0,24);
 
 export class WaitLedger {
-  constructor(db, { now = () => Date.now(), checkPr = () => ({ valid: false, reason: 'PR_source_unavailable' }), checkHuman = () => null } = {}) {
-    this.db = db; this.now = now; this.checkPr = checkPr; this.checkHuman = checkHuman;
+  constructor(db, { now = () => Date.now(), checkPr = () => ({ valid: false, reason: 'PR_source_unavailable' }), checkHuman = () => null, scopeExclusion = () => null } = {}) {
+    this.db = db; this.now = now; this.checkPr = checkPr; this.checkHuman = checkHuman; this.scopeExclusion=scopeExclusion;
     db.exec(`CREATE TABLE IF NOT EXISTS wait_facts (
       fact_key TEXT PRIMARY KEY, kind TEXT NOT NULL, subject TEXT NOT NULL, data TEXT NOT NULL,
       observed_at INTEGER NOT NULL, expires_at INTEGER, evidence_ref TEXT NOT NULL);
@@ -46,6 +46,7 @@ export class WaitLedger {
   }
   validateGoals(goals, previous = [], forceStage) {
     for (const g of goals) for (const s of g.stages ?? []) if (s.state === 'blocked') {
+      if(this.scopeExclusion(g,s))continue;
       const old = previous.find(x=>x.id===g.id)?.stages.find(x=>x.id===s.id);
       if (old?.state === 'blocked' && JSON.stringify(old.blocker) === JSON.stringify(s.blocker) &&
         !(forceStage?.goal_id===g.id && forceStage.stage_id===s.id)) continue;
@@ -55,6 +56,7 @@ export class WaitLedger {
   }
   violations(goals) {
     return goals.filter(g => !g.complete).flatMap(g => g.stages.filter(s => s.state === 'blocked').flatMap(s => {
+      if(this.scopeExclusion(g,s))return [];
       const result = this.check(s.blocker?.condition);
       if (result.valid) return [];
       const pending=this.db.prepare(`SELECT item_key,payload FROM mail WHERE lane='coordinator' AND state IN ('pending','in_batch')

@@ -1,3 +1,4 @@
+import { scopeActionReasons } from './scope-exclusions.mjs';
 import { createHash } from 'node:crypto';
 import { reviewWindowAt, readReviewWindow } from './review-window.mjs';
 import { readDependencyPolicy, forkRoute, releaseSuccessorVerified } from './dependency-provenance.mjs';
@@ -15,8 +16,8 @@ export const prKey = (repository, number) => `${repository}#${number}`;
 // This ledger determines the next obligation; existing control guards still
 // authorize every external action and original owners remain the only writers.
 export class LifecycleLedger {
-  constructor(db, { now = () => Date.now(), readOnly = false, unacknowledged = () => new Set(), deliveryMode = 'slack', dependencyPolicy = readDependencyPolicy } = {}) {
-    this.db = db; this.now = now; this.unacknowledged = unacknowledged; this.deliveryMode = deliveryMode; this.dependencyPolicy=dependencyPolicy;
+  constructor(db, { now = () => Date.now(), readOnly = false, unacknowledged = () => new Set(), deliveryMode = 'slack', dependencyPolicy = readDependencyPolicy, scopeRegistry = () => null } = {}) {
+    this.db = db; this.now = now; this.unacknowledged = unacknowledged; this.deliveryMode = deliveryMode; this.dependencyPolicy=dependencyPolicy; this.scopeRegistry=scopeRegistry;
     if (!readOnly) db.exec(`
       CREATE TABLE IF NOT EXISTS lifecycle_prs (
         pr_key TEXT PRIMARY KEY, task_id TEXT NOT NULL, owner_id TEXT NOT NULL,
@@ -70,6 +71,8 @@ export class LifecycleLedger {
   inspect(key) {
     const w = this.db.prepare('SELECT * FROM lifecycle_prs WHERE pr_key=?').get(key);
     if (!w || w.retired) return { state: 'retired', action: null };
+    const scopeReasons=scopeActionReasons(this.scopeRegistry(),'merge',w.task_id,{pr_url:`https://github.com/${key.replace('#','/pull/')}`});
+    if(scopeReasons.length)return {pr_key:key,task_id:w.task_id,state:scopeReasons[0]==='scope_excluded_by_actual_user'?'scope_excluded_by_actual_user':'scope_binding_required',action:null};
     const s = w.snapshot ? JSON.parse(w.snapshot) : null, readiness = w.readiness ? JSON.parse(w.readiness) : null;
     const base = { pr_key: key, task_id: w.task_id, owner_thread_id: w.owner_id, authorization_ref: w.authorization_ref,
       head: s?.head_sha ?? null, artifact_revision:s?.state_revision ?? 0, snapshot_ref: s?.evidence_ref ?? null };

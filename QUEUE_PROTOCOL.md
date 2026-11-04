@@ -155,3 +155,11 @@ remain, and generic recovery/diagnostic priorities are unchanged. Priority only
 controls admission; current scope, native jobs/holds, typed waits, uncertainty,
 original ownership and guarded dispatch still decide whether work can resume.
 No new timer, concurrency limit or automatic restart is introduced.
+
+## Scoped user exclusions
+
+Follow SCOPE_EXCLUSIONS.md. Persist exact actual-user stage/scope/PR bindings;
+excluded work cannot revive through expiring waits or automatic recovery. Record
+quiescent excluded stages as skipped, never passed. Preserve active/uncertain
+receipts, completed history and mandatory CI. Explicit remaining scope lets
+independent work continue; only a new actual user source can lift the exclusion.
