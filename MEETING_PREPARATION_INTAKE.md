@@ -15,8 +15,12 @@ problem, not a reason to ask for authorization again.
 
 For accepted calendar tasks without an owner, discovery uses `task request_owner`
 without inventing a new source message. The saved scoped policy supplies the real
-creation authorization. Complete the normal control prepare/claim/settle and
-native project binding, then `task bind_owner` and `task start`. Starting a
+creation authorization. Read the native project catalog, then call `task op` with
+`op="prepare_owner"`, task_id, projects (the actual native catalog array),
+project_catalog_ref and checked_at. This derives ownership/authorization facts
+from the catalog and supplies the exact control evidence fields. Use its returned
+key/evidence for control claim, invoke only claim.payload.native once, settle the
+actual result and confirm native project placement, then `task bind_owner` and `task start`. Starting a
 preparation task now installs its bound one-time runtime schedule automatically.
 It does not prepare the brief early. Repeated start retains the same schedule.
 

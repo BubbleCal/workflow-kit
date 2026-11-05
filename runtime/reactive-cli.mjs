@@ -1,4 +1,4 @@
-import {scheduleCalendarPreparation} from './calendar-preparation.mjs';
+import {scheduleCalendarPreparation,prepareMeetingOwner} from './calendar-preparation.mjs';
 import {transferPausedOwner} from './owner-transfer.mjs';
 import {NativeServices} from './native-services.mjs';
 import {existsSync,readFileSync,writeFileSync,renameSync,mkdirSync,realpathSync} from 'node:fs';
@@ -134,6 +134,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         else if(input.op==='accept')result=control.work.accept(input);
         else if(input.op==='policy')result=control.work.setPolicy(input);
         else if(input.op==='dismiss')result=control.work.dismiss(input);
+        else if(input.op==='prepare_owner')result=await prepareMeetingOwner(control,input);
         else if(input.op==='request_owner')result=control.work.requestOwner(input);
         else if(input.op==='bind_owner')result=control.work.bindOwner(input);
         else if(input.op==='start'){

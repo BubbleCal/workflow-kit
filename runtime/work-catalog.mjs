@@ -164,14 +164,14 @@ export class WorkCatalog {
     if(actual_human_verified!==true||explicit_new_thread_request_verified!==true)throw new Error('Explicit authorization for a new visible execution task is required');
     return this.atomic(()=>{
       const t=this.get(task_id);if(!t||t.state!=='accepted'||t.owner_thread_id)throw new Error('An accepted unowned task is required');
-      const prior=this.db.prepare('SELECT * FROM work_owner_requests WHERE task_id=?').get(t.id);if(prior)return {...prior,request:parse(prior.request)};
+      const prior=this.db.prepare('SELECT * FROM work_owner_requests WHERE task_id=?').get(t.id);if(prior)return {...prior,request:parse(prior.request),...(t.data.meeting_preparation?{next_operation:'task prepare_owner with fresh projects/project_catalog_ref/checked_at; do not hand-build legacy evidence fields'}:{})};
       const key=`owner-create:${t.canonical_key}`;
       const request={task_id:t.id,canonical_task_key:t.canonical_key,source_message_id,verbatim_text,
         control_action_key:key,required_tool:'create_thread',requires_existing_control_guards:true,
         project_id:this.config.scope.project_id,workspace:t.data.workspace,
         scope_authorization_ref:t.authorization.evidence_ref,
         initial_prompt:`You are the execution owner for ${t.id}: ${t.data.title}. This is one ordinary ${t.kind} task. Confirm setup only; wait for native-queue execution after binding. Do not become the background discovery role, change settings, or start unregistered work. Workflow instance: ${this.config.instance_root??'[use the actual instance root]'}. Read its WORK_TASKS.md.`};
-      this.db.prepare("INSERT INTO work_owner_requests VALUES (?,?,?,'requested')").run(t.id,key,json(request));return {action_key:key,state:'requested',request};
+      this.db.prepare("INSERT INTO work_owner_requests VALUES (?,?,?,'requested')").run(t.id,key,json(request));return {action_key:key,state:'requested',request,...(t.data.meeting_preparation?{next_operation:'task prepare_owner with fresh projects/project_catalog_ref/checked_at; do not hand-build legacy evidence fields'}:{})};
     });
   }
   bindOwner({task_id,owner_thread_id,native_binding,evidence_ref,existing_owner_authorized,actual_human_verified,source_message_id,creation_action_key}){

@@ -53,3 +53,13 @@ test('the shared mailbox blocks raw inbox writes and suppresses earlier unguarde
   assert.equal(m.reconcileInbox().suppressed,1);assert.equal(m.db.prepare("SELECT state FROM mail WHERE item_key='old-raw'").get().state,'suppressed');
  }finally{bindings.layout=before.layout;bindings.delivery.main_inbox_strict=before.strict;m.close();f.c.close();rmSync(root,{recursive:true,force:true});}
 });
+
+test('meeting owner preparation supplies real catalog guard fields and preserves a single creation key',async()=>{
+ const {prepareMeetingOwner}=await import('./calendar-preparation.mjs');
+ const f=workFixture();try{f.work.setPolicy(policy);const accepted=f.work.atomic(()=>f.work.prepareCalendarInside(observation,meeting));
+ const input={task_id:accepted.task.id,projects:[{hostId:'local',projectId:'project',label:'Project'}],project_catalog_ref:'native-projects',checked_at:new Date(f.now()).toISOString()};
+ const first=await prepareMeetingOwner(f.c,input);assert.equal(first.preparation.prepared,true,JSON.stringify(first.preparation));assert.equal(first.evidence.duplicate_task_exists,false);assert.equal(first.evidence.underlying_job_for_scope_running,false);
+ const second=await prepareMeetingOwner(f.c,input);assert.equal(second.key,first.key);assert.equal(second.preparation.state,'prepared');
+ assert.equal(f.c.db.prepare("SELECT count(*) n FROM actions WHERE kind='create_thread'").get().n,1);
+ }finally{f.c.close();}
+});
