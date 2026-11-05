@@ -1,3 +1,5 @@
+> Main notifications must pass INBOX_POLICY.md. Do not write raw answer/decision/important_completion messages to bypass control evidence, and do not escalate routine technical progress or already-authorized setup as a human decision.
+
 # Complete delivery by the original task owner
 
 Before Slack PR delivery, read REVIEW_ROUTING.md and the instance's configured

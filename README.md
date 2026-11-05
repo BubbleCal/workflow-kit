@@ -1,3 +1,5 @@
+0.8.1 adds scoped calendar preparation acceptance and automatic scheduling by discovery, plus a shared inbox gate that admits only real user decisions, requested answers and important completion.
+
 0.8.0 completes the removal of the delivery coordinator in native instances. Each original task owner handles its authorized delivery; the main conversation handles user decisions and completion archival, and optional discovery includes authorized calendar preparation scheduling. Read [OWNER_DELIVERY.md](OWNER_DELIVERY.md).
 
 # Independent Workflow Kit

@@ -79,7 +79,14 @@ export class DiscoveryStore {
       return this.sources().find(s=>s.source_id===source_id);
     });
   }
-  batch(id){const b=this.db.prepare('SELECT * FROM discovery_batches WHERE id=?').get(id);return b?{...b,snapshot:JSON.parse(b.snapshot),
+  calendarFollowups(){
+    if(!this.work.calendarRule()?.enabled)return [];
+    return this.db.prepare("SELECT id FROM work_items WHERE state='accepted' AND json_extract(data,'$.meeting_preparation.policy_key')='accept_calendar_preparation'").all().map(({id})=>{
+      const t=this.work.get(id),p=t.data.meeting_preparation,s=this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='rt_schedules'").get()?this.db.prepare('SELECT status FROM rt_schedules WHERE id=?').get(p.schedule_id):null;
+      return {task_id:id,title:t.data.title,owner_thread_id:t.owner_thread_id,schedule_id:p.schedule_id,prep_at:p.prep_at,needs_owner:!t.owner_thread_id,needs_schedule:!s,source_message_id:p.source_message_id};
+    }).filter(t=>t.needs_owner||t.needs_schedule);
+  }
+  batch(id){const b=this.db.prepare('SELECT * FROM discovery_batches WHERE id=?').get(id);return b?{...b,snapshot:JSON.parse(b.snapshot),calendar_followups:this.calendarFollowups(),
     pages:this.db.prepare('SELECT source_id,request_index,data FROM discovery_pages WHERE batch_id=? ORDER BY rowid').all(id).map(p=>({...p,data:JSON.parse(p.data)}))}:null;}
   checkBatch(id){
     const b=this.batch(id);if(!b||!['pending','running'].includes(b.state))throw new Error('Discovery batch is unavailable or its source scope changed');
@@ -124,7 +131,7 @@ export class DiscoveryStore {
       this.db.prepare("UPDATE discovery_batches SET state='pending',generation=generation+1,prompt=NULL,mail_key=? WHERE id=?").run(`discovery:${b.id}:${b.generation+1}`,b.id);
       b=this.batch(b.id);
     }
-    const prompt=`[workflow-discovery:${b.id}:${b.generation}]\nRun one source-only discovery scan for this instance. Read ${root}/DISCOVERY.md. Use the App's connected tools; do not open a session client. First obtain a real read_thread proof and call workflow discovery begin with batch_id and generation. If invalidated, stop without reading sources. Then read the batch plan and saved page cursors, collect only configured source changes, including authorized calendar preparation schedule upkeep, ingest pages and classify observations as an existing task, a candidate, or irrelevant. Preserve cursors and raw evidence. Do not explore code, papers or blogs, run benchmarks, implement work, or manufacture user authorization. Such work belongs to ordinary accepted tasks. For an accepted unowned task, follow WORK_TASKS.md to create its owner only under the saved explicit creation policy. Finish the batch only with complete source coverage and durable dispositions; otherwise checkpoint the partial cursor. No routine message to the main conversation. Batch: ${b.id}; generation: ${b.generation}.`;
+    const prompt=`[workflow-discovery:${b.id}:${b.generation}]\nRun one source-only discovery scan for this instance. Read ${root}/DISCOVERY.md. Use the App's connected tools; do not open a session client. First obtain a real read_thread proof and call workflow discovery begin with batch_id and generation. If invalidated, stop without reading sources. Then read the batch plan and saved page cursors, collect only configured source changes, including authorized calendar preparation schedule upkeep, ingest pages and classify observations as an existing task, a candidate, or irrelevant. Preserve cursors and raw evidence. Do not explore code, papers or blogs, run benchmarks, implement work, or manufacture user authorization. Such work belongs to ordinary accepted tasks. For calendar observations read full event details and pass meeting to classify; the saved preparation policy accepts only its scope and exclusions. Follow MEETING_PREPARATION_INTAKE.md to provision authorized owners and schedule them without notifying main. For an accepted unowned task, follow WORK_TASKS.md to create its owner only under the saved explicit creation policy. Finish the batch only with complete source coverage and durable dispositions; otherwise checkpoint the partial cursor. No routine message to the main conversation. Batch: ${b.id}; generation: ${b.generation}.`;
     this.db.prepare('UPDATE discovery_batches SET prompt=COALESCE(prompt,?) WHERE id=?').run(prompt,b.id);
     const queued=mailbox.enqueue({key:b.mail_key,lane:'discovery',kind:'source_scan',payload:{batch_id:b.id,text:prompt}});
     return {...queued,batch_id:b.id};
@@ -168,15 +175,21 @@ export class DiscoveryStore {
       this.db.prepare('INSERT INTO discovery_pages VALUES (?,?,?,?,?,?)').run(page_key,batch_id,source_id,request_index,digest,JSON.stringify(data));return {recorded:true};
     });
   }
-  classify({observation_id,disposition,reason,evidence_ref,candidate}){
+  classify({observation_id,disposition,reason,evidence_ref,candidate,meeting}){
     required(reason,'discovery judgment');required(evidence_ref,'judgment evidence');
     if(!['existing','candidate','ignore'].includes(disposition))throw new Error('Unknown discovery disposition');
     return this.atomic(()=>{
       const o=this.db.prepare('SELECT * FROM discovery_observations WHERE observation_id=?').get(observation_id);if(!o)throw new Error('Unknown observation');
-      if(o.disposition)return {classified:false,task_id:o.task_id};
+      if(o.disposition&&!meeting)return {classified:false,task_id:o.task_id};
       const data=JSON.parse(o.data);let task=this.work.taskForSource(o.entity_key);
       const source=this.sources().find(s=>s.source_id===o.source_id);
       if(!source?.enabled||source.revision!==data.source_revision)throw new Error('Source scope is no longer current');
+      if(data.source_kind==='calendar' && disposition!=='ignore'){
+        const accepted=this.work.prepareCalendarInside(data,meeting??data.meeting);
+        if(accepted.excluded){this.db.prepare("UPDATE discovery_observations SET disposition='ignore',decision=? WHERE observation_id=?").run(JSON.stringify({reason:accepted.reason,evidence_ref}),observation_id);return {classified:true,excluded:true};}
+        if(accepted.authorized){task=accepted.task;this.db.prepare("UPDATE discovery_observations SET disposition='existing',task_id=?,decision=? WHERE observation_id=?").run(task.id,JSON.stringify({reason:'standing_calendar_preparation',evidence_ref}),observation_id);return {classified:true,task_id:task.id,execution_authorized:task.state==='accepted',owner_required:!task.owner_thread_id,meeting_preparation:task.data.meeting_preparation,requires_reschedule:accepted.requires_reschedule??false};}
+        if(this.work.calendarRule()?.enabled&&['full_event_required','full_attendance_required'].includes(accepted.reason))throw new Error('Read the full calendar event and pass meeting before classifying preparation');
+      }
       if(disposition==='existing'&&!task)throw new Error('Existing-task routing needs an exact registered source identity');
       if(disposition==='candidate'){
         if(!candidate)throw new Error('Describe the candidate work');
@@ -204,6 +217,7 @@ export class DiscoveryStore {
         const result=source_results?.find(r=>r.source_id===s.source_id);if(!result)throw new Error('Every source needs a coverage result');
         const pages=b.pages.filter(p=>p.source_id===s.source_id);
         if(result.complete===true){
+          if(s.kind==='calendar'&&this.calendarFollowups().length)throw new Error('Bind and schedule authorized calendar follow-ups before completing coverage, or checkpoint the real technical blocker');
           if(result.followups_complete!==true||s.plan.requests.some((_,i)=>!pages.filter(p=>p.request_index===i).at(-1)?.data.complete))throw new Error('A source cursor cannot advance without all request streams and relevant follow-ups');
           const pending=this.db.prepare('SELECT 1 FROM discovery_observations WHERE source_id=? AND disposition IS NULL').get(s.source_id);
           if(pending)throw new Error('Classify source observations before completing the scan');

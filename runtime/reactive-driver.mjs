@@ -213,6 +213,7 @@ export class ReactiveDriver {
         if(payload.catalog_candidate&&this.control.work.get(payload.task_id)?.state!=='candidate')m.db.prepare("UPDATE mail SET state='superseded' WHERE item_key=? AND state='pending'").run(row.item_key);
         if(payload.catalog_owner_needed&&this.control.work.get(payload.task_id)?.owner_thread_id)m.db.prepare("UPDATE mail SET state='superseded' WHERE item_key=? AND state='pending'").run(row.item_key);
       }
+      m.reconcileInbox();
       const result=m.reserveQueuedInbox(ids);if(!result.reserved)return;
       const batch=result.batch,path=join(this.root,'batches',`${batch.id}.json`),prompt=renderPrompt(batch,path);
       this.queue.validate(this.config.inbox.thread_id,prompt);m.setPrompt(batch.id,prompt);

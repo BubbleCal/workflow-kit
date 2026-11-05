@@ -1,3 +1,4 @@
+import {calendarPreparation} from './calendar-preparation.mjs';
 import {createHash} from 'node:crypto';
 import {verifyNativeBinding} from './native-queue.mjs';
 
@@ -62,6 +63,7 @@ export class WorkCatalog {
       workspace:input.workspace??this.config.scope?.project_root,parent_id:input.parent_id??null,depends_on:input.depends_on??[],
       source:input.source??{kind:'user'},pull_requests:input.pull_requests??[],job_sources:input.job_sources??['native'],
       ...(input.schedule_sources?{schedule_sources:input.schedule_sources,trigger_only:input.trigger_only===true}:{}),
+      ...(input.meeting_preparation?{meeting_preparation:input.meeting_preparation}:{}),
       ...(kind==='exploration'?{exploration:{...structuredClone(EXPLORATION_TEMPLATE.exploration),...input.exploration}}:{})};
     if(data.parent_id&&!this.get(data.parent_id))throw new Error('Unknown parent project/task');
     if(!Array.isArray(data.depends_on)||data.depends_on.some(dep=>!this.get(dep)))throw new Error('Dependencies must be existing tasks');
@@ -80,14 +82,31 @@ export class WorkCatalog {
       .run(sourceKey,id,json(data),this.now());
   }
   taskForSource(key){const r=this.db.prepare('SELECT task_id FROM work_sources WHERE source_key=?').get(key);return r?this.get(r.task_id):null;}
-  setPolicy({key,enabled,allowed_kinds,assignee_id,source_message_id,verbatim_text,evidence_ref,actual_human_verified}){
-    if(!['create_owner','accept_assigned_linear'].includes(key))throw new Error('Unknown work policy');
+  setPolicy({key,enabled,allowed_kinds,assignee_id,calendar_id,self_email,lead_minutes=45,timezone,profiles,exclusions,source_message_id,verbatim_text,evidence_ref,actual_human_verified}){
+    if(!['create_owner','accept_assigned_linear','accept_calendar_preparation'].includes(key))throw new Error('Unknown work policy');
     if(actual_human_verified!==true)throw new Error('A standing work policy needs actual user authorization');
     for(const [n,v] of Object.entries({source_message_id,verbatim_text,evidence_ref}))required(v,n);
     if(enabled&&(!Array.isArray(allowed_kinds)||!allowed_kinds.length||allowed_kinds.some(k=>!['work','project','exploration'].includes(k))))throw new Error('Declare allowed ordinary task kinds');
     if(enabled&&key==='accept_assigned_linear')required(assignee_id,'verified Linear user ID');
-    const rule={enabled:enabled===true,allowed_kinds:allowed_kinds??[],assignee_id,source_message_id,verbatim_text,evidence_ref};
+    if(enabled&&key==='accept_calendar_preparation'&&(!calendar_id||!self_email||!timezone||!Array.isArray(profiles)||!profiles.length||lead_minutes!==45))throw new Error('Bind the existing calendar, profiles and 45-minute preparation rule');
+    const rule={enabled:enabled===true,allowed_kinds:allowed_kinds??[],assignee_id,source_message_id,verbatim_text,evidence_ref,...(key==='accept_calendar_preparation'?{calendar_id,self_email,lead_minutes,timezone,profiles,exclusions}: {})};
     this.db.prepare('INSERT INTO work_rules VALUES (?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data').run(key,json(rule));return rule;
+  }
+  calendarRule(){return parse(this.db.prepare("SELECT data FROM work_rules WHERE key='accept_calendar_preparation'").get()?.data);}
+  prepareCalendarInside(observation,event){
+    const rule=this.calendarRule(),assessment=calendarPreparation(rule,observation,event,this.now());
+    if(!assessment.authorized)return assessment;
+    let task=this.taskForSource(observation.entity_key)??this.get(assessment.canonical_key);
+    if(task && !['candidate','accepted'].includes(task.state))return {...assessment,task,unchanged:true};
+    if(!task)task=this.createInside({...assessment.task,canonical_key:assessment.canonical_key,kind:'work',meeting_preparation:assessment.preparation,
+      source:{kind:'calendar',key:observation.entity_key,url:observation.url,evidence_ref:observation.evidence_ref}}).task;
+    const prior=task.data.meeting_preparation;
+    if(this.execution(task.id))return {...assessment,task,unchanged:prior?.generation===assessment.preparation.generation,requires_reschedule:prior?.generation!==assessment.preparation.generation};
+    const data={...task.data,...assessment.task,meeting_preparation:assessment.preparation};
+    this.db.prepare("UPDATE work_items SET state='accepted',data=?,authorization=?,revision=revision+1,updated_at=? WHERE id=?").run(json(data),
+      json({kind:'standing_policy',policy:'accept_calendar_preparation',source_message_id:rule.source_message_id,evidence_ref:rule.evidence_ref,actual_human_verified:true}),this.now(),task.id);
+    this.db.prepare("UPDATE work_notices SET state='superseded' WHERE task_id=? AND state='pending'").run(task.id);
+    return {...assessment,task:this.get(task.id),owner_required:!task.owner_thread_id};
   }
   acceptAssignedInside(task,observation){
     const rule=parse(this.db.prepare("SELECT data FROM work_rules WHERE key='accept_assigned_linear'").get()?.data);
@@ -137,7 +156,7 @@ export class WorkCatalog {
     });
   }
   requestOwner({task_id,source_message_id,verbatim_text,actual_human_verified,explicit_new_thread_request_verified}){
-    const task=this.get(task_id),rule=parse(this.db.prepare("SELECT data FROM work_rules WHERE key='create_owner'").get()?.data);
+    const task=this.get(task_id),calendar=this.calendarRule(),rule=task?.data.meeting_preparation?.policy_key==='accept_calendar_preparation' && task.data.meeting_preparation.calendar_id===calendar?.calendar_id?calendar:parse(this.db.prepare("SELECT data FROM work_rules WHERE key='create_owner'").get()?.data);
     if(rule?.enabled&&task&&rule.allowed_kinds.includes(task.kind)&&!source_message_id){
       source_message_id=rule.source_message_id;verbatim_text=rule.verbatim_text;actual_human_verified=true;explicit_new_thread_request_verified=true;
     }

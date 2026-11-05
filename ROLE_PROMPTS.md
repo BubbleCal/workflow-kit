@@ -1,3 +1,5 @@
+> Main receives only genuine human decisions, answers to actual user questions and verified important completions. It does not accept machine coordination or owner-provisioning work. Discovery directly accepts, provisions and schedules already-authorized meeting preparation under MEETING_PREPARATION_INTAKE.md. All notifications follow INBOX_POLICY.md.
+
 > Native owner-delivery installation has main, optional discovery, and independent task owners only. Owners read OWNER_DELIVERY.md and deliver their own tasks. Main handles decisions and post-completion archival; discovery also maintains explicitly authorized calendar preparation schedules. No coordinator service is created.
 
 # Native role templates

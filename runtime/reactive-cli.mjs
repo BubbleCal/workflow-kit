@@ -1,3 +1,4 @@
+import {scheduleCalendarPreparation} from './calendar-preparation.mjs';
 import {transferPausedOwner} from './owner-transfer.mjs';
 import {NativeServices} from './native-services.mjs';
 import {existsSync,readFileSync,writeFileSync,renameSync,mkdirSync,realpathSync} from 'node:fs';
@@ -138,6 +139,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         else if(input.op==='start'){
           const config=runtimeConfig(root);await queueCapability(config,new NativeQueue(config.queue));
           result=control.work.start(state,{...input,queue_compatibility_verified:true});
+          const schedule=scheduleCalendarPreparation(control,input.task_id);if(schedule)result={...result,meeting_schedule:schedule};
         }else if(input.op==='report')result=control.work.recordReport(input);
         else throw new Error('Unknown ordinary task operation');
       }else if(command==='sources'){

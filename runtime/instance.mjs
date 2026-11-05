@@ -11,7 +11,7 @@ export const bindings = {
     ...(raw.layout==='native'?{inbox:raw.threads?.main,...(raw.delivery?.owner_managed?{coordinator:null}: {})}: {}) },
   scope: { project_id:null, project_root:null, repositories:[], ...raw.scope },
   identity: { github_login:null, ...raw.identity },
-  delivery: { owner_managed:raw.layout==='native'&&!raw.legacy_roles?.coordinator, slack_enabled:false, slack_channel_id:null, ready_enabled:false,
+  delivery: { main_inbox_strict:raw.layout==='native', owner_managed:raw.layout==='native'&&!raw.legacy_roles?.coordinator, slack_enabled:false, slack_channel_id:null, ready_enabled:false,
     merge_enabled:false, approver_login:null, notion_enabled:false, notion_page_id:null, ...raw.delivery },
 };
 
