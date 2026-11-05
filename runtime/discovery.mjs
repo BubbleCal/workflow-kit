@@ -42,7 +42,7 @@ export function sourceReadPlan(source,window) {
   }
   if(source.kind==='calendar')return {requests:[{tool:'google_calendar_search_events',arguments:{calendar_id:s.calendar_id,time_min:window.to,
     time_max:new Date(Date.parse(window.to)+(s.lookahead_days??7)*86400000).toISOString(),timezone_str:s.timezone??'Asia/Shanghai',max_results:100}}],
-    followups:'Follow every page and read changed events. Under the existing meeting-preparation authorization, reconcile preparation schedules 45 minutes before meetings, preserving exclusions, language preferences, existing owners and event IDs. This does not authorize modifying meetings or sending messages. Read MEETING_PREP.md; discovery only maintains preparation schedules and publishes occurrences, never writes the meeting brief. Classify unchanged/excluded events as ignore with evidence; bind changed accepted meetings to their original task.'};
+    followups:'Follow every page and read changed events. Use the configured accept_calendar_preparation lead_minutes and service_task_id. In unified mode all occurrences belong to that one service and owner; do not create per-meeting tasks or chats. Classify changed/cancelled events with their full meeting data so obsolete timers are cancelled; task start/reconcile_meeting reconciles shared timers. Preserve exclusions, language, event IDs and completed results. This does not authorize modifying meetings or sending messages. Read MEETING_PREPARATION_INTAKE.md; discovery maintains schedules, never writes the meeting brief.'};
   if(source.kind==='codex')return {requests:[{tool:'list_threads',arguments:{mode:'history',source:'codex',hostId:s.host_id??'local',archived:false,limit:50}}],followups:'Filter by the exact configured project before reading actual human requests. Ignore control/discovery chats and other projects; never infer scope from a title. Preserve existing owners and running jobs. Register verified existing work without starting or duplicating it; source listing alone is not implementation authority. Also read OWNER_RECOVERY.md and run runtime op health_targets (limit 8). Obtain the requested compact native snapshots and persist health_observe. Under the recorded standing recovery authority, reconcile exact failed/context-window turns and follow up unconsumed queues without waiting for the 120-minute maintenance audit. Preserve running owners, genuine waits and original receipts; verify actual execution before considering recovery successful.'};
   for(const id of arr(s.page_ids))requests.push({tool:'notion_fetch',arguments:{id,include_discussions:true}});
   for(const view_url of arr(s.view_urls))requests.push({tool:'notion_query_data_sources',arguments:{data:{mode:'view',view_url,page_size:100,is_archived:false}}});
@@ -135,6 +135,11 @@ export class DiscoveryStore {
   }
   calendarFollowups(){
     if(!this.work.calendarRule()?.enabled)return [];
+    const shared=this.work.calendarRule().service_task_id;
+    if(shared)return this.work.meetingOccurrences(shared).filter(r=>{
+      const s=this.db.prepare('SELECT status FROM rt_schedules WHERE id=?').get(r.preparation.schedule_id);
+      return r.state==='active'?!s:s&&['enabled','paused'].includes(s.status);
+    }).map(r=>({task_id:shared,owner_thread_id:this.work.get(shared).owner_thread_id,shared_service:true,needs_owner:false,needs_schedule:true,...r.preparation}));
     return this.db.prepare("SELECT id FROM work_items WHERE state='accepted' AND json_extract(data,'$.meeting_preparation.policy_key')='accept_calendar_preparation'").all().map(({id})=>{
       const t=this.work.get(id),p=t.data.meeting_preparation,s=this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='rt_schedules'").get()?this.db.prepare('SELECT status FROM rt_schedules WHERE id=?').get(p.schedule_id):null;
       return {task_id:id,title:t.data.title,owner_thread_id:t.owner_thread_id,schedule_id:p.schedule_id,prep_at:p.prep_at,needs_owner:!t.owner_thread_id,needs_schedule:!s,source_message_id:p.source_message_id};
@@ -267,8 +272,8 @@ export class DiscoveryStore {
       }
       if(data.source_kind==='calendar' && disposition!=='ignore'){
         const accepted=this.work.prepareCalendarInside(data,meeting??data.meeting);
-        if(accepted.excluded){this.db.prepare("UPDATE discovery_observations SET disposition='ignore',decision=? WHERE observation_id=?").run(JSON.stringify({reason:accepted.reason,evidence_ref}),observation_id);return {classified:true,excluded:true};}
-        if(accepted.authorized){task=accepted.task;this.db.prepare("UPDATE discovery_observations SET disposition='existing',task_id=?,decision=? WHERE observation_id=?").run(task.id,JSON.stringify({reason:'standing_calendar_preparation',evidence_ref}),observation_id);return {classified:true,task_id:task.id,execution_authorized:task.state==='accepted',owner_required:!task.owner_thread_id,meeting_preparation:task.data.meeting_preparation,next_preparation:accepted.preparation,requires_reschedule:accepted.requires_reschedule??false};}
+        if(accepted.excluded){this.db.prepare("UPDATE discovery_observations SET disposition='ignore',decision=? WHERE observation_id=?").run(JSON.stringify({reason:accepted.reason,evidence_ref}),observation_id);return {classified:true,excluded:true,...(accepted.shared_service?{shared_service:true,task_id:accepted.task.id}:{})};}
+        if(accepted.authorized){task=accepted.task;this.db.prepare("UPDATE discovery_observations SET disposition='existing',task_id=?,decision=? WHERE observation_id=?").run(task.id,JSON.stringify({reason:'standing_calendar_preparation',evidence_ref}),observation_id);return {classified:true,task_id:task.id,execution_authorized:task.state==='accepted',owner_required:!task.owner_thread_id,meeting_preparation:task.data.meeting_preparation,next_preparation:accepted.preparation,requires_reschedule:accepted.requires_reschedule??false,...(accepted.shared_service?{shared_service:true}:{})};}
         if(this.work.calendarRule()?.enabled&&['full_event_required','full_attendance_required'].includes(accepted.reason))throw new Error('Read the full calendar event and pass meeting before classifying preparation');
       }
       if(disposition==='existing'&&!task)throw new Error('Existing-task routing needs an exact registered source identity');

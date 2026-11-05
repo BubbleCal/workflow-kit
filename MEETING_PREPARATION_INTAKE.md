@@ -2,9 +2,25 @@
 
 # Authorized preparation intake belongs to discovery
 
+## Unified service mode
+
+If the saved policy names service_task_id, use MEETING_PREPARATION_SERVICE.md.
+All accepted occurrences route to that one already-bound task and owner. Do not
+create another task/chat per meeting. Classify with the full event; the CLI
+reconciles that occurrence's timer automatically. Shared calendar_followups only
+need task start or reconcile_meeting to finish their timer updates, never
+prepare_owner. Preserve exclusions and use the policy's lead_minutes (Yang's
+current rule is 90). Registration does not start preparation early.
+
+The independent-occurrence path below applies only when no shared service is
+configured. An explicit task consolidation supersedes the older per-meeting owner
+policy without changing recording summaries or engineering ownership.
+
+## Independent occurrence mode
+
 The saved `accept_calendar_preparation` policy contains the actual human source,
 calendar identity, enabled profiles, explicit exclusions, language/scope and the
-45-minute preparation lead. It also authorizes creating one independent execution
+configured preparation lead. It also authorizes creating one independent execution
 owner for each accepted occurrence. This does not grant engineering, event edits,
 RSVPs, external messages or preparation for excluded/unknown profiles.
 

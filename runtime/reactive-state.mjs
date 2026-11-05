@@ -127,7 +127,8 @@ export class ReactiveState {
     if (!Array.isArray(contract.job_sources) || !contract.job_sources.includes('native'))
       throw new Error('Declare native and any external job sources before automatic delivery');
     if(contract.schedule_sources!==undefined&&(!Array.isArray(contract.schedule_sources)||contract.schedule_sources.some(s=>typeof s!=='string'||!s.trim())||new Set(contract.schedule_sources).size!==contract.schedule_sources.length))throw new Error('Schedule sources must be distinct nonempty IDs');
-    if(contract.trigger_only===true&&!contract.schedule_sources?.length)throw new Error('Scheduled-only work needs bound schedule sources');
+    if(contract.trigger_only===true&&!contract.schedule_sources?.length&&contract.meeting_service!==true)throw new Error('Scheduled-only work needs bound schedule sources');
+    if(contract.meeting_service===true&&contract.trigger_only!==true)throw new Error('Meeting services only run for an actual due occurrence or human request');
     const registry = this.registry();
     if (registry) {
       const task = registry.task_registry?.items?.[task_id];
@@ -440,13 +441,14 @@ export class ReactiveState {
         canonical(payload.scope_keys??[])===canonical(task.contract.scope_keys??[]) ? [] : ['reactive_wake_changed_or_paused'];
     }
     if(!['dispatch','create_thread','archive','pr_ready','slack_pr','merge','notion_sync'].includes(kind))return [];
-    if(task.mode==='paused'&&!(kind==='archive'&&task.status==='complete'))return pausedMigrationSetup(kind,payload)&&payload.scope_handoff?.task_id===task_id ? [] : ['reactive_task_paused'];
+    const consolidated=kind==='archive'&&payload.purpose==='task_consolidation'&&this.consolidationReady?.(task_id)===true;
+    if(task.mode==='paused'&&!(kind==='archive'&&task.status==='complete')&&!consolidated)return pausedMigrationSetup(kind,payload)&&payload.scope_handoff?.task_id===task_id ? [] : ['reactive_task_paused'];
     const c=payload.runtime_context;
     if(!c || c.contract_rev!==task.contract_rev || c.plan_rev!==task.plan_rev || c.context_rev!==task.context_rev || task.dirty)
       return ['reactive_plan_or_evidence_changed'];
     if(kind==='dispatch'||kind==='create_thread')return ['reactive_owner_already_manages_execution'];
-    if(kind==='archive'&&task.status!=='complete')return ['reactive_contract_incomplete'];
-    if(kind==='archive'&&this.tasks().some(t=>t.owner_id===task.owner_id&&t.status!=='complete'))return ['reactive_owner_has_unfinished_goals'];
+    if(kind==='archive'&&task.status!=='complete'&&!consolidated)return ['reactive_contract_incomplete'];
+    if(kind==='archive'&&this.tasks().some(t=>t.owner_id===task.owner_id&&t.status!=='complete'&&!(consolidated&&this.consolidationReady?.(t.task_id))))return ['reactive_owner_has_unfinished_goals'];
     return [];
   }
   diagnostic(key,data) { this.db.prepare('INSERT INTO rt_diagnostics VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at').run(key,canonical(data),this.now()); }

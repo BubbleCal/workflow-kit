@@ -294,6 +294,10 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
       need(typeof e.expected_turn_id === 'string' && !!e.expected_turn_id && e.expected_turn_id === e.actual_turn_id, 'turn_changed_or_unknown');
       need(e.checkpoint_saved === true && /^[a-f0-9]{64}$/.test(payload.checkpoint_sha256 ?? '') && payload.checkpoint_sha256 === e.checkpoint_sha256, 'replacement_checkpoint_not_verified');
       need(e.resources_preserved === true && e.preserved_jobs_handoff_verified === true && e.task_remains_incomplete === true, 'replacement_obligations_not_preserved');
+    } else if(payload?.purpose==='task_consolidation'){
+      idle(true);
+      need(e.task_scope_transferred===true&&e.consolidation_evidence_saved===true&&e.replacement_owner_verified===true,'task_consolidation_not_verified');
+      need(e.pending_decision===false&&e.pending_cleanup===false&&e.pending_delivery===false&&e.important_result_delivered===true,'unfinished_task_obligation');
     } else {
       idle(true);
       need(e.task_complete === true && e.completion_evidence_saved === true, 'task_not_fully_complete');
@@ -378,6 +382,7 @@ export class ControlStore {
     this.reactive.checkWait = condition => this.checkReactiveWait(condition);
     this.work = new WorkCatalog(this.db,{config:{...bindings,instance_root:path===':memory:'?'[instance-root]':dirname(path)},now:this.now});
     this.reactive.completionReasons = taskId => this.work.completionReasons(taskId);
+    this.reactive.consolidationReady = taskId => this.work.archivableConsolidation(taskId);
     this.work.onReportInside = (id,event) => this.work.publishToParentInside(this.reactive,id,event);
     this.reactive.onCompleteInside = (id,wake,evidence_ref) => {
       this.work.publishToParentInside(this.reactive,id,{key:wake,type:'child_completed',payload:{status:'complete'},evidence_ref});
@@ -545,7 +550,7 @@ export class ControlStore {
       const ownership = ownershipReasons(row.kind,row.task_id,payload,evidence,this.taskRegistry(),this.db,key);
       const handoff = row.kind==='create_thread' ? scopedHandoffReasons(row.task_id,payload,evidence) : [];
       if(ownership.length || handoff.length)return {claimed:false,allowed:false,reasons:[...ownership,...handoff]};
-      if (row.kind === 'archive' && payload.purpose !== 'explicit_owner_replacement' && !(bindings.delivery.owner_managed && this.reactive.task(row.task_id)?.status==='complete') && this.progress?.unfinishedForOwner(payload.thread_id))
+      if (row.kind === 'archive' && payload.purpose !== 'explicit_owner_replacement' && !(bindings.delivery.owner_managed && (this.reactive.task(row.task_id)?.status==='complete'||payload.purpose==='task_consolidation'&&this.work.archivableConsolidation(row.task_id))) && this.progress?.unfinishedForOwner(payload.thread_id))
         return { claimed: false, reason: 'owner_has_unfinished_goal_stages' };
       if (row.kind === 'assign_project') {
         const setup = this.db.prepare('SELECT * FROM thread_setups WHERE creation_key=?').get(payload.creation_key);

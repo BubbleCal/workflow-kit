@@ -15,7 +15,7 @@ export function calendarPreparation(rule,observation,event,now=Date.now()) {
     return {authorized:false,reason:'full_attendance_required'};
   const profile=(rule.profiles??[]).find(p=>p.enabled!==false && (normalized(p.title)===title||p.series_id&&String(p.series_id).split('_R')[0]===root));
   if(!profile)return {authorized:false,reason:'meeting_preparation_scope_undecided'};
-  const key=`${rule.calendar_id}:${event.id}`,generation=createHash('sha256').update(`${key}:${new Date(start).toISOString()}`).digest('hex').slice(0,24);
+  const key=`${rule.calendar_id}:${event.id}`,generation=createHash('sha256').update(`${key}:${new Date(start).toISOString()}${rule.service_task_id?`:${rule.lead_minutes}:${rule.service_task_id}`:''}`).digest('hex').slice(0,24);
   const schedule_id=`runtime:meeting-${generation}`,prep_at=new Date(start-rule.lead_minutes*60000).toISOString();
   return {authorized:true,canonical_key:`meeting_prep:${key}`,preparation:{policy_key:'accept_calendar_preparation',calendar_id:rule.calendar_id,event_id:event.id,
     meeting_start:new Date(start).toISOString(),prep_at,schedule_id,generation,profile_title:profile.title,evidence_ref:observation.evidence_ref,
@@ -27,6 +27,29 @@ export function calendarPreparation(rule,observation,event,now=Date.now()) {
     schedule_sources:[schedule_id],trigger_only:true}};
 }
 export function scheduleCalendarPreparation(control,taskId) {
+  const shared=control.work.calendarRule();
+  if(shared?.service_task_id===taskId){
+    const item=control.work.get(taskId),task=control.reactive.task(taskId);
+    if(!item?.owner_thread_id||!task?.contract.meeting_service||task.mode==='paused')return null;
+    const records=control.work.meetingOccurrences(taskId),active=records.filter(r=>r.state==='active'),ids=active.map(r=>r.preparation.schedule_id);
+    const missing=ids.filter(id=>!task.contract.schedule_sources?.includes(id));
+    if(missing.length)control.reactive.amend({task_id:taskId,expected_contract_rev:task.contract_rev,
+      contract:{...task.contract,schedule_sources:[...new Set([...(task.contract.schedule_sources??[]),...missing])]},
+      actual_human_verified:true,source_message_id:shared.source_message_id});
+    const changes=[];
+    for(const r of records){
+      const p=r.preparation,existing=control.scheduler.get(p.schedule_id);
+      if(r.state!=='active'){
+        if(existing&&['enabled','paused'].includes(existing.status))changes.push(control.scheduler.change({id:existing.id,expected_revision:existing.revision,action:'cancel',
+          actual_human_verified:true,source_message_id:shared.source_message_id,evidence_ref:shared.evidence_ref}));
+        continue;
+      }
+      if(existing){changes.push({created:false,schedule:existing});continue;}
+      changes.push(control.scheduler.create({id:p.schedule_id,task_id:taskId,kind:'once',timezone:shared.timezone,start_at:p.prep_at,overlap:'coalesce',
+        actual_human_verified:true,source_message_id:p.source_message_id,evidence_ref:p.authorization_ref}));
+    }
+    return {shared_service:true,task_id:taskId,schedules:changes};
+  }
   const item=control.work.get(taskId),p=item?.data.meeting_preparation;
   if(!p||!item.owner_thread_id||item.state!=='accepted')return null;
   const task=control.reactive.task(taskId);if(!task)return null;

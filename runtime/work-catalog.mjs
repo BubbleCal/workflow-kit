@@ -1,7 +1,7 @@
 import {assessDifficulty,routineMeetingDifficulty} from './model-selection.mjs';
 import {calendarPreparation} from './calendar-preparation.mjs';
 import {createHash} from 'node:crypto';
-import {verifyNativeBinding} from './native-queue.mjs';
+import {verifyNativeBinding,nativeReadback} from './native-queue.mjs';
 
 const json=value=>JSON.stringify(value);
 const parse=value=>value?JSON.parse(value):null;
@@ -65,6 +65,7 @@ export class WorkCatalog {
       source:input.source??{kind:'user'},pull_requests:input.pull_requests??[],job_sources:input.job_sources??['native'],
       ...(input.schedule_sources?{schedule_sources:input.schedule_sources,trigger_only:input.trigger_only===true}:{}),
       ...(input.meeting_preparation?{meeting_preparation:input.meeting_preparation}:{}),
+      ...(input.meeting_service?{meeting_service:input.meeting_service}:{}),
       ...(kind==='exploration'?{exploration:{...structuredClone(EXPLORATION_TEMPLATE.exploration),...input.exploration}}:{})};
     if(data.parent_id&&!this.get(data.parent_id))throw new Error('Unknown parent project/task');
     if(!Array.isArray(data.depends_on)||data.depends_on.some(dep=>!this.get(dep)))throw new Error('Dependencies must be existing tasks');
@@ -83,19 +84,76 @@ export class WorkCatalog {
       .run(sourceKey,id,json(data),this.now());
   }
   taskForSource(key){const r=this.db.prepare('SELECT task_id FROM work_sources WHERE source_key=?').get(key);return r?this.get(r.task_id):null;}
-  setPolicy({key,enabled,allowed_kinds,assignee_id,calendar_id,self_email,lead_minutes=45,timezone,profiles,exclusions,source_message_id,verbatim_text,evidence_ref,actual_human_verified}){
+  setPolicy({key,enabled,allowed_kinds,assignee_id,calendar_id,self_email,lead_minutes=45,service_task_id,timezone,profiles,exclusions,source_message_id,verbatim_text,evidence_ref,actual_human_verified}){
     if(!['create_owner','accept_assigned_linear','accept_calendar_preparation'].includes(key))throw new Error('Unknown work policy');
     if(actual_human_verified!==true)throw new Error('A standing work policy needs actual user authorization');
     for(const [n,v] of Object.entries({source_message_id,verbatim_text,evidence_ref}))required(v,n);
     if(enabled&&(!Array.isArray(allowed_kinds)||!allowed_kinds.length||allowed_kinds.some(k=>!['work','project','exploration'].includes(k))))throw new Error('Declare allowed ordinary task kinds');
     if(enabled&&key==='accept_assigned_linear')required(assignee_id,'verified Linear user ID');
-    if(enabled&&key==='accept_calendar_preparation'&&(!calendar_id||!self_email||!timezone||!Array.isArray(profiles)||!profiles.length||lead_minutes!==45))throw new Error('Bind the existing calendar, profiles and 45-minute preparation rule');
-    const rule={enabled:enabled===true,allowed_kinds:allowed_kinds??[],assignee_id,source_message_id,verbatim_text,evidence_ref,...(key==='accept_calendar_preparation'?{calendar_id,self_email,lead_minutes,timezone,profiles,exclusions}: {})};
+    if(enabled&&key==='accept_calendar_preparation'&&(!calendar_id||!self_email||!timezone||!Array.isArray(profiles)||!profiles.length||!Number.isInteger(lead_minutes)||lead_minutes<1||lead_minutes>1440))throw new Error('Bind the authorized calendar, profiles and preparation lead time');
+    if(enabled&&key==='accept_calendar_preparation'&&service_task_id){const t=this.get(service_task_id);if(t?.state!=='accepted'||!t.owner_thread_id||!t.data.meeting_service)throw new Error('Bind one accepted meeting service and its verified owner');}
+    const rule={enabled:enabled===true,allowed_kinds:allowed_kinds??[],assignee_id,source_message_id,verbatim_text,evidence_ref,...(key==='accept_calendar_preparation'?{calendar_id,self_email,lead_minutes,timezone,profiles,exclusions,...(service_task_id?{service_task_id}:{})}: {})};
     this.db.prepare('INSERT INTO work_rules VALUES (?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data').run(key,json(rule));return rule;
   }
   calendarRule(){return parse(this.db.prepare("SELECT data FROM work_rules WHERE key='accept_calendar_preparation'").get()?.data);}
+  meetingOccurrences(taskId){return Object.values(this.get(taskId)?.data.meeting_occurrences??{});}
+  reconcileMeeting({task_id,calendar_id,meeting,evidence_ref,identity_verified}){
+    const rule=this.calendarRule();required(evidence_ref,'actual full calendar event evidence');
+    if(identity_verified!==true||!rule?.enabled||rule.service_task_id!==task_id||rule.calendar_id!==calendar_id||!meeting?.id)throw new Error('Reconcile an actual event for the configured unified meeting service');
+    return this.atomic(()=>this.prepareCalendarInside({source_kind:'calendar',scope_key:calendar_id,calendar_id,item_key:meeting.id,
+      entity_key:`calendar:${calendar_id}:${meeting.id}`,url:meeting.url??meeting.display_url,evidence_ref},meeting));
+  }
+  archivableConsolidation(taskId){
+    const old=this.get(taskId),transfer=old?.data.consolidation,target=transfer&&this.get(transfer.into_task_id),execution=this.execution(taskId),next=target&&this.execution(target.id);
+    return old?.state==='superseded'&&execution?.status==='superseded'&&execution.mode==='paused'&&!!transfer.evidence_ref&&
+      target?.state==='accepted'&&!!target.owner_thread_id&&target.data.meeting_service===true&&next?.mode==='active';
+  }
+  consolidateMeetings(reactive,{task_ids,into_task_id,source_message_id,actual_human_verified,evidence_ref,native_bindings,native_sources_disabled}){
+    required(source_message_id,'meeting consolidation authorization');required(evidence_ref,'preserved meeting handoff');
+    if(actual_human_verified!==true||!Array.isArray(task_ids)||!task_ids.length||new Set(task_ids).size!==task_ids.length||task_ids.includes(into_task_id))throw new Error('Explicit distinct meeting consolidation scope required');
+    return this.atomic(()=>{
+      const next=this.get(into_task_id),runtime=reactive.task(into_task_id);
+      if(next?.state!=='accepted'||!next.owner_thread_id||next.data.meeting_service!==true||runtime?.mode!=='active'||this.calendarRule()?.service_task_id!==into_task_id)throw new Error('Unified meeting service must be bound, active and selected first');
+      const oldTasks=task_ids.map(id=>({item:this.get(id),runtime:reactive.task(id)}));
+      for(const {item:t,runtime:r}of oldTasks){
+        if(t?.data.consolidation?.into_task_id===into_task_id)continue;
+        if(!t||!r||!t.canonical_key.startsWith('meeting_prep:')||r.mode!=='paused'||r.owner_id===next.owner_thread_id)throw new Error('Only paused original meeting occurrences can consolidate');
+        const binding=native_bindings?.[t.id],read=nativeReadback(binding?.readback);
+        verifyNativeBinding(binding,{thread_id:r.owner_id,workspace:r.contract.workspace,now:this.now()});
+        if(!['idle','notLoaded'].includes(read.thread.status?.type)||read.turns?.[0]?.status!=='completed'||reactive.openWake(t.id))throw new Error('Original meeting owner must be quiescent');
+        if(this.db.prepare("SELECT 1 FROM actions WHERE task_id=? AND state IN ('claimed','uncertain')").get(t.id)||
+          this.db.prepare("SELECT 1 FROM rt_schedules WHERE task_id=? AND status IN ('enabled','paused')").get(t.id)||
+          this.db.prepare("SELECT 1 FROM rt_schedule_runs WHERE task_id=? AND state IN ('pending','admitted','running')").get(t.id))throw new Error('Reconcile old meeting timers and actions first');
+        if((r.contract.schedule_sources??[]).filter(s=>!s.startsWith('runtime:')).some(id=>native_sources_disabled?.[id]?.status!=='PAUSED'||!native_sources_disabled[id].evidence_ref))throw new Error('Verify original native meeting automations are paused');
+      }
+      for(const {item:t,runtime:r}of oldTasks){
+        if(t.data.consolidation?.into_task_id===into_task_id)continue;
+        const transfer={into_task_id,to_owner_thread_id:next.owner_thread_id,source_message_id,evidence_ref,at:this.now(),kind:'scope_transfer_not_preparation_completion'};
+        const contract={...r.contract,retired:true,consolidation:transfer};
+        this.db.prepare('INSERT INTO rt_contracts VALUES (?,?,?,?,?)').run(t.id,r.contract_rev+1,json(contract),source_message_id,this.now());
+        this.db.prepare("UPDATE rt_tasks SET contract=?,contract_rev=contract_rev+1,status='superseded',dirty=0,wake_at=NULL,first_pending_at=NULL,updated_at=? WHERE task_id=?").run(json(contract),this.now(),t.id);
+        this.db.prepare("UPDATE rt_plans SET state='superseded' WHERE task_id=? AND state='current'").run(t.id);
+        this.db.prepare("UPDATE rt_events SET disposition='consolidated' WHERE task_id=? AND disposition IS NULL").run(t.id);
+        this.db.prepare("UPDATE rt_waits SET state='invalidated',reason='meeting_scope_consolidated',updated_at=? WHERE task_id=?").run(this.now(),t.id);
+        this.db.prepare("UPDATE work_items SET state='superseded',data=?,revision=revision+1,updated_at=? WHERE id=?").run(json({...t.data,consolidation:transfer}),this.now(),t.id);
+      }
+      return {consolidated:true,into_task_id,owner_thread_id:next.owner_thread_id,task_ids,preparation_completed:false,history_preserved:true};
+    });
+  }
+  prepareSharedMeetingInside(rule,observation,event,assessment){
+    const task=this.get(rule.service_task_id);if(task?.state!=='accepted'||!task.owner_thread_id||!task.data.meeting_service)throw new Error('Unified meeting owner is not available');
+    const records={...(task.data.meeting_occurrences??{})};
+    if(!assessment.authorized&&!assessment.excluded)return {...assessment,shared_service:true,task};
+    for(const [id,r]of Object.entries(records))if(r.preparation.event_id===observation.item_key&&r.preparation.calendar_id===rule.calendar_id&&r.state==='active'&&
+      (assessment.excluded||r.preparation.generation!==assessment.preparation.generation))records[id]={...r,state:assessment.excluded?'skipped':'superseded',reason:assessment.reason??'meeting_time_changed',updated_at:this.now()};
+    if(assessment.authorized){const p=assessment.preparation,old=records[p.schedule_id];
+      records[p.schedule_id]={...old,preparation:p,event,state:old?.state==='completed'?'completed':'active',source:observation,updated_at:this.now()};}
+    this.db.prepare('UPDATE work_items SET data=?,revision=revision+1,updated_at=? WHERE id=?').run(json({...task.data,meeting_occurrences:records}),this.now(),task.id);
+    return {...assessment,shared_service:true,task:this.get(task.id),owner_required:false};
+  }
   prepareCalendarInside(observation,event){
     const rule=this.calendarRule(),assessment=calendarPreparation(rule,observation,event,this.now());
+    if(rule?.enabled&&rule.service_task_id)return this.prepareSharedMeetingInside(rule,observation,event,assessment);
     if(!assessment.authorized)return assessment;
     let task=this.taskForSource(observation.entity_key)??this.get(assessment.canonical_key);
     if(task && !['candidate','accepted'].includes(task.state))return {...assessment,task,unchanged:true};
@@ -238,6 +296,7 @@ export class WorkCatalog {
     return {objective:t.data.objective,requirements:t.data.requirements,constraints:t.data.constraints,workspace:t.data.workspace,
       project_id:this.config.scope.project_id,canonical_key:t.canonical_key,authorization_ref:t.authorization?.evidence_ref,
       task_kind:t.kind,job_sources:t.data.job_sources,pull_requests:t.data.pull_requests,
+      ...(t.data.meeting_service?{meeting_service:t.data.meeting_service}:{}),
       ...(t.data.schedule_sources?{schedule_sources:t.data.schedule_sources,trigger_only:t.data.trigger_only===true}:{}),
       ...(t.kind==='exploration'?{exploration:t.data.exploration}:{})};
   }

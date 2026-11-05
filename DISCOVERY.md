@@ -1,4 +1,4 @@
-> Authorized calendar preparation is accepted and scheduled directly by discovery. Read MEETING_PREPARATION_INTAKE.md; pass full event details as meeting to classify. Inspect calendar_followups on every scan and finish their owner binding and timer setup under the saved rule. Do not send these existing-authority steps to main.
+> Authorized calendar preparation is accepted and scheduled directly by discovery. Read MEETING_PREPARATION_INTAKE.md; pass full event details as meeting to classify. When service_task_id is configured, reuse that single task/owner and reconcile shared occurrence timers; never create per-meeting owners. Inspect calendar_followups on every scan. Do not send these existing-authority steps to main.
 
 > Optional calendar source: configure exact calendar_id, preparation_authorization_ref, timezone and lookahead_days. Preserve the existing hourly scan and 45-minute preparation lead. Read-only calendar discovery may maintain authorized preparation schedules, never edit meetings, send invitations or write meeting briefs. Follow the supplied tool plan and pagination; calendar_id is its scope_key.
 

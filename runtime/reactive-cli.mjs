@@ -130,6 +130,9 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         if(input.op==='list'||input.op==='status')result=control.work.list();
         else if(input.op==='builtin')result=control.work.seedBuiltins();
         else if(input.op==='get')result=control.work.get(input.task_id);
+        else if(input.op==='meeting_occurrences')result={task_id:input.task_id,occurrences:control.work.meetingOccurrences(input.task_id).map(r=>({...r,schedule:control.scheduler.get(r.preparation.schedule_id),runs:control.scheduler.runs(r.preparation.schedule_id)}))};
+        else if(input.op==='reconcile_meeting'){result=control.work.reconcileMeeting(input);result={...result,schedule_update:scheduleCalendarPreparation(control,input.task_id)};}
+        else if(input.op==='consolidate_meetings')result=control.work.consolidateMeetings(state,input);
         else if(input.op==='create')result=control.work.create(input.kind==='exploration'?{...structuredClone(EXPLORATION_TEMPLATE),...input}:input);
         else if(input.op==='configure'){if(input.changes?.workspace)input.changes.workspace=realpathSync(input.changes.workspace);result=control.work.configure(input);}
         else if(input.op==='accept')result=control.work.accept(input);
@@ -160,7 +163,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
           mailbox.begin(mail.batch_id);
           if(result.invalidated)mailbox.finish(mail.batch_id,{processed_keys:[result.mail_key],note:'source scope changed; no source reads'});
         }else if(input.op==='ingest')result=control.discovery.ingest(input);
-        else if(input.op==='classify')result=control.discovery.classify(input);
+        else if(input.op==='classify'){result=control.discovery.classify(input);if(result.shared_service)result={...result,schedule_update:scheduleCalendarPreparation(control,result.task_id)};}
         else if(input.op==='watch_thread')result=control.discovery.watchThread(input);
         else if(input.op==='recover'){
           result=control.discovery.recover(input);

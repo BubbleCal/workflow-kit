@@ -108,7 +108,7 @@ export function ownerActionReasons(control,kind,taskId,payload,evidence={},actor
   if(!task)return ['registered_native_delivery_owner_required'];
   const executor=actor??evidence.executor_thread_id;
   const main=control.work.config.threads?.main;
-  if(kind==='archive'&&executor===main&&task.status==='complete')return [];
+  if(kind==='archive'&&executor===main&&(task.status==='complete'||payload.purpose==='task_consolidation'&&control.work.archivableConsolidation(taskId)))return [];
   return executor===task.owner_id && task.contract.retired!==true?[]:['original_task_owner_must_execute_delivery'];
 }
 
