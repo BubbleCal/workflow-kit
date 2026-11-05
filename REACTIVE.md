@@ -221,3 +221,5 @@ scope qualify. Duplicate contract/watch bindings produce one subject poll and
 one task membership. Paused/completed tasks, retired watches and owner mismatches
 do not gain a source through this path. Existing source rate limits and grouped
 owner wake guards remain in force; registration itself sends no worker message.
+
+Runtime-owned one-time and fixed-interval timers use SCHEDULES.md. They share the ordinary event/owner protocol; native schedule producers remain supported separately.

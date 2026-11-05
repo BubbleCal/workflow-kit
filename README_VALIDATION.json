@@ -1,12 +1,15 @@
 {
-  "version": "0.6.1",
-  "verified_at": "2026-11-04T20:44:26.968359+00:00",
-  "entry_point": "REACTIVE.md",
+  "version": "0.7.0",
+  "verified_at": "2026-11-05T05:08:36.876Z",
+  "entry_point": "README.md and SCHEDULES.md",
   "native_evidence_summary": "NATIVE_QUEUE_VALIDATION.md",
   "native_desktop_idle_and_busy_verified": true,
   "portable_runtime_cli_tested": true,
   "legacy_setup_preserved": true,
   "live_workflow_instances_changed": false,
-  "reactive_documentation": "REACTIVE.md covers shared owners, native schedules, verified App loading, source budgets and layout preservation",
-  "native_installation": "README.md and START-HERE.md retain main-first native layout; legacy installation documents remain explicit"
+  "reactive_documentation": "SCHEDULES.md documents durable runtime timers alongside the existing REACTIVE.md native source and shared-owner protocol",
+  "native_installation": "README.md and START-HERE.md retain main-first native layout; legacy installation documents remain explicit",
+  "native_queue_evidence_from_version": "0.6.1",
+  "scheduled_exploration_cli_verified": true,
+  "scheduled_exploration_live_desktop_verified": false
 }

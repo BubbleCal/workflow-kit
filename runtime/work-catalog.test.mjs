@@ -104,3 +104,16 @@ test('project acceptance waits for child work and research reports reach its ori
   assert.equal(f.c.discovery.status().batches.length,0);
  }finally{f.c.close();}
 });
+
+test('an exploration member can report when another task is primary in the shared wake',()=>{
+ const f=workFixture();try{const t=f.work.seedBuiltins().task;f.accept(t.id);f.bind(t.id);f.work.start(f.c.reactive,{task_id:t.id,queue_compatibility_verified:true});
+  const original=f.c.reactive.registry;f.c.reactive.registry=()=>{const r=original();return {...r,task_registry:{items:{...r.task_registry.items,'T-primary':{canonical_key:'primary',owner_thread_id:OWNER}}}};};
+  f.c.reactive.adopt({task_id:'T-primary',owner_thread_id:OWNER,contract:{...f.work.contract(t.id),canonical_key:'primary',task_kind:'work'},source_message_id:'user:primary',actual_human_verified:true});
+  f.c.reactive.setModes({task_ids:[t.id,'T-primary'],mode:'active',source_message_id:'user:shared',actual_human_verified:true,native_binding:nativeProof({status:'completed',now:f.now()}),queue_compatibility_verified:true,legacy_quiescent:true});
+  const w=f.c.reactive.reserveQueuedWake('T-primary').wake,prompt='shared owner work';assert.ok(w.member_ids.includes(t.id));
+  f.c.db.prepare("UPDATE rt_wakes SET state='queued',prompt=? WHERE id=?").run(prompt,w.id);
+  f.c.reactive.begin({task_id:'T-primary',wake_id:w.id,native_proof:nativeProof({message:prompt,now:f.now()})});
+  const result=f.work.recordReport({task_id:t.id,owner_thread_id:OWNER,report_key:'shared-member-report',outcome:'inconclusive',summary:'Bounded evidence is insufficient',evidence_refs:['observations']});
+  assert.equal(result.recorded,true);
+ }finally{f.c.close();}
+});

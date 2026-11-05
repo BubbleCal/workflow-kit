@@ -61,6 +61,7 @@ export class WorkCatalog {
     const data={title:input.title,objective:input.objective,requirements:input.requirements??[],constraints:input.constraints??[],
       workspace:input.workspace??this.config.scope?.project_root,parent_id:input.parent_id??null,depends_on:input.depends_on??[],
       source:input.source??{kind:'user'},pull_requests:input.pull_requests??[],job_sources:input.job_sources??['native'],
+      ...(input.schedule_sources?{schedule_sources:input.schedule_sources,trigger_only:input.trigger_only===true}:{}),
       ...(kind==='exploration'?{exploration:{...structuredClone(EXPLORATION_TEMPLATE.exploration),...input.exploration}}:{})};
     if(data.parent_id&&!this.get(data.parent_id))throw new Error('Unknown parent project/task');
     if(!Array.isArray(data.depends_on)||data.depends_on.some(dep=>!this.get(dep)))throw new Error('Dependencies must be existing tasks');
@@ -105,7 +106,7 @@ export class WorkCatalog {
     return this.atomic(()=>{
       const t=this.get(task_id);if(!t||t.revision!==expected_revision)throw new Error('Task changed; reread before configuring');
       if(!['draft','candidate'].includes(t.state))throw new Error('Use the execution contract amendment protocol after acceptance');
-      const allowed=['title','objective','requirements','constraints','workspace','pull_requests','job_sources','exploration'];
+      const allowed=['title','objective','requirements','constraints','workspace','pull_requests','job_sources','exploration','schedule_sources','trigger_only'];
       if(Object.keys(changes??{}).some(k=>!allowed.includes(k)))throw new Error('Unsupported task configuration field');
       const data={...t.data,...changes};required(data.title,'title');required(data.objective,'objective');
       if(t.kind!=='exploration'&&changes.exploration)throw new Error('Exploration settings belong to an exploration task');
@@ -185,6 +186,7 @@ export class WorkCatalog {
     return {objective:t.data.objective,requirements:t.data.requirements,constraints:t.data.constraints,workspace:t.data.workspace,
       project_id:this.config.scope.project_id,canonical_key:t.canonical_key,authorization_ref:t.authorization?.evidence_ref,
       task_kind:t.kind,job_sources:t.data.job_sources,pull_requests:t.data.pull_requests,
+      ...(t.data.schedule_sources?{schedule_sources:t.data.schedule_sources,trigger_only:t.data.trigger_only===true}:{}),
       ...(t.kind==='exploration'?{exploration:t.data.exploration}:{})};
   }
   start(reactive,{task_id,queue_compatibility_verified}){
@@ -219,9 +221,11 @@ export class WorkCatalog {
     if(!['findings','no_actionable_findings','inconclusive'].includes(outcome)||!Array.isArray(evidence_refs)||!evidence_refs.length)throw new Error('An evidenced research outcome is required');
     return this.atomic(()=>{
       const t=this.get(task_id);if(!t||t.kind!=='exploration'||t.owner_thread_id!==owner_thread_id)throw new Error('The exploration task owner must report its own work');
-      const wake=this.db.prepare("SELECT 1 FROM rt_wakes WHERE task_id=? AND state='running'").get(t.id);if(!wake)throw new Error('Research requires actual ordinary task execution');
+      const wake=this.db.prepare("SELECT 1 FROM rt_wakes w JOIN rt_wake_members m ON m.wake_id=w.id WHERE m.task_id=? AND w.state='running'").get(t.id);if(!wake)throw new Error('Research requires actual ordinary task execution');
       if(outcome!=='findings'&&proposals.length)throw new Error('A no-finding or inconclusive report cannot manufacture follow-up work');
-      const data={outcome,summary,evidence_refs,proposals},digest=keyHash(json(data));
+      const scheduled=this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='rt_schedule_runs'").get()?
+        this.db.prepare("SELECT id FROM rt_schedule_runs WHERE task_id=? AND state='running'").get(t.id):null;
+      const data={outcome,summary,evidence_refs,proposals,...(scheduled?{run_id:scheduled.id}:{})},digest=keyHash(json(data));
       const old=this.db.prepare('SELECT * FROM work_reports WHERE report_key=?').get(report_key);
       if(old){if(old.task_id!==t.id||old.digest!==digest)throw new Error('Immutable research report changed');return {recorded:false,duplicate:true};}
       this.db.prepare('INSERT INTO work_reports VALUES (?,?,?,?,?)').run(report_key,t.id,digest,json(data),this.now());

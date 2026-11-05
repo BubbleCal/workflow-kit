@@ -124,7 +124,8 @@ export class ReactiveState {
     if (!Array.isArray(contract.constraints)) throw new Error('Explicit constraints are required');
     if (!Array.isArray(contract.job_sources) || !contract.job_sources.includes('native'))
       throw new Error('Declare native and any external job sources before automatic delivery');
-    if(contract.trigger_only===true&&(!Array.isArray(contract.schedule_sources)||!contract.schedule_sources.length))throw new Error('Scheduled-only work needs bound native schedule sources');
+    if(contract.schedule_sources!==undefined&&(!Array.isArray(contract.schedule_sources)||contract.schedule_sources.some(s=>typeof s!=='string'||!s.trim())||new Set(contract.schedule_sources).size!==contract.schedule_sources.length))throw new Error('Schedule sources must be distinct nonempty IDs');
+    if(contract.trigger_only===true&&!contract.schedule_sources?.length)throw new Error('Scheduled-only work needs bound schedule sources');
     const registry = this.registry();
     if (registry) {
       const task = registry.task_registry?.items?.[task_id];
@@ -247,7 +248,7 @@ export class ReactiveState {
       facts: this.db.prepare('SELECT * FROM rt_facts WHERE task_id=? ORDER BY subject').all(task_id).map(f=>({...f,data:parse(f.data)})),
       events: this.db.prepare('SELECT * FROM rt_events WHERE task_id=? AND disposition IS NULL ORDER BY context_rev,event_id').all(task_id).map(e=>({...e,payload:parse(e.payload)})),
       wait: this.db.prepare('SELECT * FROM rt_waits WHERE task_id=?').get(task_id) ?? null,
-      wake: this.openWake(task_id),
+      wake: this.openWake(task_id),schedule_runs:this.scheduleRuns?.(task_id)??[],
       owner_tasks:this.tasks().filter(t=>t.owner_id===task.owner_id).map(t=>({task_id:t.task_id,mode:t.mode,status:t.status,dirty:t.dirty,objective:t.contract.objective})) };
   }
   validatePlan(task, plan) {
@@ -371,6 +372,7 @@ export class ReactiveState {
       this.db.prepare("UPDATE rt_wakes SET state='running',turn_id=?,started_at=COALESCE(started_at,?),evidence_ref=? WHERE id=?").run(turn_id,this.now(),evidence_ref,wake_id);
       this.db.prepare("UPDATE actions SET state='sent',receipt=?,updated_at=? WHERE action_key=? AND kind='task_queue' AND state IN ('claimed','uncertain')")
         .run(canonical({outcome:'sent',native_consumption:{turn_id,evidence_ref}}),this.now(),wake_id);
+      this.onBeginInside?.(wake);
       return this.checkpoint(task_id);
     });
   }
@@ -386,6 +388,7 @@ export class ReactiveState {
       }
       this.db.prepare("UPDATE rt_wakes SET state='finished',completed_at=?,evidence_ref=? WHERE id=?").run(this.now(),evidence_ref,wake_id);
       for(const id of wake.member_ids)if(this.task(id).status==='complete')this.onCompleteInside?.(id,wake_id,evidence_ref);
+      for(const id of wake.member_ids)this.onFinishInside?.(id,wake,evidence_ref);
       return {finished:true,task_complete:this.task(task_id).status==='complete'};
     });
   }

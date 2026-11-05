@@ -105,6 +105,16 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
       output({initialized:true,transport:'native_queue',backup,paused_tasks:paused,queue_verified:false,receipts_preserved:true});return;
     }
     if(command==='status'){output(state.status());return;}
+    if(command==='schedule'){
+      const input=args[1]==='list'?{op:'list'}:fileIndex>=0?read(inputFile()):JSON.parse(readFileSync(0,'utf8'));
+      let result;
+      if(input.op==='list')result=control.scheduler.list();
+      else if(input.op==='get')result={schedule:control.scheduler.get(input.id),runs:control.scheduler.runs(input.id)};
+      else if(input.op==='create')result=control.scheduler.create(input);
+      else if(['pause','resume','cancel'].includes(input.op))result=control.scheduler.change({...input,action:input.op});
+      else throw new Error('Use schedule list or create|get|pause|resume|cancel');
+      output(result);return;
+    }
     if(['task','sources','discovery'].includes(command)) {
       if(bindings.layout!=='native')throw new Error('Use the independent native layout for new task registration and discovery; preserve or migrate the legacy instance first');
       const action=args[1];

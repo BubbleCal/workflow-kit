@@ -1,5 +1,13 @@
 # Changes
 
+## 0.7.0
+
+- Add durable one-time and fixed-interval runtime schedules with explicit timezone/offset semantics and user-source authorization.
+- Coalesce missed triggers, preserve original timing anchors, and support coalesce/skip overlap, pause, resume and cancellation.
+- Reuse ordinary task contracts and shared native owner queues; save independent cycle identities, execution proofs and acceptance results.
+- Preserve accepted work and uncertain receipts, task holds and existing native schedule sources.
+- Allow exploration reports from any actual shared-wake member, with current scheduled run identity.
+
 ## 0.6.4
 
 - Accept exact native duplicate-CI dispositions and scoped post-merge handoffs through the existing coordinator progress path.

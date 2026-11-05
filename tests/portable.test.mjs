@@ -199,3 +199,32 @@ test('native layout migration preserves legacy records and imports existing task
   assert.equal(list.filter(t=>t.kind==='exploration').length,1);
  }finally{db?.close();rmSync(root,{recursive:true,force:true});}
 });
+
+test('native CLI runs a scheduled exploration through the ordinary owner queue and records a separate accepted cycle',()=>{
+ const root=setup();try{const {dir,workspace,task}=nativeSetup(root),id=task.task_id,schedule='runtime:bounded-exploration';
+  op(dir,'task',{op:'configure',task_id:id,expected_revision:0,changes:{schedule_sources:[schedule],trigger_only:true},source_message_id:'user:recurring-research',actual_human_verified:true});
+  op(dir,'task',{op:'accept',task_id:id,...{source_message_id:'user:research',evidence_ref:'bounded-recurring-scope',actual_human_verified:true}});
+  op(dir,'task',{op:'bind_owner',task_id:id,owner_thread_id:OWNER,native_binding:nativeProof({workspace,status:'completed',now:Date.now()}),
+   evidence_ref:'native-owner',existing_owner_authorized:true,actual_human_verified:true,source_message_id:'user:owner'});
+  op(dir,'task',{op:'start',task_id:id});once(dir);
+  assert.equal(run(dir,'workflow.mjs',['runtime','status']).json.wakes.length,0);
+  const authority={source_message_id:'user:timer',evidence_ref:'actual-timer-request',actual_human_verified:true};
+  op(dir,'schedule',{op:'create',id:schedule,task_id:id,kind:'interval',start_at:new Date(Date.now()-120000).toISOString(),interval_ms:60000,timezone:'Asia/Shanghai',...authority});
+  once(dir);once(dir);const packet=op(dir,'schedule',{op:'get',id:schedule});assert.equal(packet.runs.length,1);assert.equal(packet.runs[0].occurrences,3);
+  assert.equal(packet.runs[0].state,'admitted');
+  const w=run(dir,'workflow.mjs',['runtime','status']).json.wakes[0];assert.equal(w.state,'queued');
+  op(dir,'runtime',{op:'begin',task_id:id,wake_id:w.id,native_proof:nativeProof({workspace,message:w.prompt,now:Date.now()})});
+  const checkpoint=op(dir,'runtime',{op:'checkpoint',task_id:id});assert.equal(checkpoint.schedule_runs[0].id,packet.runs[0].id);
+  const report='report:'+packet.runs[0].id;
+  op(dir,'task',{op:'report',task_id:id,owner_thread_id:OWNER,report_key:report,outcome:'no_actionable_findings',summary:'No supported improvement in this cycle',evidence_refs:['this-cycle-observations']});
+  op(dir,'runtime',{op:'decide',task_id:id,owner_thread_id:OWNER,wake_id:w.id,expected_context_rev:checkpoint.task.context_rev,expected_plan_rev:0,
+   disposition:'cycle_complete',reason:'Current bounded cycle completed',evidence_refs:[report],acceptance:[{requirement_id:'evidence',passed:true,evidence_ref:report},{requirement_id:'outcome',passed:true,evidence_ref:report}]});
+  assert.equal(op(dir,'runtime',{op:'finish',task_id:id,wake_id:w.id,turn_id:'native-turn',evidence_ref:report}).task_complete,false);
+  const completed=op(dir,'schedule',{op:'get',id:schedule});assert.equal(completed.runs[0].state,'completed');assert.equal(completed.schedule.status,'enabled');
+  const db=new DatabaseSync(join(dir,'control.sqlite'));try{assert.equal(JSON.parse(db.prepare('SELECT data FROM work_reports WHERE report_key=?').get(report).data).run_id,packet.runs[0].id);}finally{db.close();}
+  op(dir,'schedule',{op:'pause',id:schedule,expected_revision:1,...authority});op(dir,'schedule',{op:'cancel',id:schedule,expected_revision:2,...authority});once(dir);
+  assert.equal(run(dir,'workflow.mjs',['schedule','list']).json[0].status,'cancelled');
+  const calls=readFileSync(join(dir,'native-queue-calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse).filter(a=>a.includes('--thread'));
+  assert.equal(calls.length,1);assert.ok(calls[0].includes(OWNER));assert.equal(run(dir,'workflow.mjs',['discovery','status']).json.batches.length,0);
+ }finally{rmSync(root,{recursive:true,force:true});}
+});

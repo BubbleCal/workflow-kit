@@ -1,21 +1,23 @@
 {
-  "version": "0.6.1",
-  "verified_at": "2026-11-04T20:44:26.967792+00:00",
+  "version": "0.7.0",
+  "verified_at": "2026-11-05T05:08:36.876Z",
   "client_timezone": "Asia/Shanghai",
-  "node": "v23.11.0",
-  "command": "npm test",
+  "node": "v26.4.0",
+  "command": "node workflow.mjs test",
   "exit_code": 0,
-  "runtime_tests": 292,
-  "portable_integration_tests": 8,
-  "passed": 300,
+  "runtime_tests": 318,
+  "portable_integration_tests": 9,
+  "passed": 327,
   "failed": 0,
-  "tested_sources_digest": "e2b3e33dc4b364832021fe310461779b9302452af81d99b3bf3f3deb042aaf23",
-  "integrated_upstream_commit": "d4b7c1149bdf86ded55f14a686058f915a65bc83",
+  "tested_sources_digest": "df2c22ce84d7e7ada288a4a7ded18c6a1563354481403d060ba31a4cc5d5f521",
+  "integrated_upstream_commit": "c7f4f3e854a5428028354f411ac6c2cc0fccaf39",
   "native_queue_validation": {
     "idle_and_busy_consumption": "verified on the installed desktop CLI",
     "shared_owner_execution": "actual original-owner grouped begin and independent task decisions observed",
     "unloaded_desktop_loading": "official existing-chat link verified with actual before/after native snapshots; no new message or turn",
-    "raw_evidence": "retained only in the local instance"
+    "raw_evidence": "retained only in the local instance",
+    "evidence_from_version": "0.6.1",
+    "repeated_in_this_release": false
   },
   "coverage": [
     "separate contracts and one owner queue across restart",
@@ -29,15 +31,28 @@
     "shared-owner rollback cannot create competing drivers",
     "two-hour maintenance slots and coalesced pending inputs",
     "cadence guards at reservation, send and actual begin",
-    "running maintenance retained; already accepted early batches deferred without receipt replay"
+    "running maintenance retained; already accepted early batches deferred without receipt replay",
+    "One-time and fixed-interval scheduling, restart deduplication and latest-occurrence catch-up",
+    "Coalesce/skip overlap, source authorization, original owner, task holds and native schedule conflicts",
+    "Independent run acceptance through shared-owner queues and ordinary exploration CLI",
+    "Pause/resume/cancel with preserved accepted work and terminal whole-task completion",
+    "Calendar timestamp rejection, explicit offsets and fixed-duration DST semantics",
+    "Exploration reports from non-primary shared-wake members"
   ],
-  "live_workflow_instances_modified": 1,
+  "live_workflow_instances_modified": 0,
   "models_or_permissions_changed": false,
   "credentials_exported": false,
   "operational_data_exported": false,
   "limits": [
-    "Actual future scheduled occurrences were not run early for this migration.",
-    "App open and queue acceptance do not prove execution; current-turn begin remains required.",
-    "A GitHub read budget limits source collection, not engineering concurrency."
-  ]
+    "New runtime schedules were validated with isolated controlled-clock and native CLI fixtures; no live schedules or App automations were created.",
+    "Existing native queue desktop observations above are upstream evidence, not a new live timer execution test.",
+    "Intervals measure elapsed time; calendar cron and automatic wall-clock DST adjustment are not implemented.",
+    "Pausing or cancelling a schedule affects future admission; already accepted cycles retain their native receipts and task controls."
+  ],
+  "scheduler_validation": {
+    "clock": "controlled deterministic timestamps plus real CLI processes",
+    "storage": "file-backed SQLite restart and second-client checks",
+    "native_transport": "existing CLI fixture",
+    "actual_live_schedules_created": 0
+  }
 }

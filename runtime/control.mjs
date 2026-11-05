@@ -2,6 +2,7 @@ import { bindings, INSTANCE_ROOT, requireBindings, instancePolicyReasons } from 
 import { ReactiveState } from './reactive-state.mjs';
 import {WorkCatalog} from './work-catalog.mjs';
 import {DiscoveryStore} from './discovery.mjs';
+import {Scheduler} from './scheduler.mjs';
 import { ciFailures } from './ci-state.mjs';
 import { scopeActionReasons } from './scope-exclusions.mjs';
 import { DatabaseSync } from 'node:sqlite';
@@ -377,6 +378,10 @@ export class ControlStore {
     this.reactive.onCompleteInside = (id,wake,evidence_ref) => this.work.publishToParentInside(this.reactive,id,
       {key:wake,type:'child_completed',payload:{status:'complete'},evidence_ref});
     this.discovery = new DiscoveryStore(this.db,{config:bindings,work:this.work,reactive:this.reactive,now:this.now});
+    this.scheduler = new Scheduler(this.db,{state:this.reactive,now:this.now});
+    this.reactive.scheduleRuns = id => this.scheduler.currentRuns(id);
+    this.reactive.onBeginInside = wake => this.scheduler.beginInside(wake);
+    this.reactive.onFinishInside = (id,wake,evidence) => this.scheduler.finishInside(id,wake,evidence);
   }
   close() { this.db.close(); }
   atomic(fn) {

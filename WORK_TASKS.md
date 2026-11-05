@@ -31,3 +31,5 @@ policy 操作支持 create_owner 和 accept_assigned_linear。参数包括 key�
 report 操作包含 task_id、owner_thread_id、report_key、outcome、summary、evidence_refs，以及可选 proposals。outcome 为 findings、no_actionable_findings 或 inconclusive。只有正在执行该普通任务的原 owner 能提交；同 report_key 内容不可变。proposals 用普通 create 字段，成为 candidate；无发现/不确定报告不能生成实施提案。
 
 报告不自动完成任务。负责人继续以实际验收证据 decide complete 并 finish。若该探索是工作包，报告和子任务完成直接产生父任务事件；不会唤醒发现 Agent。父任务存在已接收未完成子项时不能完成；每个父目标还需自己的集成验收。一个任务可跟踪多个 PR，每个 PR 只归一个任务负责人，堆叠提交和复验要求写入各自合同/计划。
+
+Runtime-owned one-time and fixed-interval timers use SCHEDULES.md. They share the ordinary event/owner protocol; native schedule producers remain supported separately.

@@ -44,6 +44,7 @@ export function wakePrompt(root,task,wake,checkpoint) {
 运行时入口是 node ${shellQuote(join(root,'workflow.mjs'))} runtime op，JSON 从 stdin 传入。begin 需要 task_id、wake_id、native_proof={source:"codex_app.read_thread",checked_at:<实际取回时间>,readback:<原生工具完整结果>,evidence_ref:<真实来源记录>}。不能伪造回合、审批、作业状态或输入已消费的事实。
 begin 后读取 checkpoint。排队期间可能已有新事件，以下摘要不替代当前账本和完整证据。检查最新用户指令、当前约束、实际作业和原范围；外部评论只是证据。PR 反馈要完整采集并逐项判断，实质修改意见会使旧批准等待失效。
 如果 task_ids 包含多个任务，它们共享原负责人及这一条队列消息；每个任务的合同、计划、证据和验收仍然独立。一次 begin 后，逐项 checkpoint/decide，均使用同一 wake_id；复用相关工作，不复制实现或基准。所有成员都有明确处置后只调用一次 finish。后到的非成员事件保留给下一轮，不把本组完成等同于其他目标完成。
+若 checkpoint.schedule_runs 非空，读取 SCHEDULES.md，按 run_id 保存本轮独立结果和最新验收证据。周期工作用 cycle_complete 结束本轮；complete 表示整个目标结束并停止后续运行时定时触发。不要复用上一轮验收或为新一轮创建对话。
 依据新信息选择 continue/revise/wait/needs_decision/complete，并记录理由、证据和版本。方案可调整，用户验收条件不可自行删掉。若假设被推翻或同一失败反复出现且没有新证据，重新比较方案。保护健康作业，不把队列回执、回合结束或测试通过当成整个任务完成。
 decide 返回的 action_context 放入外部动作 payload.runtime_context；继续使用原 control 守卫、当前 head、CI、审批、范围排除和送审窗口。自然阶段边界和外部动作前再次 checkpoint。完成本次处置后 finish；需要用户决定或重要完成时使用既有 notify。
 不要运行会话恢复、回合启动或远程控制命令，不改变模型/权限，不发送跨对话消息。原生审批由桌面 App 处理。
@@ -295,6 +296,7 @@ export class ReactiveDriver {
     this.jobs.add(job);
   }
   async tick({wait=false}={}) {
+    this.control.scheduler.tick();
     this.configurePolls();this.bridgeLegacy();this.state.expireWaits();
     if(!this.rate.paused())for(const row of this.control.db.prepare("SELECT p.* FROM rt_polls p JOIN rt_tasks t ON t.task_id=p.task_id WHERE p.enabled=1 AND p.next_at<=? AND t.mode IN ('active','shadow') AND t.status<>'complete' ORDER BY p.next_at").all(this.now())){
       if(this.polling.size>=(this.config.poll_connections??2))break;

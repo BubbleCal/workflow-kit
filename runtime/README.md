@@ -387,3 +387,5 @@ for boundary arithmetic. New guidance uses the saved rule; re-preparing old
 action keys keeps their historical guidance bytes. Actual send gates always
 read the current rule. Existing deferred review due times are interpreted using
 the current window, without resetting claimed/uncertain/sent actions.
+
+Runtime-owned one-time and fixed-interval timers use ../SCHEDULES.md. They share the ordinary event/owner protocol; native schedule producers remain supported separately.

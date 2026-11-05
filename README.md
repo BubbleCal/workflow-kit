@@ -1,8 +1,10 @@
 # Independent Workflow Kit
 
+0.7.0 新增持久化的一次性和固定周期调度，支持漏触发合并、忙碌时合并/跳过、暂停/取消和每轮独立验收。它复用原任务负责人和原生队列；使用方法见 [SCHEDULES.md](SCHEDULES.md)。
+
 0.6 adds shared-owner queues, native scheduled event sources, verified desktop loading and API read budgets. Existing installations preserve their layout, original owners and receipts during upgrade; do not run init over existing state. See REACTIVE.md.
 
-0.6.0 使用主对话、可选的后台发现 Agent，以及按需建立的普通任务负责人。自主探索是自带的普通任务，和开发、研究、项目工作包共用目标、计划、原生队列、证据和验收机制。
+0.7.0 使用主对话、可选的后台发现 Agent，以及按需建立的普通任务负责人。自主探索是自带的普通任务，和开发、研究、项目工作包共用目标、计划、原生队列、证据和验收机制。
 
 - 主对话可以直接讨论、调查、接收工作和处理决策。需要独立执行的任务进入统一账本。
 - 后台发现 Agent 只读取已启用来源的变化，关联已有任务或登记候选。Linear、Slack、Notion 分别可选，默认全部关闭。
