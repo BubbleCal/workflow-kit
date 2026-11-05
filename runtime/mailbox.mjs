@@ -442,7 +442,7 @@ export class Mailbox {
     return this.atomic(()=>{
       const b=this.get(id),task=control_db.prepare('SELECT * FROM rt_tasks WHERE task_id=?').get(task_id);
       const wake=control_db.prepare('SELECT * FROM rt_wakes WHERE id=?').get(wake_id);
-      const event=control_db.prepare('SELECT * FROM rt_events WHERE event_id=? AND task_id=?').get(`service:${id}`,task_id);
+      const event=control_db.prepare("SELECT * FROM rt_events WHERE task_id=? AND source='service_mailbox' AND json_extract(payload,'$.batch_id')=? AND event_id IN (SELECT value FROM json_each(?))").get(task_id,id,wake?.event_ids??'[]');
       if(!b||b.snapshot.delivery_transport!=='native_task'||b.snapshot.service_task_id!==task_id||
         task?.owner_id!==owner_thread_id||task.mode!=='active'||JSON.parse(task.contract).service_lane!==b.lane||
         wake?.owner_id!==owner_thread_id||wake.state!=='running'||!wake.turn_id||!wake.started_at||

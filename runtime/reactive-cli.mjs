@@ -223,6 +223,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         if(input.mode==='active')await queueCapability(config,queue);
         result=state[input.op==='mode_group'?'setModes':'setMode']({...input,queue_compatibility_verified:input.mode==='active',legacy_quiescent:legacyQuiescent(root,input.task_ids??input.task_id,input.native_binding)});
       }else if(input.op==='amend'){input.contract.workspace=realpathSync(input.contract.workspace);result=state.amend(input);}
+      else if(input.op==='service_begin')result=new NativeServices({root,control,config}).begin(input);
       else if(input.op==='checkpoint')result=state.checkpoint(input.task_id);
       else if(input.op==='publish')result=state.ingest(input);
       else if(input.op==='schedule_event')result=publishScheduledOccurrence(root,state,input);

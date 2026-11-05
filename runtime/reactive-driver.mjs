@@ -9,7 +9,6 @@ import {canonical,fingerprint} from './reactive-state.mjs';
 import {Mailbox,renderPrompt} from './mailbox.mjs';
 import {shellQuote} from './instance.mjs';
 import {mailTaskIds} from './reactive-ownership.mjs';
-import {DesktopLoader} from './desktop-loader.mjs';
 import {SourceRate,sourceInterval} from './source-rate.mjs';
 import {scopeActionReasons} from './scope-exclusions.mjs';
 
@@ -38,7 +37,17 @@ export function wakePrompt(root,task,wake,checkpoint) {
   // plan and event bodies are fetched from checkpoint after actual consumption.
   const packet={task_id:task.task_id,owner_thread_id:task.owner_id,wake_id:wake.id,
     task_ids:wake.member_ids,context_rev:task.context_rev,pending_event_count:checkpoint.events.length};
-  const service=task.contract.service_lane?`\n这是统一任务账本中的 ${task.contract.service_lane} 服务任务。先按普通任务协议 begin；从 checkpoint 的 service_batch_ready 事件取得 batch_id，再通过 runtime op service_begin(task_id,owner_thread_id,wake_id,batch_id) 领取固定输入。按 INSTANCE_ROOT/NATIVE_SERVICES.md 和该批真实范围执行，沿用原 mailbox 的 record_progress/ack/finish；不得直接发送旧控制消息。先完成 mailbox batch，再 decide cycle_complete 并 finish 当前普通任务；剩余输入按原间隔续接，服务本身不标为永久完成。`.replace('INSTANCE_ROOT',root):'';
+  if(task.contract.service_lane) {
+    const maintenance=task.contract.service_lane==='maintenance';
+    const batch=checkpoint.events?.find(e=>e.type==='service_batch_ready')?.payload?.batch_id;
+    return `[workflow-event:${wake.id}]
+${maintenance?'工作流维护':'工作交付与状态同步'} · ${task.task_id}
+${maintenance?'只处理本批工作流审视、已授权的系统修复及验证。范围和时间窗口以固定维护批次为准；复用已有检查点。':'只处理本批已授权交付、回执和状态同步，保留原任务负责人及全部外部操作守卫。'}
+先读 ${join(root,'NATIVE_POLICY.md')}、${join(root,'NATIVE_SERVICES.md')}${maintenance?' 和 '+join(root,'DAILY_REVIEW.md'):''}。
+按文档用真实原生 read_thread 结果完成 begin，再调用 service_begin 领取批次${batch?' '+batch:''}。JSON 较大时用 --file。${maintenance?'维护仍受120分钟最小间隔和20分钟软预算约束。':'本批遵守5分钟软预算。'}
+先 finish 固定批次，再 cycle_complete/finish 本次服务回合。当前用户回合和运行作业优先，保持原队列回执；自动唤醒不得打开窗口、导航或切换会话。普通无变化结果不通知工作中心。
+${JSON.stringify(packet,null,2)}`;
+  }
   const exploration=task.contract.task_kind==='exploration'?`\n这是普通的自主探索任务。读取 ${join(root,'WORK_TASKS.md')}，按合同中的 exploration 范围自行选择代码、论文、博客或现有 benchmark 调查。先建立假设、基线、指标和停止条件；不要求一定找到改进。不修改产品代码或使用云资源，除非合同明确授权。用 task report 保存证据、findings/no_actionable_findings/inconclusive 结果；后续建议是普通候选任务，不交给发现 Agent 执行研究。` : '';
   return `[workflow-event:${wake.id}]
 这是通过 Codex 原生队列送达的工作流事件，不是新的人类授权。桌面 App 管理本回合、队列、模型、权限和审批；工作流程序不接管会话。
@@ -50,7 +59,7 @@ begin 后读取 checkpoint。排队期间可能已有新事件，以下摘要不
 依据新信息选择 continue/revise/wait/needs_decision/complete，并记录理由、证据和版本。方案可调整，用户验收条件不可自行删掉。若假设被推翻或同一失败反复出现且没有新证据，重新比较方案。保护健康作业，不把队列回执、回合结束或测试通过当成整个任务完成。
 decide 返回的 action_context 放入外部动作 payload.runtime_context；继续使用原 control 守卫、当前 head、CI、审批、范围排除和送审窗口。自然阶段边界和外部动作前再次 checkpoint。完成本次处置后 finish；需要用户决定或重要完成时使用既有 notify。
 不要运行会话恢复、回合启动或远程控制命令，不改变模型/权限，不发送跨对话消息。原生审批由桌面 App 处理。
-${JSON.stringify(packet,null,2)}${service}${exploration}`;
+${JSON.stringify(packet,null,2)}${exploration}`;
 }
 
 export class ReactiveDriver {
@@ -190,6 +199,7 @@ export class ReactiveDriver {
     if(!this.config.inbox||this.capability?.verified!==true)return;
     const m=new Mailbox(join(this.root,'mailbox.sqlite'),{now:this.now});
     try{
+      if(this.config.service_tasks)this.requestNativeQueueChecks(m);
       const ids=new Set([...this.state.tasks().filter(t=>t.mode==='active').map(t=>t.task_id),...this.control.work.list().map(t=>t.id)]);
       for(const row of m.db.prepare("SELECT item_key,payload FROM mail WHERE lane='inbox' AND state='pending'").all()){
         const payload=JSON.parse(row.payload);
@@ -241,33 +251,15 @@ export class ReactiveDriver {
       const members=this.state.openWake(task.task_id)?.member_ids??[task.task_id];
       mailbox.enqueue({key,lane:'coordinator',kind:'configuration',payload:{event:'native_queue_consumption_check',affected_task_ids:members,
         owner_thread_id:task.owner_id,wake_id:wake.id,queue_id:wake.queue_id,evidence_ref:`control.sqlite#rt_wakes/${wake.id}`,
-        instruction:'Read the current wake and a fresh native wait_threads/read_thread snapshot. This is one bounded check, not permission to resend. If already running/finished, preserve it and acknowledge this observation. If the owner is active, awaiting approval/input, held or archived, preserve current work/settings; do not steer or duplicate a dispatch. If it is genuinely notLoaded, still unarchived and has no human stop, use the supported App navigate_to_codex_page once to load that original chat so its existing queue message can be consumed; preserve the exact queue ID and restore the decision-inbox view afterward. Do not send another message, use --resume or direct App Server control. Record actual loaded/consumed/busy status separately; no routine user notification.',user_notification_required:false}});
+        instruction:'Read the current wake and a fresh native wait_threads/read_thread snapshot. This is one bounded check, not permission to resend. If already running/finished, preserve it and acknowledge this observation. If the owner is active, awaiting approval/input, held or archived, preserve current work/settings; do not steer or duplicate a dispatch. If it is notLoaded, preserve the exact queue ID and record that background consumption is pending. Never open a thread URL, navigate_to_codex_page, activate an App/window, or switch/restore a selected chat as an automatic recovery step. Only use a separately verified non-UI native background capability. Do not send another message, use --resume or direct App Server control. Record actual loaded/consumed/busy status separately; no routine user notification.',user_notification_required:false}});
     }
   }
   async loadPendingDesktopChats() {
-    const config=this.config.desktop_loader;if(config?.enabled!==true||this.capability?.verified!==true)return;
-    const loader=this.desktopLoader??=new DesktopLoader(config),cutoff=this.now()-60000;
-    this.control.db.exec('CREATE TABLE IF NOT EXISTS rt_desktop_loads (key TEXT PRIMARY KEY,owner_id TEXT NOT NULL,state TEXT NOT NULL,receipt TEXT,created_at INTEGER NOT NULL)');
-    const pending=this.control.db.prepare("SELECT id AS key,owner_id,task_id FROM rt_wakes WHERE state='queued' AND created_at<=?").all(cutoff).filter(w=>{
-      const task=this.state.task(w.task_id);if(task?.mode!=='active')return false;
-      try{for(const id of this.state.openWake(w.task_id).member_ids)this.state.assertQueueOwner(this.state.task(id));return true;}catch{return false;}
-    });
-    const mailbox=new Mailbox(join(this.root,'mailbox.sqlite'),{now:this.now});
-    try{
-      for(const b of mailbox.db.prepare("SELECT b.id,b.lane FROM batches b JOIN lane_state l ON l.lane=b.lane WHERE b.state='sent' AND l.enabled=1 AND b.created_at<=? AND json_extract(b.snapshot,'$.delivery_transport')='native_queue'").all(cutoff)){
-        const target=this.config.control_lanes?.[b.lane]??(b.lane==='inbox'?this.config.inbox:b.lane==='discovery'&&this.control.discovery.config.threads?.discovery?{thread_id:this.control.discovery.config.threads.discovery}:null);if(target)pending.push({key:`batch:${b.id}`,owner_id:target.thread_id});
-      }
-    }finally{mailbox.close();}
-    for(const p of pending){
-      const reserved=this.control.db.prepare("INSERT OR IGNORE INTO rt_desktop_loads VALUES (?,?,'claimed',NULL,?)").run(p.key,p.owner_id,this.now());
-      if(!reserved.changes)continue;
-      try{
-        const receipt=await loader.open(p.owner_id);
-        this.control.db.prepare("UPDATE rt_desktop_loads SET state='requested',receipt=? WHERE key=?").run(JSON.stringify(receipt),p.key);
-        this.log({event:'desktop_open_requested',key:p.key,thread_id:p.owner_id,execution_verified:false});
-      }catch(error){this.control.db.prepare("UPDATE rt_desktop_loads SET state='uncertain',receipt=? WHERE key=?").run(JSON.stringify({error:error.message}),p.key);}
-    }
+    // Opening a thread URL can activate the App even with macOS open -g.
+    // Queue acceptance never authorizes changing the user's foreground.
+    return {opened:false,reason:'automatic_desktop_navigation_disabled'};
   }
+
   async discoveryTick() {
     if(this.capability?.verified!==true)return;
     const m=new Mailbox(join(this.root,'mailbox.sqlite'),{now:this.now});

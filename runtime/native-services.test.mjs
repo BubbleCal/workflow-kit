@@ -1,11 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync,mkdirSync,writeFileSync} from 'node:fs';
+import {mkdtempSync,rmSync,mkdirSync,writeFileSync,cpSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {fixture,OWNER,NOW} from './test-fixtures/reactive.mjs';
 import {Mailbox} from './mailbox.mjs';
 import {NativeServices} from './native-services.mjs';
+import {execFileSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import {dirname} from 'node:path';
 
 function setup(lane='coordinator') {
  const root=mkdtempSync(join(tmpdir(),'native-service-')),f=fixture(join(root,'control.sqlite'),root);
@@ -64,5 +67,37 @@ test('standing service inputs coalesce while unfinished and do not admit while p
   f.service.bridge();assert.equal(f.m.db.prepare('SELECT count(*) n FROM mail').get().n,0);
   f.activate();f.service.bridge();f.advance(3600001);f.service.bridge();
   assert.equal(f.m.db.prepare("SELECT count(*) n FROM mail WHERE json_extract(payload,'$.service_input_id')='calendar'").get().n,1);
+ }finally{f.close();}
+});
+
+
+test('the public runtime CLI claims an ordinary service batch after actual begin',()=>{
+ const f=setup();try{
+  f.enqueue('cli-input');f.activate();f.service.bridge();const b=f.m.db.prepare('SELECT id FROM batches').get(),w=f.begin();
+  cpSync(dirname(fileURLToPath(import.meta.url)),join(f.root,'runtime'),{recursive:true});
+  writeFileSync(join(f.root,'instance.json'),JSON.stringify({layout:'native',instance_id:'fixture',scope:{project_id:'project',project_root:f.root},threads:{main:'main'},legacy_roles:{coordinator:'coordinator',maintenance:'maintenance'}}));
+  writeFileSync(join(f.root,'runtime.json'),JSON.stringify({schema_version:2,transport:'native_queue',service_tasks:{coordinator:'T-1'}}));
+  writeFileSync(join(f.root,'input.json'),JSON.stringify({op:'service_begin',task_id:'T-1',owner_thread_id:OWNER,wake_id:w.id,batch_id:b.id}));
+  const output=execFileSync(process.execPath,['--input-type=module','-e',"import {runtimeMain} from './runtime/reactive-cli.mjs';await runtimeMain(['op','--file','input.json'],{root:process.cwd()});"],{cwd:f.root,encoding:'utf8'});
+  assert.equal(JSON.parse(output).begun,true);assert.equal(f.m.get(b.id).state,'running');
+ }finally{f.close();}
+});
+test('an unclaimed service batch can be retried after an ended wake with new evidence',()=>{
+ const f=setup();try{
+  f.enqueue('input');f.activate();f.service.bridge();const b=f.m.db.prepare('SELECT id FROM batches').get(),w=f.begin();
+  f.decide({wake_id:w.id,disposition:'needs_decision',plan:undefined});f.s.finish({task_id:'T-1',wake_id:w.id,turn_id:'native-turn',evidence_ref:'actual-interface-error'});
+  f.event('interface-fixed',{capability:'service_begin',available:true});f.service.bridge();const retry=f.begin();
+  assert.notEqual(retry.id,w.id);assert.equal(f.service.begin({task_id:'T-1',owner_thread_id:OWNER,wake_id:retry.id,batch_id:b.id}).begun,true);
+  assert.equal(f.m.db.prepare('SELECT count(*) n FROM batches').get().n,1);
+ }finally{f.close();}
+});
+
+test('service observations cannot bypass fixed-batch admission or maintenance cadence',()=>{
+ const f=setup('maintenance');try{
+  f.activate();const before=f.s.task('T-1');
+  f.event('unrelated-pr',{head:'new-head'});
+  assert.equal(f.s.task('T-1').status,'waiting');assert.equal(f.s.task('T-1').wake_at,null);
+  assert.equal(f.s.reserveQueuedWake('T-1').reserved,false);
+  assert.equal(f.s.task('T-1').context_rev,before.context_rev+1);
  }finally{f.close();}
 });

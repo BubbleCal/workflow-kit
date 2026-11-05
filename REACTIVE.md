@@ -3,11 +3,7 @@
 # Desktop-owned native queue runtime (0.6.0)
 
 本机验证还发现：`codex queue` 不会自动加载桌面端尚未加载的旧对话。
-可选 `desktop_loader` 使用官方的 `codex://threads/<UUID>` 链接和 macOS
-`open -g -b <verified-bundle-id>` 请求当前已验证的 App 打开原对话；不添加第二条
-消息、不使用 --resume、不连接 App Server、不设置模型或权限。打开请求不等于执行，
-仍以真实原生回合 begin 为准。每个队列回执/控制批次最多请求打开一次；未知打开结果
-不自动重复。未消费的任务随后向既有协调器提交一次有界核查。
+自动唤醒不得打开会话 URL、激活 App 窗口或切换用户正在看的对话。旧 `desktop_loader` 自动打开路径已停用；未消费的原生队列回执保留，不能通过 UI 导航或重复发送强行推进。需要独立验证可用的非 UI 后台入口；读取已存聊天不会自动加载执行会话。
 
 启用前在本机验证一个原对话从 notLoaded 到 loaded 且原 turn ID 不变，把完整原生
 wait_threads 读回保存在本机，运行 verifyDesktopLoader 校验。runtime.json 的
@@ -228,3 +224,5 @@ For large native readback proofs, save exact JSON in a local file and use
 `runtime op --file <file>`. This preserves the real envelope and avoids nested
 stdin pipelines. A blocked local metadata process is not evidence that an owner
 operation failed; inspect the durable receipt before any retry.
+
+If maintenance `begin` returns `skipped: true` and `quiet: true`, the user rescheduled that old wake. End immediately without performing maintenance, sending a notification, retrying, or calling `finish`. Queue acceptance is retained as historical evidence; it is not execution.

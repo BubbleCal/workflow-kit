@@ -89,17 +89,14 @@ test('an unconsumed queue receipt gets one native loading check without another 
   }finally{m?.close();await f.close();}
 });
 
-test('desktop loading never resends a queue message or repeats an uncertain open across restart',async()=>{
+test('automatic wakeups never open UI even with a legacy loader enabled',async()=>{
   const f=setup();try{
     f.activate();await f.driver.deliver(f.state.task('T-1'));const wake=f.state.openWake('T-1');f.advance(60001);
     f.driver.config.desktop_loader={enabled:true,bundle_id:'com.openai.codex'};
-    let opens=0;f.driver.desktopLoader={async open(){opens++;throw new Error('Unknown App open outcome');}};
-    await f.driver.loadPendingDesktopChats();await f.driver.loadPendingDesktopChats();
-    assert.equal(opens,1);assert.equal(f.queue.calls.length,1);
+    let opens=0;f.driver.desktopLoader={async open(){opens++;}};
+    const first=await f.driver.loadPendingDesktopChats();await f.driver.loadPendingDesktopChats();
+    assert.equal(first.reason,'automatic_desktop_navigation_disabled');assert.equal(opens,0);assert.equal(f.queue.calls.length,1);
     assert.equal(f.state.openWake('T-1').queue_id,wake.queue_id);assert.equal(f.state.openWake('T-1').state,'queued');
-    assert.equal(f.control.db.prepare('SELECT state FROM rt_desktop_loads').get().state,'uncertain');
-    const restarted=new ReactiveDriver({root:f.root,control:f.control,queue:f.queue,config:f.driver.config,capability:{verified:true},now:f.now});
-    restarted.desktopLoader=f.driver.desktopLoader;await restarted.loadPendingDesktopChats();assert.equal(opens,1);await restarted.close();
   }finally{await f.close();}
 });
 
@@ -243,4 +240,24 @@ test('artifact polling preserves owner, scope, paused-task and completed-task bo
     f.control.taskRegistry=()=>null;
     for(const patch of ["mode='paused'","mode='active',status='complete'"]){f.control.db.exec('UPDATE rt_tasks SET '+patch);f.driver.configurePolls();assert.equal(f.control.db.prepare('SELECT count(*) n FROM rt_polls WHERE enabled=1').get().n,0);}
   }finally{await f.close();}
+});
+
+
+test('native service layout retains receipt reconciliation without a legacy control sender',async()=>{
+ const f=setup();let m;try{
+  f.activate();await f.driver.deliver(f.state.task('T-1'));f.advance(60001);
+  f.driver.config.inbox={thread_id:INBOX};f.driver.config.service_tasks={coordinator:'T-delivery'};
+  await f.driver.deliverInbox();await f.driver.deliverInbox();
+  m=new Mailbox(join(f.root,'mailbox.sqlite'),{now:f.now});
+  assert.equal(m.db.prepare("SELECT count(*) n FROM mail WHERE item_key LIKE 'native-queue-check:%'").get().n,1);
+  assert.equal(f.queue.calls.length,1);
+ }finally{m?.close();await f.close();}
+});
+
+test('maintenance wakes contain only the maintenance role and its fixed-batch protocol',async()=>{
+ const {wakePrompt}=await import('./reactive-driver.mjs');
+ const task={task_id:'T-maintenance',owner_id:OWNER,context_rev:1,contract:{service_lane:'maintenance'}};
+ const prompt=wakePrompt('/instance',task,{id:'wake',member_ids:['T-maintenance']},{events:[{type:'service_batch_ready',payload:{batch_id:'actual-batch'}}]});
+ assert.match(prompt,/工作流维护/);assert.match(prompt,/actual-batch/);assert.match(prompt,/120分钟/);
+ assert.doesNotMatch(prompt,/多个任务|PR 反馈|implements|产品实现/);assert.ok(prompt.length<1400);
 });

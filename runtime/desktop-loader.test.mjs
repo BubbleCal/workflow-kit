@@ -4,12 +4,13 @@ import {DesktopLoader,verifyDesktopLoader} from './desktop-loader.mjs';
 import {queueHostFingerprint} from './native-queue.mjs';
 import {OWNER} from './test-fixtures/reactive.mjs';
 
-test('desktop loading uses only the verified App and existing-chat deep link',async()=>{
+test('desktop navigation requires an explicit user request; automatic callers cannot open UI',async()=>{
   const calls=[],loader=new DesktopLoader({bundle_id:'com.openai.codex',run:async(binary,args)=>calls.push({binary,args})});
-  const result=await loader.open(OWNER);
+  await assert.rejects(loader.open(OWNER),/Automatic UI navigation is disabled/);assert.equal(calls.length,0);
+  const result=await loader.open(OWNER,{user_requested_navigation:true});
   assert.deepEqual(calls,[{binary:'/usr/bin/open',args:['-g','-b','com.openai.codex',`codex://threads/${OWNER}`]}]);
   assert.equal(result.execution_verified,false);
-  await assert.rejects(loader.open('new?prompt=execute'),/existing native thread UUID/);
+  await assert.rejects(loader.open('new?prompt=execute',{user_requested_navigation:true}),/existing native thread UUID/);
   assert.throws(()=>new DesktopLoader({bundle_id:'other.application'}),/OpenAI desktop/);
 });
 

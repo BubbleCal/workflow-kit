@@ -228,6 +228,12 @@ export class ReactiveState {
       version=excluded.version,observed_at=excluded.observed_at,checked_at=excluded.checked_at,data=excluded.data,evidence_ref=excluded.evidence_ref`)
       .run(task_id,subject,version,at,this.now(),canonical(payload),evidence_ref);
     if (unchanged) return { recorded: true, unchanged: true, context_rev: revision };
+    if(task.contract.service_lane && type!=='service_batch_ready' && !this.openWake(task_id)) {
+      this.db.prepare("UPDATE rt_events SET disposition='service_observation' WHERE event_id=?").run(event_id);
+      this.db.prepare("UPDATE rt_tasks SET context_rev=?,status='waiting',dirty=0,wake_at=NULL,updated_at=? WHERE task_id=?").run(revision,this.now(),task_id);
+      this.db.prepare("UPDATE rt_waits SET state='invalidated',reason=?,updated_at=? WHERE task_id=? AND state='waiting'").run(`New service evidence: ${event_id}`,this.now(),task_id);
+      return {recorded:true,changed:true,context_rev:revision,service_only:true};
+    }
     const schedulePending=this.db.prepare("SELECT 1 FROM rt_events WHERE task_id=? AND type='schedule_due' AND disposition IS NULL").get(task_id);
     if(task.contract.trigger_only===true&&type!=='schedule_due'&&type!=='human_command'&&!schedulePending&&!this.openWake(task_id)){
       this.db.prepare("UPDATE rt_events SET disposition='schedule_observation' WHERE event_id=?").run(event_id);
@@ -366,6 +372,12 @@ export class ReactiveState {
   begin({ task_id, wake_id, native_proof }) {
     return this.atomic(()=>{
       const task=this.task(task_id),wake=this.openWake(task_id);
+      const retired=this.db.prepare("SELECT task_id,state FROM rt_wakes WHERE id=?").get(wake_id);
+      const deferred=parse(this.db.prepare('SELECT data FROM rt_diagnostics WHERE key=?').get(`maintenance-deferred:${wake_id}`)?.data);
+      if(task?.contract.service_lane==='maintenance' && retired?.task_id===task_id && retired.state==='superseded' &&
+        deferred?.reason==='user_rescheduled_maintenance' && deferred.authorization_ref && deferred.evidence_ref)
+        return {begun:false,skipped:true,quiet:true,reason:'user_rescheduled_maintenance',next_eligible_at:deferred.next_eligible_at,
+          instruction:'End this obsolete wake immediately without maintenance, notification, retry or finish. The accepted queue receipt remains historical.'};
       if(!task || task.mode!=='active' || wake?.id!==wake_id || wake.transport!=='native_queue' ||
         !['claimed','queued','uncertain','running'].includes(wake.state))
         throw new Error('Execution must match the original task, wake and actual new turn');

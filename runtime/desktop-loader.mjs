@@ -23,7 +23,8 @@ export class DesktopLoader {
     if(!/^com\.openai\.[a-z0-9.-]+$/i.test(bundle_id??''))throw new Error('Verified OpenAI desktop bundle ID required');
     this.bundle=bundle_id;this.run=run;this.now=now;
   }
-  async open(threadId) {
+  async open(threadId,{user_requested_navigation=false}={}) {
+    if(user_requested_navigation!==true)throw new Error('Automatic UI navigation is disabled; an explicit user navigation request is required');
     if(!uuid.test(threadId??''))throw new Error('Use an exact existing native thread UUID');
     await this.run('/usr/bin/open',['-g','-b',this.bundle,`codex://threads/${threadId}`],{timeout:10000,maxBuffer:65536});
     return {open_requested:true,thread_id:threadId,bundle_id:this.bundle,requested_at:this.now(),execution_verified:false};

@@ -30,12 +30,16 @@ export class NativeServices {
           payload:{...input.payload,service_input_id:input.id,authorization_ref:input.authorization_ref,window_end:new Date(cutoff).toISOString(),user_notification_required:false}});
       }
       for(const lane of Object.keys(this.config.service_tasks)){
-        const task=this.task(lane);if(task.mode!=='active'||task.status==='complete'||this.control.reactive.openWake(task.task_id))continue;
+        const task=this.task(lane);if(task.mode!=='active'||['complete','needs_decision'].includes(task.status)||this.control.reactive.openWake(task.task_id))continue;
+        const cadence=lane==='maintenance'?m.maintenanceCadence():null;
+        if(cadence && this.now()<cadence.eligible_at)continue;
         let batch=m.db.prepare("SELECT id FROM batches WHERE lane=? AND state='reserved' AND json_extract(snapshot,'$.service_task_id')=?").get(lane,task.task_id);
         if(batch)batch=m.get(batch.id);
         else {const result=m.reserveQueuedLane(lane,{service_task_id:task.task_id});if(!result.reserved)continue;batch=result.batch;}
-        this.control.reactive.ingest({event_id:`service:${batch.id}`,task_id:task.task_id,source:'service_mailbox',subject:`service:${lane}`,
-          type:'service_batch_ready',observed_at:batch.created_at,payload:{batch_id:batch.id,lane,service_task_id:task.task_id},
+        const held=this.control.db.prepare("SELECT 1 FROM rt_waits WHERE task_id=? AND state='waiting' AND json_extract(condition,'$.expires_at')>?").get(task.task_id,this.now());
+        if(task.status==='waiting'&&held)continue;
+        this.control.reactive.ingest({event_id:`service:${batch.id}:${task.wake_seq}`,task_id:task.task_id,source:'service_mailbox',subject:`service:${lane}`,
+          type:'service_batch_ready',observed_at:batch.created_at,payload:{batch_id:batch.id,lane,service_task_id:task.task_id,attempt:task.wake_seq},
           evidence_ref:`mailbox.sqlite#batches/${batch.id}`,debounce_ms:0});
       }
     }finally{m.close();}
