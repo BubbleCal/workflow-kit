@@ -23,9 +23,11 @@ A task is simple only when all three dimensions qualify:
 Use `scope="broad"`, `uncertainty="material"`, `validation="specialist"` as
 applicable. Unknown dimensions use `"unknown"`. Include a short, task-specific
 `reason`. The runtime derives simple/other; a simple label alone is insufficient.
-Routine authorized meeting preparation gets an assessment from its bounded,
-known profile. The creator can revise that assessment before creation if the
-actual occurrence needs deeper work.
+Routine authorized meeting preparation is simple when it follows established
+profiles: source gathering, summarizing, and drafting speaking points. A recurring
+service or multiple information sources alone does not make that work broad or
+materially uncertain. Only a concrete requirement for deeper investigation changes
+that assessment. Preserve any explicit task-specific user model choice.
 
 ## Creation path
 
