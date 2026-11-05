@@ -47,6 +47,37 @@ shared control guard so page writes serialize. Preserve other tasks, manual note
 IDs and historical measurements. An assessment-only task gains no product-change
 or PR-publication authority. A disabled external integration is not a blocker.
 
+## Linear issue state owned by the task owner
+
+When the instance's actual user authorization permits Linear state maintenance,
+the original execution owner keeps its bound issue states aligned with real work.
+This is part of delivery, not a separate coordinator or documentation task.
+
+- At substantive work start, move Backlog/Todo to the team's In Progress state.
+  Assignment, setup, a queued turn or a plan alone does not prove work started.
+- Use In Review when the implementation has been delivered for review under the
+  applicable gates. A draft PR alone is not In Review. Active repairs return to
+  In Progress; a valid review wait may remain In Review.
+- Waiting for CI repairs, a dependency, a release or required adoption is not
+  completion. Use an existing Blocked state when the team has one; otherwise keep
+  In Progress and preserve the exact wait in the task's own checkpoint.
+- Use Done only after the entire issue's actual acceptance and authorized delivery
+  are complete. A child PR merge or automatic GitHub issue transition is not enough
+  when required consumer adoption or integration remains. Correct a premature Done
+  when the original issue demonstrably has unfinished authorized work.
+- Read the actual issue, assignment, team states and current work evidence before
+  a transition. Change only the state of the exact issue bound to this owner and
+  assigned to the authorized user. Preserve manual holds, cancellations, scope and
+  reassignment; reconcile a conflicting human decision rather than overwriting it.
+- Check at substantive start, material phase changes and completion, using existing
+  turns. Avoid no-op writes, extra polling timers and waking completed chats merely
+  for bookkeeping. Read back successful changes and save the issue ID, previous
+  state, new state, reason, evidence and receipt in the task's existing checkpoint.
+  Failed or uncertain writes remain explicit follow-ups; do not claim they synced.
+- This authority is for issue state only. It does not authorize comments, replies,
+  descriptions, assignee/project/priority changes, or modifying another owner's
+  ticket. A status API failure does not stop independent engineering work.
+
 After completion, finish the task wake. The runtime sends one important completion
 to main with an archive_request. Main may archive that finished owner after fresh
 native idle/no-pending-input evidence and the normal archive guard, using its own

@@ -59,3 +59,10 @@ Server RPC, reset queue receipts or send repeatedly to force progress.
 `running` proves consumption only when the native turn matches the running wake.
 Record actual commands/PR work before reporting a recovered task as progressing.
 Task completion still requires every original acceptance and delivery obligation.
+
+When an existing source scan or maintenance audit finds a Linear state mismatch,
+compare the bound issue with actual owner evidence and route one deduplicated
+follow-up to that owner under OWNER_DELIVERY.md. Do not treat Backlog as proof of
+no work, or Done as proof of whole-task completion. Preserve valid waits and
+completed-owner archival; do not add another polling service or make discovery
+the ticket-state writer.
