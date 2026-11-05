@@ -78,7 +78,7 @@ test('dependency availability and genuinely changed obligations immediately rele
   if(change==='available')f.m.waits.observe({fact_key:'dependency',kind:'dependency',subject:'required-release',data:{available:true,requirement:'published release'},observed_at:new Date(f.now()).toISOString(),expires_at:new Date(f.now()+3600000).toISOString(),evidence_ref:'new-release'});
   if(change==='head'){const p={...f.payload(3),head:'b'.repeat(40)};f.c.db.prepare('UPDATE lifecycle_intents SET payload=? WHERE intent_key=?').run(JSON.stringify(p),f.intent);f.m.enqueue({key:f.intent+':3',lane:'coordinator',kind:'event',payload:p});}
   if(change==='dirty')f.event('material-feedback',{review:'request changes'});
-  if(change==='replan')f.decide({disposition:'wait',plan:plan('new independent step'),wait:JSON.parse(f.c.db.prepare("SELECT condition FROM rt_waits WHERE task_id='T-1'").get().condition)});
+  if(change==='replan'){const wait=JSON.parse(f.c.db.prepare("SELECT condition FROM rt_waits WHERE task_id='T-1'").get().condition);f.event('actual-replan',{priority:'new independent step'});const wake=f.begin();f.decide({wake_id:wake.id,disposition:'wait',plan:plan('new independent step'),wait});}
   f.route();assert.notEqual(f.s.task('T-1').wake_at,null);
  }finally{f.close();}}
 });
