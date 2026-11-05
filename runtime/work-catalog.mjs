@@ -101,7 +101,7 @@ export class WorkCatalog {
     if(!task)task=this.createInside({...assessment.task,canonical_key:assessment.canonical_key,kind:'work',meeting_preparation:assessment.preparation,
       source:{kind:'calendar',key:observation.entity_key,url:observation.url,evidence_ref:observation.evidence_ref}}).task;
     const prior=task.data.meeting_preparation;
-    if(this.execution(task.id))return {...assessment,task,unchanged:prior?.generation===assessment.preparation.generation,requires_reschedule:prior?.generation!==assessment.preparation.generation};
+    if(this.execution(task.id))return {...assessment,task,unchanged:!prior||prior.generation===assessment.preparation.generation,native_schedule_preserved:!prior,requires_reschedule:!!prior&&prior.generation!==assessment.preparation.generation};
     const data={...task.data,...assessment.task,meeting_preparation:assessment.preparation};
     this.db.prepare("UPDATE work_items SET state='accepted',data=?,authorization=?,revision=revision+1,updated_at=? WHERE id=?").run(json(data),
       json({kind:'standing_policy',policy:'accept_calendar_preparation',source_message_id:rule.source_message_id,evidence_ref:rule.evidence_ref,actual_human_verified:true}),this.now(),task.id);
