@@ -386,6 +386,8 @@ export class ReactiveState {
       const task=this.task(task_id),wake=this.openWake(task_id);
       if(task?.contract.retired===true)return {begun:false,skipped:true,quiet:true,reason:'service_retired',instruction:'End immediately. Responsibilities were transferred to original owners; do not process or resend this historical wake.'};
       const retired=this.db.prepare("SELECT task_id,state FROM rt_wakes WHERE id=?").get(wake_id);
+      if(retired?.task_id===task_id&&['finished','ended_unresolved'].includes(retired.state))
+        return {begun:false,skipped:true,quiet:true,reason:'wake_already_terminal',instruction:'This wake was already handled or recovered. End this duplicate delivery immediately without work, retry or finish; preserve the original receipt and current owner.'};
       const deferred=parse(this.db.prepare('SELECT data FROM rt_diagnostics WHERE key=?').get(`maintenance-deferred:${wake_id}`)?.data);
       if(task?.contract.service_lane==='maintenance' && retired?.task_id===task_id && retired.state==='superseded' &&
         deferred?.reason==='user_rescheduled_maintenance' && deferred.authorization_ref && deferred.evidence_ref)
@@ -395,7 +397,7 @@ export class ReactiveState {
         !['claimed','queued','uncertain','running'].includes(wake.state))
         throw new Error('Execution must match the original task, wake and actual new turn');
       const {turn_id,evidence_ref}=verifyExecutionProof(native_proof,{thread_id:task.owner_id,workspace:task.contract.workspace,prompt:wake.prompt,now:this.now()});
-      if(wake.turn_id&&wake.turn_id!==turn_id)throw new Error('A different turn already owns this wake');
+      if(wake.turn_id&&wake.turn_id!==turn_id)return {begun:false,skipped:true,quiet:true,reason:'wake_owned_by_another_turn',instruction:'Another actual turn already owns this wake. End this duplicate delivery without work or finish; preserve current jobs and receipts.'};
       this.db.prepare("UPDATE rt_wakes SET state='running',turn_id=?,started_at=COALESCE(started_at,?),evidence_ref=? WHERE id=?").run(turn_id,this.now(),evidence_ref,wake_id);
       this.db.prepare("UPDATE actions SET state='sent',receipt=?,updated_at=? WHERE action_key=? AND kind='task_queue' AND state IN ('claimed','uncertain')")
         .run(canonical({outcome:'sent',native_consumption:{turn_id,evidence_ref}}),this.now(),wake_id);

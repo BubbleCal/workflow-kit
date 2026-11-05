@@ -1,6 +1,7 @@
 import {scheduleCalendarPreparation,prepareMeetingOwner} from './calendar-preparation.mjs';
 import {transferPausedOwner} from './owner-transfer.mjs';
 import {NativeServices} from './native-services.mjs';
+import {OwnerHealth} from './owner-health.mjs';
 import {existsSync,readFileSync,writeFileSync,renameSync,mkdirSync,realpathSync} from 'node:fs';
 import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -228,6 +229,8 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         result=state[input.op==='mode_group'?'setModes':'setMode']({...input,queue_compatibility_verified:input.mode==='active',legacy_quiescent:legacyQuiescent(root,input.task_ids??input.task_id,input.native_binding)});
       }else if(input.op==='amend'){input.contract.workspace=realpathSync(input.contract.workspace);result=state.amend(input);}
       else if(input.op==='service_begin')result=new NativeServices({root,control,config}).begin(input);
+      else if(input.op==='health_targets')result=new OwnerHealth(control).targets(input);
+      else if(input.op==='health_observe')result=new OwnerHealth(control).observe(input);
       else if(input.op==='checkpoint')result=state.checkpoint(input.task_id);
       else if(input.op==='publish')result=state.ingest(input);
       else if(input.op==='schedule_event')result=publishScheduledOccurrence(root,state,input);

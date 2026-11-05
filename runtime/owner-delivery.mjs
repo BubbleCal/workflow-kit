@@ -89,12 +89,16 @@ export function queueOwnerHealth({control,mailbox,now=Date.now}) {
   if(!control.reactive.tasks().some(t=>t.mode==='active'&&t.contract.service_lane==='maintenance'))return;
   for(const wake of control.db.prepare("SELECT * FROM rt_wakes WHERE state IN ('queued','uncertain','running') AND created_at<?").all(now()-900000)) {
     const task=control.reactive.task(wake.task_id);
-    if(!task||task.mode!=='active'||task.contract.service_lane||task.contract.retired)continue;
+    if(!task||task.mode!=='active'||['complete','needs_decision'].includes(task.status)||task.contract.service_lane||task.contract.retired)continue;
     if(wake.state==='running'&&now()-(wake.started_at??wake.created_at)<3600000)continue;
-    const key=`owner-health:${wake.id}`;
-    if(mailbox.db.prepare('SELECT 1 FROM mail WHERE item_key=?').get(key))continue;
+    const prefix=`owner-health:${wake.id}`;
+    const prior=mailbox.db.prepare("SELECT state,created_at,payload FROM mail WHERE item_key=? OR item_key LIKE ? ORDER BY seq DESC LIMIT 1").get(prefix,prefix+':recheck:%');
+    if(prior&&['pending','in_batch'].includes(prior.state))continue;
+    const generation=prior?(JSON.parse(prior.payload).health_generation??0)+1:0;
+    if(prior&&now()-prior.created_at<Math.min(3600000,900000*2**Math.min(generation,2)))continue;
+    const key=prior?`${prefix}:recheck:${generation}`:prefix;
     mailbox.enqueue({key,lane:'maintenance',kind:'workflow_recovery',payload:{event:'native_queue_consumption_check',affected_task_ids:[task.task_id],
-      owner_thread_id:task.owner_id,wake_id:wake.id,queue_id:wake.queue_id,evidence_ref:`control.sqlite#rt_wakes/${wake.id}`,
-      instruction:'At the regular maintenance boundary, read native state and reconcile only this existing receipt. A long turn is not evidence of failure. Preserve running jobs and human holds. Never resend an uncertain message, activate windows or navigate to chats.',user_notification_required:false}});
+      owner_thread_id:task.owner_id,wake_id:wake.id,queue_id:wake.queue_id,health_generation:generation,evidence_ref:`control.sqlite#rt_wakes/${wake.id}`,
+      instruction:'Read OWNER_RECOVERY.md. Queue acceptance or an acknowledged health message is not recovery. Record health_observe from fresh native state; reconcile a terminal failed/context-exhausted wake and verify actual successor work. Keep unconsumed queues unresolved with bounded rechecks; use an authorized exact-wake recovery at most once, never blind retransmission. Preserve running jobs, valid waits, holds, uncertain effects and all queue receipts. Never activate windows or navigate to chats.',user_notification_required:false}});
   }
 }

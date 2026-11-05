@@ -24,6 +24,7 @@ import { reviewStageReasons } from './pr-review-gates.mjs';
 import { readTaskRegistry, ownershipReasons, scopedHandoffReasons, pausedMigrationSetup } from './task-ownership.mjs';
 import { isReviewDelivery, readReviewWindow, reviewWindowAt, withReviewWindowGuidance, REVIEW_WINDOW } from './review-window.mjs';
 import {readReviewChannels,reviewDestinationReasons} from './pr-review-routing.mjs';
+import {isQueuedResume,queuedResumeReasons} from './queued-resume.mjs';
 
 export const INBOX = bindings.threads.inbox;
 export const PAGE = bindings.delivery.notion_page_id;
@@ -233,7 +234,7 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
     need(e.owner_matches === true && payload?.thread_id === e.owner_thread_id, 'human_input_target_mismatch');
     const restoredQuiescentOwner = e.thread_status === 'notLoaded' &&
       e.explicit_resume_request_verified === true && e.thread_archived === false &&
-      e.latest_turn_quiescent === true && e.pending_dispatch === false && e.overlapping_owner === false;
+      e.latest_turn_quiescent === true && (e.pending_dispatch === false || isQueuedResume(kind,payload)&&e.queued_resume_verified===true) && e.overlapping_owner === false;
     need(['idle', 'active', 'awaiting_input'].includes(e.thread_status) || restoredQuiescentOwner, 'human_input_target_state_unknown');
     if (payload?.intent === 'question' && payload.thread_id !== COORDINATOR) {
       need(e.thread_status === 'idle' || restoredQuiescentOwner, 'technical_question_waits_for_idle_owner');
@@ -434,6 +435,14 @@ export class ControlStore {
   }
   prepare(input) {
     const key = required(input.key, 'action key');
+    if(isQueuedResume(input.kind,input.payload)){
+      const prefix=input.payload.intent==='resume_existing_wake'?'resume-execute':'resume-input';
+      if(key!==`${prefix}:${input.task_id}:${input.payload.existing_queue_id}`)
+        return {prepared:false,allowed:false,reasons:['stable_single_recovery_key_required']};
+      const reasons=queuedResumeReasons(this.reactive.task(input.task_id),this.reactive.openWake(input.task_id),input.payload,input.evidence,this.now());
+      if(reasons.length)return {prepared:false,allowed:false,reasons};
+      input={...input,evidence:{...input.evidence,queued_resume_verified:true}};
+    }
     if(bindings.delivery.owner_managed){const reasons=ownerActionReasons(this,input.kind,input.task_id,input.payload,input.evidence);if(reasons.length)return {prepared:false,allowed:false,reasons};}
     const scopeReasons=scopeActionReasons(this.taskRegistry(),input.kind,input.task_id,input.payload,input.evidence);
     if(scopeReasons.length)return {prepared:false,allowed:false,reasons:scopeReasons};
@@ -520,6 +529,11 @@ export class ControlStore {
       const blocked = this.db.prepare("SELECT action_key FROM actions WHERE scope_key=? AND state IN ('claimed','uncertain') AND action_key<>? LIMIT 1").get(row.scope_key, key);
       if (blocked) return { claimed: false, reason: 'scope_in_use', blocking_key: blocked.action_key };
       const payload = JSON.parse(row.payload);
+      if(isQueuedResume(row.kind,payload)){
+        const reasons=queuedResumeReasons(this.reactive.task(row.task_id),this.reactive.openWake(row.task_id),payload,evidence,this.now());
+        if(reasons.length)return {claimed:false,reasons};
+        evidence={...evidence,queued_resume_verified:true};
+      }
       if(bindings.delivery.owner_managed){const reasons=ownerActionReasons(this,row.kind,row.task_id,payload,evidence,owner);if(reasons.length)return {claimed:false,reasons};}
       const reactiveReasons = this.reactive.actionReasons(row.kind,row.task_id,payload);
       if (reactiveReasons.length) return { claimed:false, reasons:reactiveReasons };
