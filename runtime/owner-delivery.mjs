@@ -14,8 +14,10 @@ export function waitingOnSameObligation({control,mailbox,task,payload,now=Date.n
   for(const expected of wait.facts){const fact=control.db.prepare('SELECT version FROM rt_facts WHERE task_id=? AND subject=?').get(task.task_id,expected.subject);if(!fact||fact.version!==expected.version)return null;}
   const proof=['pr','review_request'].includes(wait.condition?.kind)?control.checkReactiveWait(wait.condition):mailbox.waits.check(wait.condition);
   if(!proof.valid)return null;
-  const previous=control.db.prepare("SELECT payload FROM rt_events WHERE task_id=? AND disposition='handled' AND json_extract(payload,'$.original.lifecycle_key')=? ORDER BY received_at DESC LIMIT 1").get(task.task_id,payload.lifecycle_key);
-  if(!previous||lifecycleMeaning(JSON.parse(previous.payload).original)!==lifecycleMeaning(payload))return null;
+  const previous=control.db.prepare("SELECT e.payload,d.plan_rev,d.disposition,d.data FROM rt_events e JOIN rt_decisions d ON d.id=e.decision_id WHERE e.task_id=? AND e.disposition='handled' AND json_extract(e.payload,'$.original.lifecycle_key')=? ORDER BY e.received_at DESC LIMIT 1").get(task.task_id,payload.lifecycle_key);
+  if(!previous||previous.plan_rev!==task.plan_rev||previous.disposition!=='wait'||
+    canonical(JSON.parse(previous.data).wait?.condition)!==canonical(wait.condition)||
+    lifecycleMeaning(JSON.parse(previous.payload).original)!==lifecycleMeaning(payload))return null;
   return {reason:'same_obligation_has_verified_wait',wait_updated_at:row.updated_at,expires_at:wait.expires_at,evidence_ref:proof.evidence_ref??proof.proof??null};
 }
 

@@ -74,10 +74,11 @@ test('same reminder stays pending during a verified dependency wait and is relea
  }finally{f.close();}
 });
 test('dependency availability and genuinely changed obligations immediately release work',()=>{
- for(const change of ['available','head','dirty']){const f=dependencyReminderFixture();try{f.route();
+ for(const change of ['available','head','dirty','replan']){const f=dependencyReminderFixture();try{f.route();
   if(change==='available')f.m.waits.observe({fact_key:'dependency',kind:'dependency',subject:'required-release',data:{available:true,requirement:'published release'},observed_at:new Date(f.now()).toISOString(),expires_at:new Date(f.now()+3600000).toISOString(),evidence_ref:'new-release'});
   if(change==='head'){const p={...f.payload(3),head:'b'.repeat(40)};f.c.db.prepare('UPDATE lifecycle_intents SET payload=? WHERE intent_key=?').run(JSON.stringify(p),f.intent);f.m.enqueue({key:f.intent+':3',lane:'coordinator',kind:'event',payload:p});}
   if(change==='dirty')f.event('material-feedback',{review:'request changes'});
+  if(change==='replan')f.decide({disposition:'wait',plan:plan('new independent step'),wait:JSON.parse(f.c.db.prepare("SELECT condition FROM rt_waits WHERE task_id='T-1'").get().condition)});
   f.route();assert.notEqual(f.s.task('T-1').wake_at,null);
  }finally{f.close();}}
 });
