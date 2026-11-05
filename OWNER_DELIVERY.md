@@ -2,6 +2,11 @@
 
 # Complete delivery by the original task owner
 
+Before creating any PR, including a draft, read the branch-ownership rule in
+TASK_OWNERSHIP_AND_PR_GATES.md. When the instance applies Yang's rule, stacked PRs
+may contain only his feature branches. Development may depend on another owner's
+branch, but PR creation waits for that PR to merge and for rebasing onto main.
+
 Before Slack PR delivery, read REVIEW_ROUTING.md and the instance's configured
 route policy. If scoped routing is configured, include current-PR
 `evidence.review_routing` at prepare, claim and final send authorization.

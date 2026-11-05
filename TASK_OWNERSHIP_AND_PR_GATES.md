@@ -24,6 +24,37 @@ This scoped transfer does not require archiving the old unrelated task chat.
 Checkpoint exact worktree/branch/edits/jobs/resources and ownership before creating
 the new chat; native project readback and actual productive start remain required.
 
+## Branch ownership before creating a PR
+
+Follow the instance's actual user policy for dependency ownership. Under Yang's
+rule, every unpublished feature branch in a stacked PR chain must belong to Yang.
+Check the entire chain back to main, not just the immediate parent. The branch's
+actual PR/task ownership must support that conclusion; a branch-name prefix,
+shared repository, write access or copying somebody else's branch is not proof.
+
+Development may start on another person's unmerged branch in the task's own
+isolated branch/worktree. Do not modify that person's branch. When the work depends
+on their unmerged PR, do not create a PR yet, including a draft, stacked PR or a PR
+targeting main whose diff still contains that unmerged dependency.
+
+Wait for the other person's PR to merge into main. Fetch the latest main, rebase
+the task's own changes onto it, resolve any resulting conflicts and run the
+appropriate validation. Then create the PR against main. A closed-unmerged PR,
+approval or successful CI does not satisfy this prerequisite. Merely retargeting
+the PR to main does not replace the rebase or remove dependency commits.
+
+Before creating any PR, the owner records its target, the unmerged dependency
+chain and actual branch/PR owners in the existing task checkpoint. If ownership
+is unknown or a dependency belongs to someone else, keep the implementation as
+branch work until the dependency is merged. Do not create a new approval request
+for waiting that is already required by this rule.
+
+Recheck dependencies before ready, review delivery and merge. Reuse an existing
+PR and its history when correcting prior work; do not create duplicates or edit
+another owner's PR. Preserve any explicit instructions for existing PRs. Existing
+noncompliant work stays out of further delivery until its dependency and base
+are corrected; this rule alone does not instruct closing or deleting old PRs.
+
 ## Ready and review delivery
 
 New PRs start draft. Current applicable CI must pass before pr_ready. Ready then
