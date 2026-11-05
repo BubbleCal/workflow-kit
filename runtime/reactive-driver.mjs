@@ -59,13 +59,23 @@ export class ReactiveDriver {
   }
   configurePolls() {
     const subjects=new Map(),registry=this.control.taskRegistry();
-    for(const task of this.state.tasks().filter(t=>['active','shadow'].includes(t.mode)&&t.status!=='complete'))for(const pr of task.contract.pull_requests??[]) {
-      if(!this.config.repositories.includes(pr.repository)||!/^[\w.-]+\/[\w.-]+$/.test(pr.repository)||!Number.isSafeInteger(pr.pr_number)||pr.pr_number<1)
-        throw new Error('PR source is outside the verified instance repository scope');
-      if(scopeActionReasons(registry,'merge',task.task_id,{pr_url:`https://github.com/${pr.repository}/pull/${pr.pr_number}`}).includes('scope_excluded_by_actual_user'))continue;
-      const subject=`${pr.repository}#${pr.pr_number}`;
-      if(!subjects.has(subject))subjects.set(subject,{...pr,task_ids:[]});
-      subjects.get(subject).task_ids.push(task.task_id);
+    const watches=this.control.db.prepare('SELECT pr_key,task_id,owner_id FROM lifecycle_prs WHERE retired=0').all();
+    for(const task of this.state.tasks().filter(t=>['active','shadow'].includes(t.mode)&&t.status!=='complete')) {
+      const sources=new Map((task.contract.pull_requests??[]).map(pr=>[`${pr.repository}#${pr.pr_number}`,pr]));
+      // Artifact registration is source metadata, not a change to the user's goal.
+      for(const watch of watches.filter(w=>w.task_id===task.task_id && w.owner_id===task.owner_id)) {
+        const match=watch.pr_key.match(/^([\w.-]+\/[\w.-]+)#([1-9]\d*)$/);
+        if(match && this.config.repositories.includes(match[1]) && !sources.has(watch.pr_key))
+          sources.set(watch.pr_key,{repository:match[1],pr_number:Number(match[2])});
+      }
+      for(const pr of sources.values()) {
+        if(!this.config.repositories.includes(pr.repository)||!/^[\w.-]+\/[\w.-]+$/.test(pr.repository)||!Number.isSafeInteger(pr.pr_number)||pr.pr_number<1)
+          throw new Error('PR source is outside the verified instance repository scope');
+        if(scopeActionReasons(registry,'merge',task.task_id,{pr_url:`https://github.com/${pr.repository}/pull/${pr.pr_number}`}).includes('scope_excluded_by_actual_user'))continue;
+        const subject=`${pr.repository}#${pr.pr_number}`;
+        if(!subjects.has(subject))subjects.set(subject,{...pr,task_ids:[]});
+        subjects.get(subject).task_ids.push(task.task_id);
+      }
     }
     this.control.atomic(()=>{
     for(const row of this.control.db.prepare('SELECT subject FROM rt_polls WHERE enabled=1').all())if(!subjects.has(row.subject))this.control.db.prepare('UPDATE rt_polls SET enabled=0 WHERE subject=?').run(row.subject);

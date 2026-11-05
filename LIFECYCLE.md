@@ -296,3 +296,15 @@ revisions and unfinished source-task acceptance. Then use normal exact-generatio
 `lifecycle_resolve(disposition:progress)` and separately acknowledge the admitted
 handoff. An old handoff cannot close a newer head/failure episode. This records
 triage, never passing CI, merge readiness or whole-task completion.
+
+## Preserve CI proof across metadata reads
+
+A metadata-only PR observation retains existing `applicable_ci` only for the
+same head, state, draft phase and PR `updated_at`. It preserves every original
+proof field, including `checked_at`, `evidence_ref` and `policy_ref`; metadata
+freshness never renews CI freshness. Explicit replacement/null remains effective.
+When a fresh raw CI surface is supplied, its complete check identities, producer
+identities and results must match the retained proof. Added/removed checks,
+changed attempts/results/producers or changed PR state invalidate the proof.
+Expired proof still requires a fresh applicability decision. This does not waive
+CI, Gatekeeper, the review window or current-operation evidence requirements.

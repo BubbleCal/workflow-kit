@@ -378,3 +378,34 @@ test('read-only review targets preserve findings without author delivery obligat
   c.lifecycle.scopeRegistry=()=>({task_registry:{items:{'T-010':{role:'implementation',owner_thread_id:'owner'}}}});
   assert.notEqual(c.lifecycle.inspect(key).action,null);c.close();
 });
+
+test('metadata-only observations retain applicable CI without renewing its evidence',()=>{
+  let now=NOW;const c=setup(()=>now);observe(c,now,{draft:true});
+  const original=JSON.parse(c.db.prepare('SELECT snapshot FROM lifecycle_prs WHERE pr_key=?').get(key).snapshot).applicable_ci;
+  now+=1000;observe(c,now,{draft:true,applicable_ci:undefined});
+  const saved=JSON.parse(c.db.prepare('SELECT snapshot FROM lifecycle_prs WHERE pr_key=?').get(key).snapshot);
+  assert.deepEqual(saved.applicable_ci,original);assert.notEqual(saved.checked_at,original.checked_at);
+  assert.equal(c.lifecycle.inspect(key).action,'deliver_review');
+  now+=20*60000;observe(c,now,{draft:true,applicable_ci:undefined});
+  assert.equal(c.lifecycle.inspect(key).action,'verify_review_ci');c.close();
+});
+
+test('retained applicability never crosses a head, phase, or changed check surface',()=>{
+  const raw={head_sha:HEAD,checked_at:new Date(NOW).toISOString(),evidence_ref:'fresh-runs',complete:true,scope:'observed',
+    checks:[{kind:'check_run',id:'fixture-ci',name:'unit',head_sha:HEAD,status:'completed',conclusion:'success'}]};
+  for(const change of ['unchanged','head','ready','updated','pending','additional','removed','app','clear']){
+    const c=setup();observe(c,NOW,{draft:true,ci:raw});
+    const patch={draft:true,applicable_ci:undefined,ci:structuredClone(raw)};
+    if(change==='head')patch.head_sha='b'.repeat(40);
+    if(change==='ready')patch.draft=false;
+    if(change==='updated')patch.updated_at=new Date(NOW+1).toISOString();
+    if(change==='pending')patch.ci.checks[0].status='in_progress';
+    if(change==='additional')patch.ci.checks.push({...patch.ci.checks[0],id:'new-run'});
+    if(change==='removed')patch.ci.checks=[];
+    if(change==='app')patch.ci.checks[0].app_id=88;
+    if(change==='clear')patch.applicable_ci=null;
+    observe(c,NOW,patch);
+    const saved=JSON.parse(c.db.prepare('SELECT snapshot FROM lifecycle_prs WHERE pr_key=?').get(key).snapshot);
+    assert.equal(!!saved.applicable_ci,change==='unchanged',change);c.close();
+  }
+});

@@ -1,5 +1,10 @@
 # Changes
 
+## 0.6.3
+
+- Preserve same-source applicable CI proof across metadata observations without renewing its original timestamps or accepting changed check surfaces.
+- Include already registered PR artifacts in native polling when their task and original owner match, without amending contracts or bypassing holds and exclusions.
+
 ## 0.6.2
 
 - Keep read-only PR review targets outside authored-delivery lifecycle actions while retaining findings and review refresh ownership.

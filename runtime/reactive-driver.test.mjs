@@ -207,3 +207,40 @@ test('native review requests can justify waiting without Slack but never hide ne
     assert.equal(f.control.checkReactiveWait(condition).valid,false);
   }finally{await f.close();}
 });
+
+test('registered owner artifacts join native polling without amending contracts or duplicating a source',async()=>{
+  const f=setup();try{
+    const t=f.state.task('T-1');f.control.db.prepare('UPDATE rt_tasks SET contract=? WHERE task_id=?').run(JSON.stringify({...t.contract,pull_requests:[]}),'T-1');
+    const before=f.state.task('T-1');
+    f.control.lifecycle.track({repository:'example/service',pr_number:1,task_id:'T-1',owner_thread_id:OWNER,authorization_ref:'original-deliverable'});
+    f.driver.configurePolls();f.driver.configurePolls();
+    const rows=f.control.db.prepare('SELECT * FROM rt_polls WHERE enabled=1').all();
+    assert.equal(rows.length,1);assert.deepEqual(JSON.parse(rows[0].config).task_ids,['T-1']);
+    assert.deepEqual(f.state.task('T-1'),before);assert.equal(f.queue.calls.length,0);
+    f.activate();await f.driver.deliver(f.state.task('T-1'));
+    await f.driver.poll(rows[0]);const observed=f.state.task('T-1').context_rev;
+    f.advance(300000);await f.driver.poll(f.control.db.prepare('SELECT * FROM rt_polls').get());
+    await f.driver.deliver(f.state.task('T-1'));
+    assert.equal(f.queue.calls.length,1);assert.equal(f.state.task('T-1').context_rev,observed);
+    assert.equal(f.state.task('T-1').contract_rev,before.contract_rev);
+    f.control.db.prepare('UPDATE rt_tasks SET contract=? WHERE task_id=?').run(JSON.stringify(t.contract),'T-1');
+    f.driver.configurePolls();assert.deepEqual(JSON.parse(f.control.db.prepare('SELECT config FROM rt_polls').get().config).task_ids,['T-1']);
+    f.control.db.prepare('UPDATE lifecycle_prs SET retired=1').run();
+    f.control.db.prepare('UPDATE rt_tasks SET contract=? WHERE task_id=?').run(JSON.stringify({...t.contract,pull_requests:[]}),'T-1');
+    f.driver.configurePolls();assert.equal(f.control.db.prepare('SELECT enabled FROM rt_polls').get().enabled,0);
+  }finally{await f.close();}
+});
+
+test('artifact polling preserves owner, scope, paused-task and completed-task boundaries',async()=>{
+  const f=setup();try{
+    const t=f.state.task('T-1');f.control.db.prepare('UPDATE rt_tasks SET contract=? WHERE task_id=?').run(JSON.stringify({...t.contract,pull_requests:[]}),'T-1');
+    for(const [number,task,owner,repository] of [[2,'T-1','wrong','example/service'],[3,'missing',OWNER,'example/service'],[4,'T-1',OWNER,'outside/repo']])
+      f.control.lifecycle.track({repository,pr_number:number,task_id:task,owner_thread_id:owner,authorization_ref:'original'});
+    f.driver.configurePolls();assert.equal(f.control.db.prepare('SELECT count(*) n FROM rt_polls WHERE enabled=1').get().n,0);
+    f.control.lifecycle.track({repository:'example/service',pr_number:1,task_id:'T-1',owner_thread_id:OWNER,authorization_ref:'original'});
+    f.control.taskRegistry=()=>({scope_restrictions:{skip:{task_id:'T-1',source_message_id:'human',evidence_ref:'actual-source',verbatim_text:'Stop this PR',status:'excluded',targets:{pr_urls:['https://github.com/example/service/pull/1']}}}});
+    f.driver.configurePolls();assert.equal(f.control.db.prepare('SELECT count(*) n FROM rt_polls WHERE enabled=1').get().n,0);
+    f.control.taskRegistry=()=>null;
+    for(const patch of ["mode='paused'","mode='active',status='complete'"]){f.control.db.exec('UPDATE rt_tasks SET '+patch);f.driver.configurePolls();assert.equal(f.control.db.prepare('SELECT count(*) n FROM rt_polls WHERE enabled=1').get().n,0);}
+  }finally{await f.close();}
+});

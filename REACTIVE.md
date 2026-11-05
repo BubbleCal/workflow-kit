@@ -210,3 +210,14 @@ Automatic maintenance can be paced independently of engineering and control
 progress with daily-review/config.json interval_minutes and first_due_at. The
 interval is enforced at reservation, send authorization and actual begin, including
 messages queued before a schedule change. No native automation needs to be added.
+
+## Sources for registered PR artifacts
+
+Native poll configuration combines contract PR sources with unretired lifecycle
+watches owned by that same adopted task and original owner. Artifact registration
+is operational source metadata; it does not amend the user's goal or contract.
+Only active/shadow unfinished tasks, configured repositories and nonexcluded
+scope qualify. Duplicate contract/watch bindings produce one subject poll and
+one task membership. Paused/completed tasks, retired watches and owner mismatches
+do not gain a source through this path. Existing source rate limits and grouped
+owner wake guards remain in force; registration itself sends no worker message.

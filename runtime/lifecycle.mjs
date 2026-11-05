@@ -12,6 +12,21 @@ const fresh = (at, now, age = 20 * 60000) => Number.isFinite(Date.parse(at)) && 
 const revisionOf = ({ snapshot_ref, ...state }) => hash(state);
 const mergedFact = s => s?.state === 'merged' && Number.isFinite(Date.parse(s.merged_at)) && /^[a-f0-9]{40,64}$/.test(s.merge_sha ?? '');
 export const prKey = (repository, number) => `${repository}#${number}`;
+const checkSurface = checks => Array.isArray(checks) ? checks.map(c => ({
+  kind:c.kind ?? 'check_run', id:String(c.id), name:c.name, head_sha:c.head_sha,
+  status:c.status, conclusion:c.conclusion, completed_at:c.completed_at,
+  app_id:c.app_id, suite_id:c.suite_id,
+})).sort((a,b)=>(a.kind+':'+a.id).localeCompare(b.kind+':'+b.id)) : null;
+
+function retainedApplicableCI(snapshot, previous) {
+  const proof=previous?.applicable_ci;
+  if(snapshot.applicable_ci!==undefined || !proof || previous.head_sha!==snapshot.head_sha ||
+    previous.state!==snapshot.state || previous.draft!==snapshot.draft || previous.updated_at!==snapshot.updated_at) return {};
+  // Metadata reads cannot renew CI evidence; a new check surface invalidates it.
+  if(snapshot.ci!==undefined && (!snapshot.ci?.complete || snapshot.ci.head_sha!==snapshot.head_sha ||
+    stable(checkSurface(snapshot.ci.checks))!==stable(checkSurface(proof.checks)))) return {};
+  return {applicable_ci:proof};
+}
 
 // This ledger determines the next obligation; existing control guards still
 // authorize every external action and original owners remain the only writers.
@@ -53,7 +68,7 @@ export class LifecycleLedger {
     const previous = old.snapshot ? JSON.parse(old.snapshot) : null;
     if (previous && Date.parse(previous.checked_at) > Date.parse(snapshot.checked_at)) throw new Error('Out-of-order PR snapshot');
     const stateChanged = !previous || ['state','head_sha','draft'].some(k=>previous[k]!==snapshot[k]);
-    const saved = { ...snapshot, ...(snapshot.ci === undefined && previous?.head_sha === snapshot.head_sha && previous.ci ? {ci:previous.ci} : {}), state_revision:(previous?.state_revision ?? 0)+Number(stateChanged) };
+    const saved = { ...snapshot, ...retainedApplicableCI(snapshot,previous), ...(snapshot.ci === undefined && previous?.head_sha === snapshot.head_sha && previous.ci ? {ci:previous.ci} : {}), state_revision:(previous?.state_revision ?? 0)+Number(stateChanged) };
     this.db.prepare('UPDATE lifecycle_prs SET snapshot=?,feedback_updated_at=CASE WHEN ? THEN ? ELSE feedback_updated_at END,updated_at=? WHERE pr_key=?')
       .run(stable(saved), Number(feedbackCollected), snapshot.updated_at, this.now(), key);
     return { observed: true, pr_key: key };
