@@ -1,3 +1,5 @@
+> Before creating an owner, assess the whole accepted task under MODEL_SELECTION.md. Save a short rationale through task assess_difficulty or request_owner; use the actual model/thinking returned by control claim. Existing owner models do not change.
+
 > accept_calendar_preparation is a scoped standing policy, including owner creation for its accepted meeting occurrences. task start automatically installs their one-time timer. Main is not a calendar admission or scheduling intermediary. See MEETING_PREPARATION_INTAKE.md and INBOX_POLICY.md.
 
 > In owner-delivery mode, an accepted execution task includes its existing authorized delivery through acceptance. Main/discovery create owners; owners perform their own delivery. Read OWNER_DELIVERY.md. Do not add a delivery coordinator.

@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "mode": "task_difficulty",
+  "source_message_id": "<actual-user-model-policy-message>",
+  "scope": "New task conversations only; explicit per-task user choices take precedence",
+  "routes": {
+    "simple": { "model": "gpt-6.1-sol", "thinking": "high" },
+    "other": { "model": "gpt-6-astra", "thinking": "xhigh" }
+  }
+}

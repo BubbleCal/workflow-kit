@@ -750,3 +750,13 @@ test('scoped destination is rechecked at prepare, claim and final send without w
   routing={...routing,routes:[{scope:'lancedb_functions',channel_id:'CFUNCTIONS'}]};
   assert.equal(authorize().send,true);c.close();
 });
+
+test('difficulty routing reaches claimed create arguments and remains frozen on replay',()=>{
+ let policy={version:2,mode:'task_difficulty',source_message_id:'human:difficulty',routes:{simple:{model:'gpt-6.1-sol',thinking:'high'},other:{model:'gpt-6-astra',thinking:'xhigh'}}};
+ const s=new ControlStore(':memory:',{now:()=>NOW,modelSelection:()=>policy});
+ try{const a=createAction('difficulty-simple','simple-work');a.payload.difficulty_assessment={scope:'bounded',uncertainty:'low',validation:'routine',reason:'One routine correction with a known verification step.'};a.payload.native.model='stale-default';
+ assert.equal(s.prepare(a).prepared,true);policy={...policy,routes:{...policy.routes,simple:{model:'changed-later',thinking:'low'}}};
+ assert.equal(s.prepare(a).reason,'already_recorded');const claim=s.claim({key:a.key,owner:'creator',evidence:a.evidence});assert.equal(claim.payload.native.model,'gpt-6.1-sol');assert.equal(claim.payload.native.thinking,'high');
+ const b=createAction('difficulty-unknown','unassessed-work');assert.equal(s.prepare(b).prepared,true);const claimed=s.claim({key:b.key,owner:'creator',evidence:b.evidence});assert.equal(claimed.payload.native.model,'gpt-6-astra');assert.equal(claimed.payload.native.thinking,'xhigh');
+ }finally{s.close();}
+});

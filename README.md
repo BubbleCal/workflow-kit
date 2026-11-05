@@ -1,3 +1,5 @@
+0.9.0 supports task difficulty assessment before conversation creation, with a centrally configured model/effort mapping. See [MODEL_SELECTION.md](MODEL_SELECTION.md). Existing conversations keep their selected models.
+
 0.8.1 adds scoped calendar preparation acceptance and automatic scheduling by discovery, plus a shared inbox gate that admits only real user decisions, requested answers and important completion.
 
 0.8.0 completes the removal of the delivery coordinator in native instances. Each original task owner handles its authorized delivery; the main conversation handles user decisions and completion archival, and optional discovery includes authorized calendar preparation scheduling. Read [OWNER_DELIVERY.md](OWNER_DELIVERY.md).
@@ -29,6 +31,8 @@
 读 README.md、START-HERE.md、ROLE_PROMPTS.md、WORK_TASKS.md、DISCOVERY.md、POLICY.md，以及项目适用的 AGENTS.md。先核验已有实例；不要覆盖已有账本或另建重复实例。默认使用 native 布局，不安装旧四角色或十分钟触发器。
 
 复用当前对话为主对话，并核验项目归属和 cwd。保留我选择的模型、推理和权限。Linear、Slack、Notion 来源默认全部关闭；仅按我另行给出的来源范围启用。只有启用来源时，这条安装请求才授权创建一个独立的后台发现对话。
+
+新执行对话创建前评估完整任务难度，使用 MODEL_SELECTION.md 的默认难度映射；把这条安装请求记录为该映射的授权。已有更具体的任务模型选择优先，不调整现有对话。
 
 初始化自带探索任务并保留为草稿。为该项目建立任务范围、预算和验收后再执行。候选发现不是实施授权。不要把安装请求当成创建任意执行对话的许可；我给出一次性自动建任务授权时，保存它的实际范围和原文，之后按规则复用，不重复确认。
 

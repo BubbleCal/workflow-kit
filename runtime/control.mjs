@@ -455,8 +455,11 @@ export class ControlStore {
     if (['dispatch','create_thread'].includes(input.kind) && (!prior || JSON.parse(prior.payload).dependency_guidance_version === 1))
       input = { ...input, payload: { ...input.payload, dependency_guidance_version:1 } };
     if (input.kind === 'create_thread') {
-      const selection = prior ? JSON.parse(prior.payload).model_selection : this.modelSelection();
-      input = { ...input, payload: withCreationModel(input.kind, input.payload, selection) };
+      const saved=prior?JSON.parse(prior.payload):null;
+      const selection = saved ? saved.model_selection : this.modelSelection();
+      const difficulty=input.payload.difficulty_assessment ?? saved?.difficulty_assessment ?? this.work.get(input.task_id)?.data.difficulty_assessment;
+      const payload=selection?.mode==='task_difficulty'&&difficulty?{...input.payload,difficulty_assessment:difficulty}:input.payload;
+      input = { ...input, payload: withCreationModel(input.kind, payload, selection) };
     }
     if (!prior || JSON.parse(prior.payload).engineering_guidance_version === 1)
       input = { ...input, payload: withEngineeringPrinciples(input.kind, input.payload) };

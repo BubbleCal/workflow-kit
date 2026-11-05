@@ -1,3 +1,5 @@
+> Known, bounded preparation profiles receive a routine difficulty assessment. Review the actual occurrence and use task assess_difficulty before prepare_owner if it requires specialist reasoning; MODEL_SELECTION.md controls the model mapping.
+
 # Authorized preparation intake belongs to discovery
 
 The saved `accept_calendar_preparation` policy contains the actual human source,

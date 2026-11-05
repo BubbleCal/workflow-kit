@@ -1,3 +1,4 @@
+import {assessDifficulty,routineMeetingDifficulty} from './model-selection.mjs';
 import {calendarPreparation} from './calendar-preparation.mjs';
 import {createHash} from 'node:crypto';
 import {verifyNativeBinding} from './native-queue.mjs';
@@ -102,7 +103,7 @@ export class WorkCatalog {
       source:{kind:'calendar',key:observation.entity_key,url:observation.url,evidence_ref:observation.evidence_ref}}).task;
     const prior=task.data.meeting_preparation;
     if(this.execution(task.id))return {...assessment,task,unchanged:!prior||prior.generation===assessment.preparation.generation,native_schedule_preserved:!prior,requires_reschedule:!!prior&&prior.generation!==assessment.preparation.generation};
-    const data={...task.data,...assessment.task,meeting_preparation:assessment.preparation};
+    const data={...task.data,...assessment.task,meeting_preparation:assessment.preparation,difficulty_assessment:task.data.difficulty_assessment??routineMeetingDifficulty()};
     this.db.prepare("UPDATE work_items SET state='accepted',data=?,authorization=?,revision=revision+1,updated_at=? WHERE id=?").run(json(data),
       json({kind:'standing_policy',policy:'accept_calendar_preparation',source_message_id:rule.source_message_id,evidence_ref:rule.evidence_ref,actual_human_verified:true}),this.now(),task.id);
     this.db.prepare("UPDATE work_notices SET state='superseded' WHERE task_id=? AND state='pending'").run(task.id);
@@ -155,7 +156,22 @@ export class WorkCatalog {
       return this.get(t.id);
     });
   }
-  requestOwner({task_id,source_message_id,verbatim_text,actual_human_verified,explicit_new_thread_request_verified}){
+  assessDifficulty({task_id,expected_revision,difficulty_assessment}){
+    const assessment=assessDifficulty(difficulty_assessment);
+    return this.atomic(()=>{
+      const task=this.get(task_id);
+      if(!task||task.state!=='accepted'||task.owner_thread_id||task.revision!==expected_revision)
+        throw new Error('Assess the current accepted unowned task before creating its conversation');
+      if(this.db.prepare("SELECT 1 FROM actions WHERE task_id=? AND kind='create_thread' AND state<>'cancelled'").get(task_id))
+        throw new Error('The creation action already has immutable model arguments');
+      this.db.prepare('UPDATE work_items SET data=?,revision=revision+1,updated_at=? WHERE id=?')
+        .run(json({...task.data,difficulty_assessment:assessment}),this.now(),task_id);
+      return this.get(task_id);
+    });
+  }
+  requestOwner({task_id,source_message_id,verbatim_text,actual_human_verified,explicit_new_thread_request_verified,difficulty_assessment,expected_revision}){
+    if(difficulty_assessment)this.assessDifficulty({task_id,expected_revision:expected_revision??this.get(task_id)?.revision,difficulty_assessment});
+
     const task=this.get(task_id),calendar=this.calendarRule(),rule=task?.data.meeting_preparation?.policy_key==='accept_calendar_preparation' && task.data.meeting_preparation.calendar_id===calendar?.calendar_id?calendar:parse(this.db.prepare("SELECT data FROM work_rules WHERE key='create_owner'").get()?.data);
     if(rule?.enabled&&task&&rule.allowed_kinds.includes(task.kind)&&!source_message_id){
       source_message_id=rule.source_message_id;verbatim_text=rule.verbatim_text;actual_human_verified=true;explicit_new_thread_request_verified=true;
@@ -164,9 +180,10 @@ export class WorkCatalog {
     if(actual_human_verified!==true||explicit_new_thread_request_verified!==true)throw new Error('Explicit authorization for a new visible execution task is required');
     return this.atomic(()=>{
       const t=this.get(task_id);if(!t||t.state!=='accepted'||t.owner_thread_id)throw new Error('An accepted unowned task is required');
-      const prior=this.db.prepare('SELECT * FROM work_owner_requests WHERE task_id=?').get(t.id);if(prior)return {...prior,request:parse(prior.request),...(t.data.meeting_preparation?{next_operation:'task prepare_owner with fresh projects/project_catalog_ref/checked_at; do not hand-build legacy evidence fields'}:{})};
+      const prior=this.db.prepare('SELECT * FROM work_owner_requests WHERE task_id=?').get(t.id);if(prior)return {...prior,request:{...parse(prior.request),difficulty_assessment:t.data.difficulty_assessment??null},...(t.data.meeting_preparation?{next_operation:'task prepare_owner with fresh projects/project_catalog_ref/checked_at; do not hand-build legacy evidence fields'}:{})};
       const key=`owner-create:${t.canonical_key}`;
-      const request={task_id:t.id,canonical_task_key:t.canonical_key,source_message_id,verbatim_text,
+      const request={task_id:t.id,canonical_task_key:t.canonical_key,source_message_id,verbatim_text,difficulty_assessment:t.data.difficulty_assessment??null,
+        model_routing_guidance:'Assess the full task before control prepare using task assess_difficulty or payload.difficulty_assessment. Read MODEL_SELECTION.md. Unknown difficulty uses the other route; do not copy a previous default model into native arguments.',
         control_action_key:key,required_tool:'create_thread',requires_existing_control_guards:true,
         project_id:this.config.scope.project_id,workspace:t.data.workspace,
         scope_authorization_ref:t.authorization.evidence_ref,

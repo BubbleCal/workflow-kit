@@ -134,3 +134,16 @@ test('completed history has no owner-needed blocker and cannot start again',()=>
   assert.equal(f.c.reactive.task(task.id),null);
  }finally{f.c.close();}
 });
+
+test('difficulty is assessed for an accepted unowned task and carried into its owner request',()=>{
+ const f=workFixture();try{
+  const t=f.work.create({canonical_key:'difficulty-docs',title:'Correct one documented option',objective:'Match the documented name to the existing API',requirements:[{id:'correct',text:'The example matches the API'}]}).task;
+  const accepted=f.accept(t.id);
+  const assessed=f.work.assessDifficulty({task_id:t.id,expected_revision:accepted.revision,difficulty_assessment:{scope:'bounded',uncertainty:'low',validation:'routine',reason:'Known documentation correction with a direct example check.'}});
+  assert.equal(assessed.data.difficulty_assessment.level,'simple');
+  const request=f.work.requestOwner({task_id:t.id,source_message_id:'user:create',verbatim_text:'Create an independent task for this work.',actual_human_verified:true,explicit_new_thread_request_verified:true});
+  assert.equal(request.request.difficulty_assessment.level,'simple');
+  f.bind(t.id);
+  assert.throws(()=>f.work.assessDifficulty({task_id:t.id,expected_revision:assessed.revision,difficulty_assessment:{scope:'broad',uncertainty:'material',validation:'specialist',reason:'Changed assessment'}}),/unowned task/);
+ }finally{f.c.close();}
+});
