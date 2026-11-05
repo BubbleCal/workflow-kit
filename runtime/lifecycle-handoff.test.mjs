@@ -52,3 +52,74 @@ test('handoff rejects mismatched episode, owner, decision, automatic ACK and com
     assert.equal(x.m.progress.hasResolution(x.key),false);
   }finally{x.close();}}
 });
+
+function replaceHandoff(x,patch) {
+  const b=x.m.get(x.b.id);Object.assign(b.snapshot.items.find(i=>i.key==='handoff').payload,patch);
+  x.m.db.prepare('UPDATE batches SET snapshot=? WHERE id=?').run(JSON.stringify(b.snapshot),b.id);
+}
+function postMergeSetup() {
+  const x=setup(),merge='c'.repeat(40),head='a'.repeat(40),p=JSON.parse(x.m.db.prepare('SELECT payload FROM mail WHERE item_key=?').get(x.key).payload);
+  Object.assign(p,{action:'decide_after_merge',state:'merged',merge_sha:merge});
+  x.m.db.prepare('UPDATE mail SET payload=? WHERE item_key=?').run(JSON.stringify(p),x.key);
+  x.f.c.db.prepare('UPDATE rt_events SET payload=? WHERE event_id=?').run(JSON.stringify(p),`legacy:${x.key}:T-1`);
+  const e=x.f.c.db.prepare('SELECT decision_id FROM rt_events WHERE event_id=?').get(`legacy:${x.key}:T-1`);
+  x.f.c.db.prepare("UPDATE rt_decisions SET data=json_set(data,'$.evidence_refs',json(?)) WHERE id=?").run(JSON.stringify(['scoped-acceptance']),e.decision_id);
+  replaceHandoff(x,{event:'native_post_merge_scope_disposition',head:undefined,expected_head_sha:head,expected_merge_sha:merge,
+    original_source_event_key:x.key,original_lifecycle_key:p.lifecycle_key,lifecycle_generation:p.lifecycle_generation,scoped_acceptance_ref:'scoped-acceptance',project_complete:false});
+  x.f.c.lifecycle.track({repository:'example/project',pr_number:42,task_id:'T-1',owner_thread_id:OWNER,authorization_ref:'human:original'});
+  x.f.c.lifecycle.observe({repository:'example/project',pr_number:42,head_sha:head,state:'merged',draft:false,
+    checked_at:new Date(NOW).toISOString(),updated_at:new Date(NOW).toISOString(),merged_at:new Date(NOW-1000).toISOString(),merge_sha:merge,evidence_ref:'actual-merge'});
+  return x;
+}
+test('duplicate CI disposition binds the exact consumed failure episode',()=>{
+  const x=setup();try{
+    replaceHandoff(x,{event:'native_duplicate_ci_obligation_disposition'});
+    x.f.c.db.prepare("UPDATE rt_decisions SET data=json_set(data,'$.evidence_refs',json(?))").run(JSON.stringify(['triage-result']));
+    assert.equal(x.m.recordProgress(x.input).recorded,true);
+    assert.equal(x.m.progress.goals()[0].complete,false);
+  }finally{x.close();}
+});
+test('post-merge scope handoff records its merge identity without completing or dispatching parent work',()=>{
+  const x=postMergeSetup();try{
+    const snapshot=JSON.stringify(x.m.get(x.b.id).snapshot);
+    assert.equal(x.m.recordProgress(x.input).recorded,true);
+    const binding=JSON.parse(x.m.db.prepare('SELECT binding FROM progress_handoffs').get().binding);
+    assert.equal(binding.merge_sha,'c'.repeat(40));assert.equal(x.m.progress.goals()[0].complete,false);
+    assert.equal(JSON.stringify(x.m.get(x.b.id).snapshot),snapshot);
+    assert.equal(x.m.db.prepare('SELECT count(*) n FROM continuation_actions').get().n,0);
+    assert.equal(x.f.c.db.prepare('SELECT retired FROM lifecycle_prs').get().retired,0);
+  }finally{x.close();}
+});
+test('post-merge handoff rejects wrong task, head, merge, generation, native decision and unbound acceptance',()=>{
+  for(const change of ['task','head','merge','generation','decision','acceptance','source','watch','conflicting-alias']){
+    const x=postMergeSetup();try{
+      if(change==='task')replaceHandoff(x,{affected_task_ids:['other']});
+      if(change==='head')replaceHandoff(x,{expected_head_sha:'b'.repeat(40)});
+      if(change==='merge')replaceHandoff(x,{expected_merge_sha:'d'.repeat(40)});
+      if(change==='generation')replaceHandoff(x,{lifecycle_generation:3});
+      if(change==='decision')x.f.c.db.prepare('UPDATE rt_events SET decision_id=NULL').run();
+      if(change==='acceptance')replaceHandoff(x,{scoped_acceptance_ref:'unverified-file'});
+      if(change==='source')replaceHandoff(x,{original_source_event_key:'other-source'});
+      if(change==='watch')x.f.c.db.prepare("UPDATE lifecycle_prs SET snapshot=json_set(snapshot,'$.merge_sha',?)").run('d'.repeat(40));
+      if(change==='conflicting-alias')replaceHandoff(x,{head:'b'.repeat(40)});
+      assert.throws(()=>x.m.recordProgress(x.input),/handoff/i,change);
+      assert.equal(x.m.progress.hasResolution(x.key),false);
+    }finally{x.close();}
+  }
+});
+
+test('duplicate CI handoff rejects another task, head, generation or decision evidence',()=>{
+  for(const change of ['task','head','generation','decision','evidence']) {
+    const x=setup();try{
+      replaceHandoff(x,{event:'native_duplicate_ci_obligation_disposition'});
+      x.f.c.db.prepare("UPDATE rt_decisions SET data=json_set(data,'$.evidence_refs',json(?))").run(JSON.stringify(['triage-result']));
+      if(change==='task')replaceHandoff(x,{affected_task_ids:['other']});
+      if(change==='head')replaceHandoff(x,{head:'b'.repeat(40)});
+      if(change==='generation')replaceHandoff(x,{lifecycle_generation:3});
+      if(change==='decision')replaceHandoff(x,{runtime_context:{context_rev:99,plan_rev:99}});
+      if(change==='evidence')x.f.c.db.prepare("UPDATE rt_decisions SET data=json_set(data,'$.evidence_refs',json('[]'))").run();
+      assert.throws(()=>x.m.recordProgress(x.input),/handoff/i,change);
+      assert.equal(x.m.progress.hasResolution(x.key),false);
+    }finally{x.close();}
+  }
+});

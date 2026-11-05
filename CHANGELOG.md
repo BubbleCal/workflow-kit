@@ -1,5 +1,11 @@
 # Changes
 
+## 0.6.4
+
+- Accept exact native duplicate-CI dispositions and scoped post-merge handoffs through the existing coordinator progress path.
+- Bind post-merge progress to the recorded native decision, scoped acceptance, original head/generation and verified merge SHA while preserving parent successors.
+- Reject conflicting identity aliases and evidence from another task, head, merge or decision without rewriting immutable batches.
+
 ## 0.6.3
 
 - Preserve same-source applicable CI proof across metadata observations without renewing its original timestamps or accepting changed check surfaces.

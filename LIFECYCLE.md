@@ -308,3 +308,21 @@ identities and results must match the retained proof. Added/removed checks,
 changed attempts/results/producers or changed PR state invalidate the proof.
 Expired proof still requires a fresh applicability decision. This does not waive
 CI, Gatekeeper, the review window or current-operation evidence requirements.
+
+## Duplicate CI and scoped post-merge native handoffs
+
+The exact-source `record_progress` handoff path also accepts
+`native_duplicate_ci_obligation_disposition` for `triage_ci`. Its evidence must
+be referenced by the actual native decision that consumed that exact source;
+matching names, an old head or a previous failure episode alone are insufficient.
+
+`native_post_merge_scope_disposition` applies only to `decide_after_merge`.
+It requires typed original source/lifecycle key and generation, expected head and
+merge SHA, the matching durable merged PR observation, and a scoped acceptance
+reference present in that exact native decision. Conflicting identity aliases
+are rejected. Original owner, task, current coordinator batch, `ack:false`, goal
+revision and remaining source-task acceptance checks still apply. The recorded
+handoff includes the actual merge SHA. Recording progress itself does not retire
+anything: the coordinator then uses ordinary exact-generation `lifecycle_resolve`
+to retire only that merged watch, preserving the parent and other PR successors.
+No second merge, worker dispatch, CI rerun or task completion is implied.
