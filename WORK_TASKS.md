@@ -1,3 +1,5 @@
+> In owner-delivery mode, an accepted execution task includes its existing authorized delivery through acceptance. Main/discovery create owners; owners perform their own delivery. Read OWNER_DELIVERY.md. Do not add a delivery coordinator.
+
 # Ordinary tasks and built-in exploration
 
 native 布局的统一目录在 control.sqlite 的 work_items 中。work、project、exploration 共用同一任务 ID、唯一 canonical key、接收授权、独立 owner、执行合同、计划、队列和验收。探索没有单独执行器。

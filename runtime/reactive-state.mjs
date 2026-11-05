@@ -372,6 +372,7 @@ export class ReactiveState {
   begin({ task_id, wake_id, native_proof }) {
     return this.atomic(()=>{
       const task=this.task(task_id),wake=this.openWake(task_id);
+      if(task?.contract.retired===true)return {begun:false,skipped:true,quiet:true,reason:'service_retired',instruction:'End immediately. Responsibilities were transferred to original owners; do not process or resend this historical wake.'};
       const retired=this.db.prepare("SELECT task_id,state FROM rt_wakes WHERE id=?").get(wake_id);
       const deferred=parse(this.db.prepare('SELECT data FROM rt_diagnostics WHERE key=?').get(`maintenance-deferred:${wake_id}`)?.data);
       if(task?.contract.service_lane==='maintenance' && retired?.task_id===task_id && retired.state==='superseded' &&

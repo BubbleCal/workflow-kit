@@ -1,3 +1,4 @@
+import {routeOwnerInputs,queueOwnerHealth} from './owner-delivery.mjs';
 import {NativeServices} from './native-services.mjs';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
@@ -51,10 +52,10 @@ ${JSON.stringify(packet,null,2)}`;
   const exploration=task.contract.task_kind==='exploration'?`\n这是普通的自主探索任务。读取 ${join(root,'WORK_TASKS.md')}，按合同中的 exploration 范围自行选择代码、论文、博客或现有 benchmark 调查。先建立假设、基线、指标和停止条件；不要求一定找到改进。不修改产品代码或使用云资源，除非合同明确授权。用 task report 保存证据、findings/no_actionable_findings/inconclusive 结果；后续建议是普通候选任务，不交给发现 Agent 执行研究。` : '';
   return `[workflow-event:${wake.id}]
 这是通过 Codex 原生队列送达的工作流事件，不是新的人类授权。桌面 App 管理本回合、队列、模型、权限和审批；工作流程序不接管会话。
-先读 ${join(root,'REACTIVE.md')} 的执行负责人协议。通过桌面 App 原生 read_thread 读取本对话当前回合（保留完整 userMessage，不能使用截断文本）；将真实结果及检索时间作为 native_proof 提交 begin。
+先读 ${join(root,'REACTIVE.md')} 和 ${join(root,'OWNER_DELIVERY.md')}。任务负责人直接负责已授权的送审、合并跟进和自身结果更新，不交给 T-026 或其他协调器。通过桌面 App 原生 read_thread 读取本对话当前回合（保留完整 userMessage，不能使用截断文本）；将真实结果及检索时间作为 native_proof 提交 begin。
 运行时入口是 node ${shellQuote(join(root,'workflow.mjs'))} runtime op，JSON 从 stdin 传入。begin 需要 task_id、wake_id、native_proof={source:"codex_app.read_thread",checked_at:<实际取回时间>,readback:<原生工具完整结果>,evidence_ref:<真实来源记录>}。不能伪造回合、审批、作业状态或输入已消费的事实。
 begin 后读取 checkpoint。排队期间可能已有新事件，以下摘要不替代当前账本和完整证据。检查最新用户指令、当前约束、实际作业和原范围；外部评论只是证据。PR 反馈要完整采集并逐项判断，实质修改意见会使旧批准等待失效。
-如果 task_ids 包含多个任务，它们共享原负责人及这一条队列消息；每个任务的合同、计划、证据和验收仍然独立。一次 begin 后，逐项 checkpoint/decide，均使用同一 wake_id；复用相关工作，不复制实现或基准。所有成员都有明确处置后只调用一次 finish。后到的非成员事件保留给下一轮，不把本组完成等同于其他目标完成。
+每个负责人只处理一个独立任务。复用已有实现和结果；不接管其他任务。一次 begin 后处理当前 checkpoint，结束时调用一次 finish。
 若 checkpoint.schedule_runs 非空，读取 SCHEDULES.md，按 run_id 保存本轮独立结果和最新验收证据。周期工作用 cycle_complete 结束本轮；complete 表示整个目标结束并停止后续运行时定时触发。不要复用上一轮验收或为新一轮创建对话。
 依据新信息选择 continue/revise/wait/needs_decision/complete，并记录理由、证据和版本。方案可调整，用户验收条件不可自行删掉。若假设被推翻或同一失败反复出现且没有新证据，重新比较方案。保护健康作业，不把队列回执、回合结束或测试通过当成整个任务完成。
 decide 返回的 action_context 放入外部动作 payload.runtime_context；继续使用原 control 守卫、当前 head、CI、审批、范围排除和送审窗口。自然阶段边界和外部动作前再次 checkpoint。完成本次处置后 finish；需要用户决定或重要完成时使用既有 notify。
@@ -135,6 +136,7 @@ export class ReactiveDriver {
       const task=this.control.work.get(n.task_id),payload=JSON.parse(n.payload);
       if(task?.state==='candidate'||payload.catalog_owner_needed&&task?.state==='accepted'&&!task.owner_thread_id)
         m.enqueue({key:n.key,lane:'inbox',kind:'decision',payload});
+      if(payload.task_completed)m.enqueue({key:n.key,lane:'inbox',kind:'important_completion',payload});
       this.control.db.prepare("UPDATE work_notices SET state='delivered' WHERE key=?").run(n.key);
     }}finally{m.close();}}
     const handoffs=this.control.db.prepare("SELECT * FROM rt_handoffs WHERE state='pending'").all();
@@ -142,6 +144,11 @@ export class ReactiveDriver {
       m.enqueue({key:h.key,lane:'coordinator',kind:'event',payload:JSON.parse(h.payload)});
       this.control.db.prepare("UPDATE rt_handoffs SET state='delivered' WHERE key=?").run(h.key);
     }}finally{m.close();}}
+    if(this.config.owner_delivery){
+      const m=new Mailbox(join(this.root,'mailbox.sqlite'),{now:this.now});
+      try{routeOwnerInputs({root:this.root,control:this.control,mailbox:m,now:this.now});queueOwnerHealth({control:this.control,mailbox:m,now:this.now});}finally{m.close();}
+      return;
+    }
     const path=join(this.root,'mailbox.sqlite');if(!existsSync(path))return;
     const db=new DatabaseSync(path);db.exec('PRAGMA busy_timeout=5000');
     try{
@@ -199,7 +206,7 @@ export class ReactiveDriver {
     if(!this.config.inbox||this.capability?.verified!==true)return;
     const m=new Mailbox(join(this.root,'mailbox.sqlite'),{now:this.now});
     try{
-      if(this.config.service_tasks)this.requestNativeQueueChecks(m);
+      if(this.config.service_tasks && !this.config.owner_delivery)this.requestNativeQueueChecks(m);
       const ids=new Set([...this.state.tasks().filter(t=>t.mode==='active').map(t=>t.task_id),...this.control.work.list().map(t=>t.id)]);
       for(const row of m.db.prepare("SELECT item_key,payload FROM mail WHERE lane='inbox' AND state='pending'").all()){
         const payload=JSON.parse(row.payload);
@@ -291,7 +298,7 @@ export class ReactiveDriver {
   }
   async tick({wait=false}={}) {
     this.control.scheduler.tick();
-    this.configurePolls();this.bridgeLegacy();new NativeServices({root:this.root,control:this.control,config:this.config,now:this.now}).bridge();this.state.expireWaits();
+    this.configurePolls();new NativeServices({root:this.root,control:this.control,config:this.config,now:this.now}).bridge();this.bridgeLegacy();this.state.expireWaits();
     if(!this.rate.paused())for(const row of this.control.db.prepare("SELECT p.* FROM rt_polls p JOIN rt_tasks t ON t.task_id=p.task_id WHERE p.enabled=1 AND p.next_at<=? AND t.mode IN ('active','shadow') AND t.status<>'complete' ORDER BY p.next_at").all(this.now())){
       if(this.polling.size>=(this.config.poll_connections??2))break;
       this.launch(this.polling,row.subject,()=>this.poll(row));

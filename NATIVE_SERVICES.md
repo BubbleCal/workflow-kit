@@ -1,3 +1,5 @@
+> With owner_delivery enabled, coordinator services are prohibited. PR delivery belongs to the original task owner (OWNER_DELIVERY.md). Only optional maintenance uses the service-batch protocol below; coordinator service support is retained solely for explicitly unmigrated legacy instances.
+
 # Optional ordinary service tasks
 
 Delivery and maintenance are ordinary catalog tasks with one owner each. They

@@ -20,6 +20,9 @@ export function sourceReadPlan(source,window) {
       content_types:'messages',sort:'timestamp',sort_dir:'asc',limit:20,include_context:true}});
     return {requests,followups:'Follow all result cursors and read relevant full threads with slack_read_thread. Preserve root thread identity and reply/edit versions. Private access must match the recorded explicit user grant.'};
   }
+  if(source.kind==='calendar')return {requests:[{tool:'google_calendar_search_events',arguments:{calendar_id:s.calendar_id,time_min:window.to,
+    time_max:new Date(Date.parse(window.to)+(s.lookahead_days??7)*86400000).toISOString(),timezone_str:s.timezone??'Asia/Shanghai',max_results:100}}],
+    followups:'Follow every page and read changed events. Under the existing meeting-preparation authorization, reconcile preparation schedules 45 minutes before meetings, preserving exclusions, language preferences, existing owners and event IDs. This does not authorize modifying meetings or sending messages. Read MEETING_PREP.md; discovery only maintains preparation schedules and publishes occurrences, never writes the meeting brief. Classify unchanged/excluded events as ignore with evidence; bind changed accepted meetings to their original task.'};
   if(source.kind==='codex')return {requests:[{tool:'list_threads',arguments:{mode:'history',source:'codex',hostId:s.host_id??'local',archived:false,limit:50}}],followups:'Filter by the exact configured project before reading actual human requests. Ignore control/discovery chats and other projects; never infer scope from a title. Preserve existing owners and running jobs. Register verified existing work without starting or duplicating it; source listing alone is not implementation authority.'};
   for(const id of arr(s.page_ids))requests.push({tool:'notion_fetch',arguments:{id,include_discussions:true}});
   for(const view_url of arr(s.view_urls))requests.push({tool:'notion_query_data_sources',arguments:{data:{mode:'view',view_url,page_size:100,is_archived:false}}});
@@ -45,7 +48,7 @@ export class DiscoveryStore {
         observation_id TEXT PRIMARY KEY,source_id TEXT NOT NULL,entity_key TEXT NOT NULL,item_key TEXT NOT NULL,version TEXT NOT NULL,
         data TEXT NOT NULL,disposition TEXT,task_id TEXT,decision TEXT,created_at INTEGER NOT NULL);
     `);
-    for(const [kind,interval] of [['linear',300000],['slack',300000],['notion',900000],['codex',600000]])
+    for(const [kind,interval] of [['linear',300000],['slack',300000],['notion',900000],['codex',600000],['calendar',3600000]])
       db.prepare('INSERT OR IGNORE INTO discovery_sources(source_id,kind,interval_ms) VALUES (?,?,?)').run(kind,kind,interval);
   }
   atomic(fn){this.db.exec('BEGIN IMMEDIATE');try{const r=fn();this.db.exec('COMMIT');return r;}catch(e){this.db.exec('ROLLBACK');throw e;}}
@@ -61,6 +64,7 @@ export class DiscoveryStore {
       if(old.kind==='slack'&&scope.access!=='private'&&arr(scope.channel_ids).some(id=>!id.startsWith('C')))throw new Error('Private channels/DMs cannot be queried through the public source');
       if(old.kind==='slack'&&scope.with_user_id&&scope.professional_only!==true)throw new Error('User-directed Slack discovery must be limited to professional work');
       if(old.kind==='codex'&&(scope.project_id!==this.config.scope.project_id||scope.host_id!=='local'))throw new Error('Codex discovery must use this exact local project');
+      if(old.kind==='calendar'&&(!scope.calendar_id||!scope.preparation_authorization_ref))throw new Error('Calendar discovery needs a specific calendar and original preparation authorization');
       if(old.kind==='notion'&&!arr(scope.page_ids).length&&!arr(scope.view_urls).length)throw new Error('Configure specific Notion pages or saved views');
     }
     const interval=interval_ms??old.interval_ms;if(!Number.isSafeInteger(interval)||interval<60000)throw new Error('A discovery source interval must be at least one minute');
@@ -120,7 +124,7 @@ export class DiscoveryStore {
       this.db.prepare("UPDATE discovery_batches SET state='pending',generation=generation+1,prompt=NULL,mail_key=? WHERE id=?").run(`discovery:${b.id}:${b.generation+1}`,b.id);
       b=this.batch(b.id);
     }
-    const prompt=`[workflow-discovery:${b.id}:${b.generation}]\nRun one source-only discovery scan for this instance. Read ${root}/DISCOVERY.md. Use the App's connected tools; do not open a session client. First obtain a real read_thread proof and call workflow discovery begin with batch_id and generation. If invalidated, stop without reading sources. Then read the batch plan and saved page cursors, collect only configured Linear/Slack/Notion changes, ingest pages and classify observations as an existing task, a candidate, or irrelevant. Preserve cursors and raw evidence. Do not explore code, papers or blogs, run benchmarks, implement work, or manufacture user authorization. Such work belongs to ordinary accepted tasks. For an accepted unowned task, follow WORK_TASKS.md to create its owner only under the saved explicit creation policy. Finish the batch only with complete source coverage and durable dispositions; otherwise checkpoint the partial cursor. No routine message to the main conversation. Batch: ${b.id}; generation: ${b.generation}.`;
+    const prompt=`[workflow-discovery:${b.id}:${b.generation}]\nRun one source-only discovery scan for this instance. Read ${root}/DISCOVERY.md. Use the App's connected tools; do not open a session client. First obtain a real read_thread proof and call workflow discovery begin with batch_id and generation. If invalidated, stop without reading sources. Then read the batch plan and saved page cursors, collect only configured source changes, including authorized calendar preparation schedule upkeep, ingest pages and classify observations as an existing task, a candidate, or irrelevant. Preserve cursors and raw evidence. Do not explore code, papers or blogs, run benchmarks, implement work, or manufacture user authorization. Such work belongs to ordinary accepted tasks. For an accepted unowned task, follow WORK_TASKS.md to create its owner only under the saved explicit creation policy. Finish the batch only with complete source coverage and durable dispositions; otherwise checkpoint the partial cursor. No routine message to the main conversation. Batch: ${b.id}; generation: ${b.generation}.`;
     this.db.prepare('UPDATE discovery_batches SET prompt=COALESCE(prompt,?) WHERE id=?').run(prompt,b.id);
     const queued=mailbox.enqueue({key:b.mail_key,lane:'discovery',kind:'source_scan',payload:{batch_id:b.id,text:prompt}});
     return {...queued,batch_id:b.id};
@@ -151,7 +155,7 @@ export class DiscoveryStore {
       if(previous?.complete || cursor!==(previous?.next_cursor??null))throw new Error('Resume the exact saved source cursor; do not skip or restart a partial stream');
       for(const o of observations){
         for(const k of ['entity_key','item_key','version','scope_key','summary','url'])required(o[k],k);
-        const allowed=source.kind==='linear'?[source.scope.project,source.scope.team,source.scope.assignment_only?source.scope.assignee_id:null].filter(Boolean):source.kind==='slack'?[...arr(source.scope.channel_ids),source.scope.with_user_id].filter(Boolean):source.kind==='codex'?[source.scope.project_id]:[...arr(source.scope.page_ids),...arr(source.scope.view_urls)];
+        const allowed=source.kind==='linear'?[source.scope.project,source.scope.team,source.scope.assignment_only?source.scope.assignee_id:null].filter(Boolean):source.kind==='slack'?[...arr(source.scope.channel_ids),source.scope.with_user_id].filter(Boolean):source.kind==='codex'?[source.scope.project_id]:source.kind==='calendar'?[source.scope.calendar_id]:[...arr(source.scope.page_ids),...arr(source.scope.view_urls)];
         if(source.kind==='linear'&&source.scope.assignment_only&&o.assignee_id!==source.scope.assignee_id)throw new Error('Observation has a different assigned user');
         if(source.kind==='slack'&&source.scope.with_user_id&&(o.relevant_user_id!==source.scope.with_user_id||o.professional_relevance!==true))throw new Error('Observation is outside the user-directed professional scope');
         if(source.kind==='codex'&&(o.project_id!==source.scope.project_id||Object.values(this.config.threads??{}).includes(o.item_key)))throw new Error('Observation is outside ordinary work in this project');

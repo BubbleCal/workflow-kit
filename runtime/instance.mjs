@@ -8,10 +8,10 @@ const raw = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
 export const bindings = {
   ...raw,
   threads: { coordinator:null, inbox:raw.threads?.main??null, maintenance:null, dispatcher:null, ...raw.legacy_roles, ...raw.threads,
-    ...(raw.layout==='native'?{inbox:raw.threads?.main}: {}) },
+    ...(raw.layout==='native'?{inbox:raw.threads?.main,...(raw.delivery?.owner_managed?{coordinator:null}: {})}: {}) },
   scope: { project_id:null, project_root:null, repositories:[], ...raw.scope },
   identity: { github_login:null, ...raw.identity },
-  delivery: { slack_enabled:false, slack_channel_id:null, ready_enabled:false,
+  delivery: { owner_managed:raw.layout==='native'&&!raw.legacy_roles?.coordinator, slack_enabled:false, slack_channel_id:null, ready_enabled:false,
     merge_enabled:false, approver_login:null, notion_enabled:false, notion_page_id:null, ...raw.delivery },
 };
 

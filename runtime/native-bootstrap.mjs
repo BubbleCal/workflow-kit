@@ -17,7 +17,7 @@ export function nativeBootstrap(command,args,root) {
     const preferences=read(join(root,'templates/preferences.json'));
     const config={schema_version:2,layout:'native',instance_id:randomUUID(),name,created_at:new Date().toISOString(),
       scope:{project_root:project,project_id:null,repositories:[]},threads:{main:null,discovery:null},
-      identity:{github_login:null},delivery:{slack_enabled:false,ready_enabled:false,merge_enabled:false,notion_enabled:false},
+      identity:{github_login:null},delivery:{owner_managed:true,slack_enabled:false,ready_enabled:false,merge_enabled:false,notion_enabled:false},
       models:{default:'inherit',roles:{main:null,discovery:null,execution:null}},preferences,native_bindings_verified:false};
     for(const d of ['observations','batches','completions'])mkdirSync(join(root,d),{recursive:true});
     save(path,config);save(join(root,'pr-review-window.json'),{timezone:preferences.timezone,blocked_start_inclusive:preferences.review_blackout.start_inclusive,blocked_end_exclusive:preferences.review_blackout.end_exclusive});

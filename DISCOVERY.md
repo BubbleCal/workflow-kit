@@ -1,3 +1,5 @@
+> Optional calendar source: configure exact calendar_id, preparation_authorization_ref, timezone and lookahead_days. Preserve the existing hourly scan and 45-minute preparation lead. Read-only calendar discovery may maintain authorized preparation schedules, never edit meetings, send invitations or write meeting briefs. Follow the supplied tool plan and pagination; calendar_id is its scope_key.
+
 # Optional source-only discovery
 
 Linear、Slack、Notion 各自默认关闭，和 PR 跟踪/外部写入配置独立。没有启用来源时不会排队发现扫描，也不要求 discovery 对话。代码、论文、博客和 benchmark 是 WORK_TASKS.md 的普通探索任务。

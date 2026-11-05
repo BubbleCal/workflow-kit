@@ -1,3 +1,5 @@
+> In native owner-delivery mode, main owns the shared decision list and decision-page projection. Each task owner owns only its task outcome rows. The native catalog is authoritative; legacy registry is historical. The old coordinator-only writer rule below is superseded.
+
 # One task sequence for user-facing work
 
 Use the existing canonical T task number for work, answers and pending decisions.

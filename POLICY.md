@@ -1,3 +1,5 @@
+> Native owner-delivery mode supersedes historical coordinator-only routing: read OWNER_DELIVERY.md and the instance NATIVE_POLICY.md. The original task owner executes only its already-authorized delivery. Main owns user decisions and completed-task archival; discovery owns configured source/calendar intake. Existing external communication, approval, scope and review-window limits remain unchanged.
+
 # Native-layout precedence (0.5)
 
 For layout=native, WORK_TASKS.md, DISCOVERY.md and REACTIVE.md define the current role and task protocol. Only main is required; discovery is optional and source-only. Exploration is an ordinary independently owned task, seeded as a draft. All three discovery sources are optional and disabled by default. The main conversation may investigate and answer directly. SQLite is the common task ledger; registry/decisions sole-writer rules and dispatcher/maintenance schedules below apply only to legacy instances and unmigrated records. Do not install legacy roles or schedules in a fresh native instance.

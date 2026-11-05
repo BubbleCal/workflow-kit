@@ -34,6 +34,6 @@ node workflow.mjs migrate --file observations/migration.json
 node workflow.mjs doctor
 ```
 
-命令备份 instance.json，导入已登记 rt_tasks 的原负责人和合同，保留任务模式、队列回执和旧文件，更新主对话通知目标，导入旧候选/历史记录并保留原授权边界。旧 control_lanes 自动移除；需要继续的交付/维护职责按 NATIVE_SERVICES.md 登记为普通任务。它不会修改或归档原生角色、停用 App 定时任务或擅自接管旧任务。未迁移任务需逐项核验后登记，原调度不得与新执行器同时驱动同一任务。再次检查 runtime 队列配置和迁移输出，再按实际授权恢复服务。
+命令备份 instance.json，导入已登记 rt_tasks 的原负责人和合同，保留任务模式、队列回执和旧文件，更新主对话通知目标，导入旧候选/历史记录并保留原授权边界。旧 control_lanes 自动移除；新版交付按 OWNER_DELIVERY.md 由原任务负责人承担；只有可选维护按 NATIVE_SERVICES.md 登记。已有集中交付服务必须按 UPGRADE_OWNER_DELIVERY.md 完成退役，不重新创建协调器。它不会修改或归档原生角色、停用 App 定时任务或擅自接管旧任务。未迁移任务需逐项核验后登记，原调度不得与新执行器同时驱动同一任务。再次检查 runtime 队列配置和迁移输出，再按实际授权恢复服务。
 
 旧四角色从零安装必须显式使用 init --legacy，并只遵循 LEGACY_START_HERE.md 和 LEGACY_ROLE_PROMPTS.md。

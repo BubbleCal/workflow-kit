@@ -14,7 +14,7 @@ export class NativeServices {
     return task;
   }
   bridge(){
-    if(!this.config.service_tasks)return;
+    if(!this.config.service_tasks && !this.config.owner_delivery)return;
     const m=new Mailbox(join(this.root,'mailbox.sqlite'),{now:this.now});
     try{
       const read=name=>{const p=join(this.root,name);return existsSync(p)?JSON.parse(readFileSync(p,'utf8')):undefined;};
@@ -29,7 +29,8 @@ export class NativeServices {
         m.enqueue({key:`service-input:${input.id}:${cutoff}`,lane:input.lane,kind:input.lane==='maintenance'?'workflow_recovery':'configuration',
           payload:{...input.payload,service_input_id:input.id,authorization_ref:input.authorization_ref,window_end:new Date(cutoff).toISOString(),user_notification_required:false}});
       }
-      for(const lane of Object.keys(this.config.service_tasks)){
+      for(const lane of Object.keys(this.config.service_tasks??{})){
+        if(this.config.owner_delivery && lane==='coordinator')throw new Error('Owner delivery cannot enable a coordinator service');
         const task=this.task(lane);if(task.mode!=='active'||['complete','needs_decision'].includes(task.status)||this.control.reactive.openWake(task.task_id))continue;
         const cadence=lane==='maintenance'?m.maintenanceCadence():null;
         if(cadence && this.now()<cadence.eligible_at)continue;

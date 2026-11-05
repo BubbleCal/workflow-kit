@@ -19,7 +19,7 @@ const ROOT=join(dirname(fileURLToPath(import.meta.url)),'..');
 const read=path=>JSON.parse(readFileSync(path,'utf8'));
 const save=(path,data)=>{writeFileSync(path+'.tmp',JSON.stringify(data,null,2)+'\n',{mode:0o600});renameSync(path+'.tmp',path);};
 const digest=data=>createHash('sha256').update(data).digest('hex');
-export const DEFAULT_RUNTIME=Object.freeze({schema_version:2,transport:'native_queue',queue:{binary:'codex',timeout_ms:15000},
+export const DEFAULT_RUNTIME=Object.freeze({schema_version:2,transport:'native_queue',owner_delivery:bindings.delivery.owner_managed===true,queue:{binary:'codex',timeout_ms:15000},
   tick_ms:1000,poll_min_ms:30000,poll_max_ms:300000,poll_connections:2,github_read_budget_per_hour:1800});
 
 export function runtimeConfig(root=ROOT) {
@@ -32,6 +32,7 @@ export function runtimeConfig(root=ROOT) {
     !Number.isSafeInteger(c.github_read_budget_per_hour)||c.github_read_budget_per_hour<120||c.github_read_budget_per_hour>5000)throw new Error('Invalid GitHub source budget');
   if(c.inbox&&(c.inbox.thread_id!==bindings.threads.inbox||c.inbox.project_id!==bindings.scope.project_id||!c.inbox.workspace))throw new Error('Inbox must match this instance');
   if(bindings.layout==='native'&&c.control_lanes)throw new Error('Native layout uses ordinary service tasks, not legacy control lanes');
+  if(c.owner_delivery && c.service_tasks?.coordinator)throw new Error('Owner delivery cannot retain a coordinator service');
   if(c.control_lanes)for(const [lane,b]of Object.entries(c.control_lanes))
     if(!['coordinator','inbox','maintenance'].includes(lane)||b.thread_id!==bindings.threads[lane]||!b.workspace)throw new Error('Control lanes must match verified instance roles');
   if(c.desktop_loader?.enabled){

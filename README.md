@@ -1,3 +1,5 @@
+0.8.0 completes the removal of the delivery coordinator in native instances. Each original task owner handles its authorized delivery; the main conversation handles user decisions and completion archival, and optional discovery includes authorized calendar preparation scheduling. Read [OWNER_DELIVERY.md](OWNER_DELIVERY.md).
+
 # Independent Workflow Kit
 
 0.7.0 新增持久化的一次性和固定周期调度，支持漏触发合并、忙碌时合并/跳过、暂停/取消和每轮独立验收。它复用原任务负责人和原生队列；使用方法见 [SCHEDULES.md](SCHEDULES.md)。

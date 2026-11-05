@@ -1,3 +1,5 @@
+> Native owner-delivery mode: read OWNER_DELIVERY.md. Each original task owner completes its authorized PR delivery and result updates. There is no central delivery chat. Lifecycle progress may use an exact native decision; legacy coordinator-batch progress is not required. Historical coordinator-only instructions do not apply in this mode.
+
 > Native installation: START-HERE.md and WORK_TASKS.md use a verified main conversation with optional source-only discovery. Existing legacy layouts retain their roles and state; this release does not silently convert them.
 
 # Desktop-owned native queue runtime (0.6.0)

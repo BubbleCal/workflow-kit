@@ -1,3 +1,4 @@
+import {nativeLifecycleProgress,ownerActionReasons} from './owner-delivery.mjs';
 import { bindings, INSTANCE_ROOT, requireBindings, instancePolicyReasons } from './instance.mjs';
 import { ReactiveState } from './reactive-state.mjs';
 import {WorkCatalog} from './work-catalog.mjs';
@@ -375,8 +376,15 @@ export class ControlStore {
     this.work = new WorkCatalog(this.db,{config:{...bindings,instance_root:path===':memory:'?'[instance-root]':dirname(path)},now:this.now});
     this.reactive.completionReasons = taskId => this.work.completionReasons(taskId);
     this.work.onReportInside = (id,event) => this.work.publishToParentInside(this.reactive,id,event);
-    this.reactive.onCompleteInside = (id,wake,evidence_ref) => this.work.publishToParentInside(this.reactive,id,
-      {key:wake,type:'child_completed',payload:{status:'complete'},evidence_ref});
+    this.reactive.onCompleteInside = (id,wake,evidence_ref) => {
+      this.work.publishToParentInside(this.reactive,id,{key:wake,type:'child_completed',payload:{status:'complete'},evidence_ref});
+      if(bindings.delivery.owner_managed){
+        const task=this.reactive.task(id),item=this.work.get(id);
+        this.db.prepare("INSERT OR IGNORE INTO work_notices VALUES (?,?,?,'pending')").run(`complete:${wake}`,id,canonical({task_id:id,task_completed:true,
+          text:`${id} · ${item?.data.title??task.contract.objective}：已完成全部任务验收。成果证据：${evidence_ref}`,
+          archive_request:{task_id:id,thread_id:task.owner_id,evidence_ref},evidence_ref}));
+      }
+    };
     this.discovery = new DiscoveryStore(this.db,{config:bindings,work:this.work,reactive:this.reactive,now:this.now});
     this.scheduler = new Scheduler(this.db,{state:this.reactive,now:this.now});
     this.reactive.scheduleRuns = id => this.scheduler.currentRuns(id);
@@ -424,6 +432,7 @@ export class ControlStore {
   }
   prepare(input) {
     const key = required(input.key, 'action key');
+    if(bindings.delivery.owner_managed){const reasons=ownerActionReasons(this,input.kind,input.task_id,input.payload,input.evidence);if(reasons.length)return {prepared:false,allowed:false,reasons};}
     const scopeReasons=scopeActionReasons(this.taskRegistry(),input.kind,input.task_id,input.payload,input.evidence);
     if(scopeReasons.length)return {prepared:false,allowed:false,reasons:scopeReasons};
     const ownership = ownershipReasons(input.kind,input.task_id,input.payload,input.evidence,this.taskRegistry(),this.db,input.key);
@@ -509,6 +518,7 @@ export class ControlStore {
       const blocked = this.db.prepare("SELECT action_key FROM actions WHERE scope_key=? AND state IN ('claimed','uncertain') AND action_key<>? LIMIT 1").get(row.scope_key, key);
       if (blocked) return { claimed: false, reason: 'scope_in_use', blocking_key: blocked.action_key };
       const payload = JSON.parse(row.payload);
+      if(bindings.delivery.owner_managed){const reasons=ownerActionReasons(this,row.kind,row.task_id,payload,evidence,owner);if(reasons.length)return {claimed:false,reasons};}
       const reactiveReasons = this.reactive.actionReasons(row.kind,row.task_id,payload);
       if (reactiveReasons.length) return { claimed:false, reasons:reactiveReasons };
       const scopeReasons=scopeActionReasons(this.taskRegistry(),row.kind,row.task_id,payload,evidence);
@@ -516,7 +526,7 @@ export class ControlStore {
       const ownership = ownershipReasons(row.kind,row.task_id,payload,evidence,this.taskRegistry(),this.db,key);
       const handoff = row.kind==='create_thread' ? scopedHandoffReasons(row.task_id,payload,evidence) : [];
       if(ownership.length || handoff.length)return {claimed:false,allowed:false,reasons:[...ownership,...handoff]};
-      if (row.kind === 'archive' && payload.purpose !== 'explicit_owner_replacement' && this.progress?.unfinishedForOwner(payload.thread_id))
+      if (row.kind === 'archive' && payload.purpose !== 'explicit_owner_replacement' && !(bindings.delivery.owner_managed && this.reactive.task(row.task_id)?.status==='complete') && this.progress?.unfinishedForOwner(payload.thread_id))
         return { claimed: false, reason: 'owner_has_unfinished_goal_stages' };
       if (row.kind === 'assign_project') {
         const setup = this.db.prepare('SELECT * FROM thread_setups WHERE creation_key=?').get(payload.creation_key);
@@ -574,6 +584,7 @@ export class ControlStore {
       if (this.db.prepare('SELECT 1 FROM review_send_permits WHERE attempt_id=?').get(attempt_id))
         return { send: false, reason: 'send_already_authorized_reconcile_outcome' };
       if (operation_not_started !== true) return { send: false, reason: 'unstarted_operation_evidence_required' };
+      if(bindings.delivery.owner_managed){const reasons=ownerActionReasons(this,row.kind,row.task_id,JSON.parse(row.payload),evidence,row.owner);if(reasons.length)return {send:false,reasons};}
       const reactiveReasons = this.reactive.actionReasons(row.kind,row.task_id,JSON.parse(row.payload));
       if (reactiveReasons.length) return { send:false, reasons:reactiveReasons };
       const scopeReasons=scopeActionReasons(this.taskRegistry(),row.kind,row.task_id,JSON.parse(row.payload),evidence);
@@ -832,7 +843,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       lifecycle_status: () => control.lifecycle.status(),
       lifecycle_resolve: () => {
         let progress_resolution;
-        if (input.disposition === 'progress') {
+        if (input.disposition === 'progress' && input.native_decision_id) {
+          progress_resolution=nativeLifecycleProgress(control,input);
+        } else if (input.disposition === 'progress') {
           mailbox ??= new Mailbox(resolve(base,'mailbox.sqlite'));
           if (input.progress_event_key !== `${input.key}:${input.generation}`) throw new Error('Progress must consume this exact lifecycle event');
           const event = mailbox.db.prepare('SELECT * FROM progress_events WHERE event_key=?').get(input.progress_event_key ?? '');
