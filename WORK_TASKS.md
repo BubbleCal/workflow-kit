@@ -11,6 +11,11 @@ such as “会议准备”. Do not prefix these conversation titles with a task 
 Keep stable task IDs in the internal catalog, contracts and evidence. Preserve
 the user's manual title changes; do not restore an earlier generated title.
 
+Pin every ongoing recurring-service conversation after creation and verify its
+sidebar membership. Keep it active between occurrences; completing one run does
+not authorize archiving the standing service. Retain one stable owner rather than
+rebinding it to each day's temporary automation source/result conversation.
+
 # Ordinary tasks and built-in exploration
 
 native 布局的统一目录在 control.sqlite 的 work_items 中。work、project、exploration 共用同一任务 ID、唯一 canonical key、接收授权、独立 owner、执行合同、计划、队列和验收。探索没有单独执行器。

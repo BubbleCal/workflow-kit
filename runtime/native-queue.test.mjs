@@ -29,6 +29,14 @@ test('an exit-zero response without the exact matching queue receipt remains unc
     const q=new NativeQueue({run:async()=>({stdout})});await assert.rejects(()=>q.enqueue(OWNER,'message'),e=>e.uncertain===true);
   }
 });
+test('only an exact archived-target provider rejection proves non-delivery',async()=>{
+ const stderr=`Error: failed to queue session message: thread/queue/add failed: session ${OWNER} is archived. Run codex unarchive first. (code -32600)`;
+ const run=async()=>{throw Object.assign(new Error('command failed'),{code:1,stderr,stdout:''});};
+ await assert.rejects(()=>new NativeQueue({run}).enqueue(OWNER,'work'),e=>e.not_sent===true&&e.target_archived===true&&!e.uncertain);
+ for(const patch of [{code:'ETIMEDOUT'},{signal:'SIGTERM'},{stderr:stderr.replace(OWNER,QUEUE_ID)},{stdout:`Queued message ${QUEUE_ID} for thread ${OWNER}.`}]){
+  await assert.rejects(()=>new NativeQueue({run:async()=>{throw Object.assign(new Error('ambiguous'),{code:1,stderr,stdout:''},patch);}}).enqueue(OWNER,'work'),e=>e.uncertain===true&&!e.not_sent);
+ }
+});
 test('capability approval requires actual idle and busy native consumption rather than a CLI ACK',()=>{
   const evidence=compatibilityFixture(),probe={cli_version:'codex-cli fixture',host_fingerprint:'fixture-host'};
   assert.equal(validateQueueCompatibility(evidence,probe).verified,true);
@@ -49,4 +57,12 @@ test('receiver proof binds the exact executing native message, thread, cwd and f
     assert.throws(()=>verifyExecutionProof(proof,{...expected,...patch}));
   const ended=nativeProof({message,status:'completed'});assert.throws(()=>verifyExecutionProof(ended,expected),/current executing/);
   assert.equal(verifyExecutionProof(ended,{...expected,terminal:true}).status,'completed');
+});
+
+
+test('human-only targets are refused before submission while other owners retain native delivery',async()=>{
+  const calls=[];const q=new NativeQueue({blocked_thread_ids:[OWNER],run:async(binary,args)=>{calls.push(args);return {stdout:`Queued message ${OWNER} for thread ${QUEUE_ID}.\n`};}});
+  for(const id of [OWNER,OWNER.toUpperCase()])await assert.rejects(()=>q.enqueue(id,'Automatic notification'),error=>error.not_sent===true&&/human-only/.test(error.message));
+  assert.equal(calls.length,0);
+  assert.equal((await q.enqueue(QUEUE_ID,'Owner event')).queued,true);assert.equal(calls.length,1);
 });

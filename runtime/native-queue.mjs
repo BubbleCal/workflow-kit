@@ -11,8 +11,10 @@ export const queueHostFingerprint=()=>messageDigest(JSON.stringify([hostname(),h
 // This adapter submits to Codex's native queue. It never loads a thread, starts
 // a turn, selects an app-server endpoint, changes permissions or handles approval.
 export class NativeQueue {
-  constructor({binary='codex',timeout_ms=15000,run=execute,now=()=>Date.now()}={}) {
+  constructor({binary='codex',timeout_ms=15000,blocked_thread_ids=[],run=execute,now=()=>Date.now()}={}) {
     if(typeof binary!=='string'||!binary.trim())throw new Error('Native Codex executable is required');
+    if(!Array.isArray(blocked_thread_ids)||blocked_thread_ids.some(id=>!uuid.test(id)))throw new Error('Blocked queue targets must be native thread UUIDs');
+    this.blockedThreads=new Set(blocked_thread_ids.map(id=>id.toLowerCase()));
     this.binary=binary;this.timeout=timeout_ms;this.run=run;this.now=now;
   }
   async probe() {
@@ -27,6 +29,7 @@ export class NativeQueue {
   }
   validate(threadId,message) {
     if(!uuid.test(threadId??''))throw new Error('Use a verified exact native thread UUID, never a title');
+    if(this.blockedThreads.has(threadId.toLowerCase()))throw new Error('Automatic queue delivery to this human-only conversation is disabled');
     if(typeof message!=='string'||!message.trim()||message.includes('\0')||Buffer.byteLength(message)>65536)
       throw new Error('A bounded UTF-8 native queue message is required');
   }
@@ -37,7 +40,14 @@ export class NativeQueue {
       // Fixed argv is intentional: no --resume, --remote, profile, cwd, model,
       // permission override, shell, app-server proxy, or alternate fallback.
       result=await this.run(this.binary,['queue','--thread',threadId,'--message',message],{timeout:this.timeout,maxBuffer:1024*1024});
-    }catch(error){error.uncertain=true;throw error;}
+    }catch(error){
+      const rejection=`Error: failed to queue session message: thread/queue/add failed: session ${threadId} is archived.`;
+      const knownRejection=Number.isInteger(error.code)&&error.code!==0&&!error.killed&&!error.signal&&
+        String(error.stderr??'').trim().startsWith(rejection)&&String(error.stderr).trim().endsWith('(code -32600)')&&
+        !/Queued message /.test(String(error.stdout??''));
+      if(knownRejection){error.not_sent=true;error.target_archived=true;}else error.uncertain=true;
+      throw error;
+    }
     const lines=result.stdout.split('\n').map(line=>line.trim()).filter(Boolean);
     const receipts=lines.map(line=>line.match(/^Queued message ([0-9a-f-]{36}) for thread ([0-9a-f-]{36})\.$/i)).filter(Boolean);
     if(receipts.length!==1||!uuid.test(receipts[0][1])||receipts[0][2]!==threadId) {

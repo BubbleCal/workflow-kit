@@ -1,3 +1,4 @@
+import {verifyNativeBinding,nativeReadback} from './native-queue.mjs';
 import {nativeLifecycleProgress,ownerActionReasons} from './owner-delivery.mjs';
 import { bindings, INSTANCE_ROOT, requireBindings, instancePolicyReasons } from './instance.mjs';
 import { ReactiveState } from './reactive-state.mjs';
@@ -655,7 +656,7 @@ export class ControlStore {
           !/^[0-9a-f-]{36}$/i.test(receipt.queue_id??'')))throw new Error('Native queue acceptance needs its exact receipt; it is not execution');
         this.db.prepare(`UPDATE rt_wakes SET state=CASE WHEN state='claimed' THEN ? ELSE state END,queue_id=COALESCE(?,queue_id),evidence_ref=?
           WHERE id=?`).run(outcome==='not_sent'?'reserved':outcome==='sent'?'queued':state,receipt?.queue_id??null,evidence_ref,wakeId);
-        if (outcome==='not_sent' && !retryable) this.db.prepare("UPDATE rt_wakes SET state='not_sent',completed_at=? WHERE id=? AND state='reserved'").run(this.now(),wakeId);
+        if (outcome==='not_sent' && !retryable && !evidence_ref.includes(`session ${JSON.parse(row.payload).thread_id} is archived.`)) this.db.prepare("UPDATE rt_wakes SET state='not_sent',completed_at=? WHERE id=? AND state='reserved'").run(this.now(),wakeId);
       }
       if (row.kind === 'create_thread' && state === 'sent') {
         const identity = creationIdentity(native_result);
@@ -712,19 +713,31 @@ export class ControlStore {
           native_move: { threadId: setup.thread_id, hostId: setup.host_id, source: 'codex', projectId: project } }) };
     });
   }
-  reconcile({ key, confirmed_outcome, evidence_ref, owner_quiescent, verified_at }) {
+  reconcile({ key, confirmed_outcome, evidence_ref, owner_quiescent, verified_at, recover_queue=false, native_binding }) {
     required(evidence_ref, 'reconciliation evidence_ref');
     if (!['sent', 'not_sent'].includes(confirmed_outcome)) throw new Error('Reconciliation needs a verified sent/not_sent outcome');
     if (owner_quiescent !== true || !freshness({ verified_at }, this.now())) throw new Error('Fresh quiescent-owner evidence required before reconciliation');
     return this.atomic(() => {
       const row = this.db.prepare('SELECT * FROM actions WHERE action_key=?').get(key);
-      if (!row || !['claimed', 'uncertain'].includes(row.state)) throw new Error(`Action does not require reconciliation: ${key}`);
+      if (!row || !['claimed','uncertain',...(recover_queue?['prepared','failed']:[])].includes(row.state)) throw new Error(`Action does not require reconciliation: ${key}`);
+      let rejectedWake;
+      if(recover_queue){
+        const p=JSON.parse(row.payload),task=this.reactive.task(row.task_id);
+        rejectedWake=this.reactive.openWake(row.task_id);
+        if(row.kind!=='task_queue'||confirmed_outcome!=='not_sent'||!task||p.thread_id!==task.owner_id||
+          rejectedWake?.id!==p.wake_id||!['uncertain','reserved'].includes(rejectedWake.state)||rejectedWake.queue_id||rejectedWake.turn_id||rejectedWake.started_at||
+          !rejectedWake.evidence_ref?.includes(`session ${task.owner_id} is archived.`))throw new Error('Exact rejected archived-target wake without acceptance is required');
+        verifyNativeBinding(native_binding,{thread_id:task.owner_id,workspace:task.contract.workspace,now:this.now()});
+        const read=nativeReadback(native_binding.readback);
+        if(!['idle','notLoaded'].includes(read.thread.status?.type)||read.turns?.[0]?.status!=='completed')throw new Error('Restored owner must be quiescent');
+      }
       // Imported uncertain actions require a newly prepared action after explicit
       // reconciliation, because their original executable payload was not imported.
       const state = confirmed_outcome === 'sent' ? 'sent' : row.imported ? 'cancelled' : 'prepared';
       this.db.prepare('UPDATE actions SET state=?,attempt_id=NULL,owner=NULL,due=?,receipt=?,updated_at=? WHERE action_key=?')
         .run(state, this.now(), canonical({ reconciled: true, confirmed_outcome, evidence_ref }), this.now(), key);
       if (row.kind === 'create_thread' && state === 'sent') this.db.prepare("UPDATE thread_setups SET state='identity_pending',evidence_ref=?,updated_at=? WHERE creation_key=? AND state='awaiting_creation'").run(evidence_ref, this.now(), key);
+      if(rejectedWake)this.db.prepare("UPDATE rt_wakes SET state='reserved',completed_at=NULL,evidence_ref=? WHERE id=?").run(evidence_ref,rejectedWake.id);
       return { key, state, ...(row.kind === 'create_thread' && state === 'sent' ? { setup_complete: false, next: 'record_creation then confirm_creation' } : {}) };
     });
   }
