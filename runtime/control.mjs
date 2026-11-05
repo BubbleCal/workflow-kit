@@ -23,6 +23,7 @@ import { readDecisionState, taskDisplayText, taskId, resolveReply } from './task
 import { reviewStageReasons } from './pr-review-gates.mjs';
 import { readTaskRegistry, ownershipReasons, scopedHandoffReasons, pausedMigrationSetup } from './task-ownership.mjs';
 import { isReviewDelivery, readReviewWindow, reviewWindowAt, withReviewWindowGuidance, REVIEW_WINDOW } from './review-window.mjs';
+import {readReviewChannels,reviewDestinationReasons} from './pr-review-routing.mjs';
 
 export const INBOX = bindings.threads.inbox;
 export const PAGE = bindings.delivery.notion_page_id;
@@ -98,7 +99,7 @@ export function resolvePlacement({ projects, project_id, project_label, host_id,
 
 // These checks validate supplied evidence. The coordinator must obtain that
 // evidence from the owning tools; this is not a replacement for tool permissions.
-export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPACITY_LIMITS, reviewRule = REVIEW_WINDOW, outcomeBindings = kind === 'notion_sync' && payload?.page_id !== PAGE ? readOutcomeBindings() : null, dependencyPolicy = ['pr_ready','slack_pr','merge'].includes(kind) ? readDependencyPolicy() : null) {
+export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPACITY_LIMITS, reviewRule = REVIEW_WINDOW, outcomeBindings = kind === 'notion_sync' && payload?.page_id !== PAGE ? readOutcomeBindings() : null, dependencyPolicy = ['pr_ready','slack_pr','merge'].includes(kind) ? readDependencyPolicy() : null, reviewChannels = kind === 'slack_pr' ? readReviewChannels() : null) {
   const reasons = instancePolicyReasons(kind, payload, e);
   reasons.push(...dependencyReasons(kind,payload,e,dependencyPolicy,now));
   const need = (condition, reason) => { if (!condition) reasons.push(reason); };
@@ -262,7 +263,7 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
   if (kind === 'pr_ready') need(payload?.operation === 'mark_ready' && prUrl(payload.pr_url) && payload.pr_url === e.pr_url, 'verified_draft_transition_required');
   if (isReviewDelivery(kind)) reasons.push(...reviewStageReasons(kind, payload, e, now));
   if (kind === 'slack_pr') {
-    need(payload?.channel_id === CHANNEL, 'slack_destination_forbidden');
+    reasons.push(...reviewDestinationReasons(payload,e,reviewChannels));
     need(prUrl(payload?.message) && payload.message === e.pr_url, 'slack_message_must_match_verified_PR_URL');
     need(e.already_announced === false, 'already_announced_or_unknown');
   }
@@ -331,7 +332,7 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
 }
 
 export class ControlStore {
-  constructor(path, { now = () => Date.now(), capacity = CAPACITY_LIMITS, progress = null, reviewRule = readReviewWindow, outcomeBindings = readOutcomeBindings, modelSelection = readModelSelection, dependencyPolicy = readDependencyPolicy, taskRegistry = () => readTaskRegistry(path) } = {}) {
+  constructor(path, { now = () => Date.now(), capacity = CAPACITY_LIMITS, progress = null, reviewRule = readReviewWindow, outcomeBindings = readOutcomeBindings, modelSelection = readModelSelection, dependencyPolicy = readDependencyPolicy, reviewChannels = readReviewChannels, taskRegistry = () => readTaskRegistry(path) } = {}) {
     this.now = now;
     this.capacity = capacity;
     this.progress = progress;
@@ -339,6 +340,7 @@ export class ControlStore {
     this.outcomeBindings = outcomeBindings;
     this.modelSelection = modelSelection;
     this.dependencyPolicy = dependencyPolicy;
+    this.reviewChannels = reviewChannels;
     this.taskRegistry = taskRegistry;
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
@@ -466,7 +468,7 @@ export class ControlStore {
       const rule = isReviewDelivery(kind) ? this.reviewRule() : REVIEW_WINDOW;
       const reactiveReasons = this.reactive.actionReasons(kind, task, input.payload);
       if (reactiveReasons.length) return { prepared:false, allowed:false, reasons:reactiveReasons };
-      const result = assess(kind, input.payload, input.evidence, this.now(), this.capacity, rule, kind === 'notion_sync' && input.payload?.page_id !== PAGE ? this.outcomeBindings() : null, ['pr_ready','slack_pr','merge'].includes(kind)?this.dependencyPolicy():null);
+      const result = assess(kind, input.payload, input.evidence, this.now(), this.capacity, rule, kind === 'notion_sync' && input.payload?.page_id !== PAGE ? this.outcomeBindings() : null, ['pr_ready','slack_pr','merge'].includes(kind)?this.dependencyPolicy():null,kind==='slack_pr'?this.reviewChannels():null);
       const deferred = result.reasons.length === 1 && result.reasons[0] === 'review_delivery_blackout';
       if (!result.allowed && !deferred) return { prepared: false, key, ...result };
       const feedback = this.feedbackGate(kind,input.payload);
@@ -565,7 +567,7 @@ export class ControlStore {
         checkedEvidence = { ...checkedEvidence, dispatches_this_run: Number.isSafeInteger(evidence?.dispatches_this_run) && evidence.dispatches_this_run >= 0
           ? Math.max(evidence.dispatches_this_run, claimedInRun) : evidence?.dispatches_this_run };
       }
-      const result = assess(row.kind, payload, checkedEvidence, this.now(), this.capacity, isReviewDelivery(row.kind) ? this.reviewRule() : REVIEW_WINDOW, row.kind === 'notion_sync' && payload.page_id !== PAGE ? this.outcomeBindings() : null, ['pr_ready','slack_pr','merge'].includes(row.kind)?this.dependencyPolicy():null);
+      const result = assess(row.kind, payload, checkedEvidence, this.now(), this.capacity, isReviewDelivery(row.kind) ? this.reviewRule() : REVIEW_WINDOW, row.kind === 'notion_sync' && payload.page_id !== PAGE ? this.outcomeBindings() : null, ['pr_ready','slack_pr','merge'].includes(row.kind)?this.dependencyPolicy():null,row.kind==='slack_pr'?this.reviewChannels():null);
       if (!result.allowed) return { claimed: false, ...result };
       const feedback = this.feedbackGate(row.kind,payload);
       if (!feedback.allowed) return {claimed:false,...feedback};
@@ -592,7 +594,7 @@ export class ControlStore {
       const rule = this.reviewRule(), window = reviewWindowAt(this.now(),rule);
       if (window.blocked) return { send: false, ...this.deferReview(key,rule) };
       if (this.db.prepare("SELECT value FROM settings WHERE key='processing'").get().value !== 'on') return { send: false, reason: 'processing_paused' };
-      const result = assess(row.kind,JSON.parse(row.payload),evidence,this.now(),this.capacity,rule,null,this.dependencyPolicy());
+      const result = assess(row.kind,JSON.parse(row.payload),evidence,this.now(),this.capacity,rule,null,this.dependencyPolicy(),row.kind==='slack_pr'?this.reviewChannels():null);
       if (!result.allowed) return { send: false, ...result };
       const feedback = this.feedbackGate(row.kind,JSON.parse(row.payload));
       if (!feedback.allowed) return {send:false,...feedback};
@@ -780,6 +782,7 @@ export function routeControlPreparation(input, control, mailbox, now = Date.now(
       ...(decisionRoute ? { decision_route: decisionRoute } : {}),
       ...(input.payload.legacy_decision_alias ? { legacy_decision_alias: input.payload.legacy_decision_alias } : {}),
     } });
+  if(queued.state==='suppressed')return {...preparation,...queued};
   control.db.prepare("UPDATE actions SET state='queued',receipt=?,updated_at=? WHERE action_key=? AND state IN ('prepared','queued')")
     .run(JSON.stringify({ mailbox_key: input.key, sequence: queued.seq }), now, input.key);
   const immediate=queued.immediate_trigger ?? (triggerProof?mailbox.atomic(()=>mailbox.immediate.admit(mailbox.db.prepare('SELECT * FROM mail WHERE item_key=?').get(input.key),triggerProof)):null);

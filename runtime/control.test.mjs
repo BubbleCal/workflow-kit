@@ -721,3 +721,32 @@ test('paused processing admits only explicitly authorized migration scope releas
   const regular=action('still-paused');assert.equal(s.prepare(regular).prepared,true);assert.equal(s.claim({key:regular.key,owner:'migration',evidence:regular.evidence}).reason,'processing_paused');
   s.close();
 });
+
+
+test('scoped destination is rechecked at prepare, claim and final send without weakening CI or dedup',()=>{
+  let routing={schema_version:1,source_message_id:'human-routing',default_channel_id:CHANNEL,
+    routes:[{scope:'lancedb_functions',channel_id:'CFUNCTIONS'}]};
+  const c=new ControlStore(':memory:',{now:()=>NOW,reviewChannels:()=>routing});
+  const e={...prEvidence(),already_announced:false,review_routing:{scope:'lancedb_functions',verified:true,
+    pr_url:prEvidence().pr_url,head_sha:head,evidence_ref:'current-feature-scope'}};
+  const a={key:'functions-route',kind:'slack_pr',task_id:'T-001',
+    payload:{channel_id:'CFUNCTIONS',message:e.pr_url,expected_head_sha:head},evidence:e};
+  c.feedback.ingest({repository:'example/service',pr_number:1,head_sha:head,head_before:head,head_after:head,
+    checked_at:common().verified_at,evidence_ref:'full-feedback',
+    complete:{reviews:true,review_comments:true,issue_comments:true,review_threads:true},
+    reviews:[],review_comments:[],issue_comments:[],review_threads:[]});
+  assert.ok(c.prepare({...a,key:'old-destination',payload:{...a.payload,channel_id:CHANNEL}}).reasons.includes('slack_destination_forbidden'));
+  const pending=structuredClone(e);pending.applicable_ci.checks[0].status='in_progress';pending.applicable_ci.checks[0].conclusion=null;
+  assert.equal(c.prepare({...a,key:'pending-ci',evidence:pending}).prepared,false);
+  assert.equal(c.prepare({...a,key:'already-announced',evidence:{...e,already_announced:true}}).prepared,false);
+  assert.equal(c.prepare(a).prepared,true);
+  routing={...routing,routes:[{scope:'lancedb_functions',channel_id:'CNEW'}]};
+  assert.ok(c.claim({key:a.key,owner:'coordinator',evidence:e}).reasons.includes('slack_destination_forbidden'));
+  routing={...routing,routes:[{scope:'lancedb_functions',channel_id:'CFUNCTIONS'}]};
+  const claim=c.claim({key:a.key,owner:'coordinator',evidence:e});assert.equal(claim.claimed,true);
+  const authorize=()=>c.authorizeReviewSend({key:a.key,attempt_id:claim.attempt_id,owner:'coordinator',evidence:e,operation_not_started:true});
+  routing={...routing,routes:[{scope:'lancedb_functions',channel_id:'CNEW'}]};
+  assert.ok(authorize().reasons.includes('slack_destination_forbidden'));
+  routing={...routing,routes:[{scope:'lancedb_functions',channel_id:'CFUNCTIONS'}]};
+  assert.equal(authorize().send,true);c.close();
+});

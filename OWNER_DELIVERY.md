@@ -1,5 +1,9 @@
 # Complete delivery by the original task owner
 
+Before Slack PR delivery, read REVIEW_ROUTING.md and the instance's configured
+route policy. If scoped routing is configured, include current-PR
+`evidence.review_routing` at prepare, claim and final send authorization.
+
 In native owner-delivery mode there is no coordinator or delivery-service chat.
 The original owner implements and delivers its own accepted task. The main chat
 handles user discussion, decisions and important completions; discovery reads

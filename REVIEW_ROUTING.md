@@ -1,0 +1,31 @@
+# PR review channel routing
+
+An instance may set `delivery.slack_routing_file` to a JSON policy file relative
+to its root. The policy has `schema_version:1`, the actual authorizing
+`source_message_id`, `default_channel_id` matching the instance default, and
+`routes:[{scope,channel_id}]`. Scope `default` is reserved for ordinary PRs.
+Without this optional setting, the instance retains its single configured channel.
+A configured missing or invalid file never silently restores single-channel routing.
+
+Before `slack_pr` prepare, claim and `authorize_review_send`, the original owner
+classifies the actual current PR feature scope and supplies:
+
+```json
+{
+  "review_routing": {
+    "scope": "lancedb_functions",
+    "verified": true,
+    "pr_url": "https://github.com/owner/repo/pull/123",
+    "head_sha": "<actual current head>",
+    "evidence_ref": "<saved scope assessment from the current PR/task>"
+  }
+}
+```
+
+This object is inside `evidence`, alongside the existing CI, feedback and
+technical-review evidence. Use `scope:"default"` for unrelated work. Repository
+name or the generic source-code word "function" does not establish feature scope.
+The payload's `channel_id` must match the selected route. All three gates reread
+the policy, including for previously prepared actions. Existing readiness,
+canonical-URL-only, head, blackout, feedback and already-announced checks remain.
+Do not resend an already delivered URL merely because its route changed.
