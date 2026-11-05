@@ -11,11 +11,14 @@ export function routeOwnerInputs({root,control,mailbox,now=Date.now}) {
     else state.diagnostic(key,payload);
   };
   db.exec(`CREATE TABLE IF NOT EXISTS owner_input_routes (item_key TEXT PRIMARY KEY,targets TEXT NOT NULL,routed_at INTEGER NOT NULL)`);
-  for(const row of mailbox.db.prepare("SELECT * FROM mail WHERE lane='coordinator' AND state='pending' ORDER BY seq").all()) {
+  for(const row of mailbox.db.prepare("SELECT * FROM mail WHERE lane='coordinator' AND (state='pending' OR state='reactive' AND json_extract(payload,'$.event')='pr_lifecycle_action') ORDER BY seq").all()) {
     const p=JSON.parse(row.payload),targets=[];
     const prior=db.prepare('SELECT targets FROM owner_input_routes WHERE item_key=?').get(row.item_key);
-    if(prior){mailbox.db.prepare("UPDATE mail SET state='owner_routed' WHERE item_key=? AND state='pending'").run(row.item_key);continue;}
-    if(p.event==='native_queue_consumption_check') {
+    if(prior){mailbox.db.prepare("UPDATE mail SET state='owner_routed' WHERE item_key=? AND state IN ('pending','reactive')").run(row.item_key);continue;}
+    const lifecycle=p.event==='pr_lifecycle_action' && db.prepare('SELECT state,payload FROM lifecycle_intents WHERE intent_key=?').get(p.lifecycle_key??'');
+    if(p.event==='pr_lifecycle_action' && (!lifecycle || ['resolved','superseded'].includes(lifecycle.state) || JSON.parse(lifecycle.payload).lifecycle_generation!==p.lifecycle_generation)) {
+      targets.push('historical_lifecycle_generation');
+    } else if(p.event==='native_queue_consumption_check') {
       const wake=db.prepare('SELECT state FROM rt_wakes WHERE id=?').get(p.wake_id??'');
       if(wake && ['queued','uncertain'].includes(wake.state)) {
         deferHealth(`owner-recovery:${row.item_key}`,{...p,source_event_key:row.item_key,user_notification_required:false});
@@ -50,7 +53,7 @@ export function routeOwnerInputs({root,control,mailbox,now=Date.now}) {
       }
     }
     db.prepare('INSERT INTO owner_input_routes VALUES (?,?,?)').run(row.item_key,JSON.stringify(targets),now());
-    mailbox.db.prepare("UPDATE mail SET state='owner_routed' WHERE item_key=? AND state='pending'").run(row.item_key);
+    mailbox.db.prepare("UPDATE mail SET state='owner_routed' WHERE item_key=? AND state IN ('pending','reactive')").run(row.item_key);
   }
 }
 

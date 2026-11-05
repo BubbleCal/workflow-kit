@@ -1,7 +1,7 @@
 {
   "version": "0.8.0",
   "source": "workflow-kit repository source",
-  "upstream_base_commit": "8e96e35eac2c88b1b0c5d4029253413922c19e8f",
+  "upstream_base_commit": "77bf1f796a3415bfdfbfdc8cd06475486ae5f354",
   "source_files": {
     "package.json": "2d33d0ade1cea10dc981185383212993d78f0507b22e5b7f0dd64de81dfc218a",
     "runtime/ci-state.mjs": "8f00790daaa150c53f93c36ea0cabbcebd9bc2c0e571c478328a68db7444de58",
@@ -42,8 +42,8 @@
     "runtime/native-services.test.mjs": "74b6e04a3785f54e506da67e9aa32087693ccadb35246dcf722da7d918bb8f25",
     "runtime/outcomes.mjs": "78e553fbb78a1433b6b4c7b3a739062602b74334e0c8b4ea0a104d77d7e017c2",
     "runtime/outcomes.test.mjs": "051adf90a27d3fa308db92a2e2894ad6766ba00dfeb310e55be60b38c34d8028",
-    "runtime/owner-delivery.mjs": "c364421629e245c8c38f83e1f76131de410d84da3df95444daccc12d3b98d9ca",
-    "runtime/owner-delivery.test.mjs": "8442fb740b057e6ec9fb1cb4d9be677306190a65f1c1e2ed9a301635cc77f9e3",
+    "runtime/owner-delivery.mjs": "9b474d500c19c8bfbb01a33482058504fa833e3e2a9eb4b153eab4858a542a56",
+    "runtime/owner-delivery.test.mjs": "bb9b9d0dacc19226f047129a5e2d680e874eb56a9ea25e4eff18566a6a69bd8d",
     "runtime/owner-transfer.mjs": "13e1ad77fb23961e2d70ca2f8f82b6ca374eb9cd19d8605b5b12601a7fd789c8",
     "runtime/owner-transfer.test.mjs": "56ca65c8d8edf9d3041e4ce2250ee70b313607c81eb33f1751eed9f1b536e64a",
     "runtime/pr-review-gates.mjs": "939b905f0c3ab3c8e411ef8728e6370412ba74d69a79deee82d891f1a62972b7",

@@ -26,7 +26,7 @@ test('a different delivery actor cannot publish on behalf of the original owner'
 });
 test('native lifecycle progress binds the actual handled source generation',()=>{
  const f=setup();try{const key='lifecycle:repo#1:ci',source=key+':1';f.c.db.prepare("INSERT INTO lifecycle_intents(intent_key,pr_key,action,revision,payload,state,due_at,created_at) VALUES (?,?,?,?,?,?,?,?)").run(key,'repo#1','triage_ci','r',JSON.stringify({task_id:'T-1',lifecycle_generation:1}),'pending',f.now(),f.now());
- f.m.enqueue({key:source,lane:'coordinator',kind:'event',payload:{task_id:'T-1',event:'pr_lifecycle_action'}});f.route();
+ f.m.enqueue({key:source,lane:'coordinator',kind:'event',payload:{task_id:'T-1',event:'pr_lifecycle_action',lifecycle_key:key,lifecycle_generation:1}});f.route();
  const d=f.decide({disposition:'revise',plan:plan('fix')});
  assert.equal(nativeLifecycleProgress(f.c,{key,generation:1,native_decision_id:d.decision_id,owner_thread_id:OWNER,evidence_ref:'triage'}).task_complete,false);
  assert.throws(()=>nativeLifecycleProgress(f.c,{key,generation:2,native_decision_id:d.decision_id,owner_thread_id:OWNER,evidence_ref:'triage'}),/exact lifecycle/);
