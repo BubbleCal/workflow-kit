@@ -108,3 +108,93 @@ test('migration preserves assigned-user intake and scoped native chat discovery 
   assert.throws(()=>configure(d,{project_id:'other',host_id:'local'},'codex'),/exact local project/);
  }finally{f.c.close();}
 });
+
+test('saved professional Slack evidence survives legacy field names without weakening scope',()=>{
+ const f=workFixture();try{const d=f.c.discovery;
+  configure(d,{with_user_id:'U123',professional_only:true},'slack');const b=scan(f);
+  const saved={entity_key:'slack:C123:1793723567.440139',item_key:'C123:1793882898.958309',version:'v1',scope_key:'U123',
+    with_user_id:'U123',professional:true,summary:'A colleague asks whether the accepted feature is deployed.',url:'https://slack.com/archives/C123/p1793882898958309'};
+  const ingest=o=>d.ingest({batch_id:b.id,generation:b.generation,source_id:'slack',page_key:'final',observations:[o],complete:true,evidence_ref:'saved-full-thread'});
+  assert.throws(()=>ingest({...saved,with_user_id:'U456'}),/scope|configured user/);
+  assert.throws(()=>ingest({...saved,professional:false}),/scope|professional_relevance/);
+  assert.throws(()=>ingest({...saved,relevant_user_id:'U456'}),/scope|Conflicting/);
+  assert.equal(ingest(saved).recorded,true);
+  const o=d.status().observations[0];assert.equal(o.data.relevant_user_id,'U123');assert.equal(o.data.professional_relevance,true);
+  assert.equal(d.sources().find(s=>s.source_id==='slack').last_success_at,null);
+ }finally{f.c.close();}
+});
+
+test('a watched reply without a new mention reaches the original owner while historical search is checkpointed',()=>{
+ const f=workFixture();try{const d=f.c.discovery,t=f.work.create(candidate).task;f.accept(t.id);f.bind(t.id);f.begin(t.id);
+  configure(d,{with_user_id:'U123',professional_only:true},'slack');const historical=scan(f);
+  d.ingest({batch_id:historical.id,generation:1,source_id:'slack',page_key:'history1',observations:[],complete:false,next_cursor:'history2',evidence_ref:'historical-page'});
+  d.finish({batch_id:historical.id,generation:1,source_results:[{source_id:'slack',complete:false,reason:'Historical pagination incomplete'}]});
+  const request={task_id:t.id,channel_id:'C123',thread_ts:'1793723567.440139',relevant_user_id:'U123',professional_relevance:true,identity_verified:true,evidence_ref:'user-participation-and-task-proof'};
+  const watch=d.watchThread(request),revision=d.sources().find(s=>s.source_id===watch.source_id).revision;
+  assert.equal(d.watchThread(request).source_id,watch.source_id);assert.equal(d.sources().find(s=>s.source_id===watch.source_id).revision,revision);
+  const next=scan(f);assert.deepEqual(next.snapshot.sources.map(s=>s.source_id),[watch.source_id]);
+  const plan=next.snapshot.sources[0].plan;
+  assert.equal(plan.requests[0].tool,'slack_read_thread');assert.equal(plan.requests[0].arguments.message_ts,request.thread_ts);
+  const o={entity_key:watch.entity_key,item_key:'1793882898.958309',version:'content-v1',scope_key:'U123',channel_id:'C123',thread_ts:request.thread_ts,
+    relevant_user_id:'U123',professional_relevance:true,summary:'is it in today’s deployment',url:'https://slack.com/archives/C123/p1793882898958309'};
+  const input={batch_id:next.id,generation:next.generation,source_id:watch.source_id,page_key:'thread1',observations:[o],complete:true,evidence_ref:'actual-full-thread'};
+  assert.throws(()=>d.ingest({...input,observations:[{...o,thread_ts:'999.1'}]}),/outside the watched/);
+  d.ingest(input);const obs=d.status().observations[0],before=f.c.reactive.task(t.id).context_rev;
+  assert.equal(d.classify({observation_id:obs.observation_id,disposition:'existing',reason:'Existing feature deployment question',evidence_ref:'actual-task-and-thread'}).task_id,t.id);
+  assert.equal(f.c.reactive.task(t.id).context_rev,before+1);assert.equal(f.work.list().length,1);
+  assert.equal(d.classify({observation_id:obs.observation_id,disposition:'existing',reason:'Repeated observation',evidence_ref:'actual-task-and-thread'}).classified,false);
+  assert.equal(d.finish({batch_id:next.id,generation:next.generation,source_results:[{source_id:watch.source_id,complete:true,followups_complete:true}]}).finished,true);
+  assert.equal(d.sources().find(s=>s.source_id==='slack').last_success_at,null);
+  assert.equal(d.batch(historical.id).pages[0].data.next_cursor,'history2');
+ }finally{f.c.close();}
+});
+
+test('thread watches preserve access, original owners and stop with completed work',()=>{
+ const f=workFixture();try{const d=f.c.discovery,t=f.work.create(candidate).task;f.accept(t.id);f.bind(t.id);f.begin(t.id);
+  configure(d,{channel_ids:['C123'],with_user_id:'U123',professional_only:true},'slack');
+  const req={task_id:t.id,channel_id:'C123',thread_ts:'1793723567.440139',relevant_user_id:'U123',professional_relevance:true,identity_verified:true,evidence_ref:'actual-thread'};
+  assert.throws(()=>d.watchThread({...req,channel_id:'C456'}),/outside/);
+  assert.throws(()=>d.watchThread({...req,relevant_user_id:'U456'}),/professional/);
+  assert.throws(()=>d.watchThread({...req,identity_verified:false}),/verified original owner/);
+  const w=d.watchThread(req);
+  f.c.db.prepare("UPDATE rt_tasks SET status='complete' WHERE task_id=?").run(t.id);
+  d.enqueueDue({enqueue:v=>({queued:true,key:v.key})},'/instance');
+  assert.equal(d.sources().find(s=>s.source_id===w.source_id).enabled,0);
+ }finally{f.c.close();}
+});
+
+test('source changes only invalidate affected scans and revoke child thread watches',()=>{
+ const f=workFixture();try{const d=f.c.discovery;configure(d);const linear=scan(f);
+  configure(d,{with_user_id:'U123',professional_only:true},'slack');assert.equal(d.batch(linear.id).state,'running');
+  const t=f.work.create(candidate).task;f.accept(t.id);f.bind(t.id);f.begin(t.id);
+  const w=d.watchThread({task_id:t.id,channel_id:'C123',thread_ts:'1793723567.440139',relevant_user_id:'U123',professional_relevance:true,identity_verified:true,evidence_ref:'actual-thread'});
+  configure(d,{with_user_id:'U456',professional_only:true},'slack');
+  assert.equal(d.sources().find(s=>s.source_id===w.source_id).enabled,0);assert.equal(d.batch(linear.id).state,'running');
+ }finally{f.c.close();}
+});
+
+test('verified migrated source identity binds to the existing task without a duplicate',()=>{
+ const f=workFixture();try{const d=f.c.discovery,t=f.work.create(candidate).task;f.accept(t.id);f.bind(t.id);f.begin(t.id);configure(d);const b=scan(f);page(d,b);
+  const observation_id=d.status().observations[0].observation_id;
+  const req={observation_id,disposition:'existing',task_id:t.id,reason:'Same issue ID in original task evidence',evidence_ref:'actual-issue-task-binding'};
+  assert.throws(()=>d.classify(req),/verified identity/);
+  assert.equal(d.classify({...req,identity_verified:true}).task_id,t.id);
+  assert.equal(f.work.taskForSource(observation.entity_key).id,t.id);assert.equal(f.work.list().length,1);
+ }finally{f.c.close();}
+});
+
+test('a discovery turn that ended without finish resumes its preserved pages only after native proof',()=>{
+ const f=workFixture();try{const d=f.c.discovery;configure(d);const b=scan(f);
+  page(d,b,{observations:[],complete:false,next_cursor:'page2'});
+  const req={batch_id:b.id,generation:b.generation,effects_reconciled:true,evidence_ref:'actual-ended-scan',
+    native_proof:nativeProof({thread:DISCOVERY,message:b.prompt,status:'completed',now:f.now()})};
+  assert.throws(()=>d.recover({...req,native_proof:nativeProof({thread:DISCOVERY,message:b.prompt,now:f.now()})}),/not terminal/);
+  assert.throws(()=>d.recover({...req,effects_reconciled:false}),/Reconcile/);
+  assert.throws(()=>d.recover({...req,native_proof:nativeProof({thread:DISCOVERY,message:'different scan',status:'completed',now:f.now()})}),/exact queued prompt/);
+  assert.equal(d.recover(req).pages_preserved,1);
+  assert.equal(d.sources().find(s=>s.source_id==='linear').last_success_at,null);
+  const resumed=scan(f);assert.equal(resumed.id,b.id);assert.equal(resumed.generation,b.generation+1);
+  assert.equal(resumed.pages[0].data.next_cursor,'page2');
+  assert.throws(()=>d.recover(req),/Stale/);
+ }finally{f.c.close();}
+});

@@ -161,6 +161,15 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
           if(result.invalidated)mailbox.finish(mail.batch_id,{processed_keys:[result.mail_key],note:'source scope changed; no source reads'});
         }else if(input.op==='ingest')result=control.discovery.ingest(input);
         else if(input.op==='classify')result=control.discovery.classify(input);
+        else if(input.op==='watch_thread')result=control.discovery.watchThread(input);
+        else if(input.op==='recover'){
+          result=control.discovery.recover(input);
+          mailbox=new Mailbox(join(root,'mailbox.sqlite'));
+          const mail=mailbox.db.prepare('SELECT batch_id FROM mail WHERE item_key=?').get(result.mail_key);
+          if(!mail?.batch_id)throw new Error('Discovery recovery requires its original native queue receipt');
+          const batch=mailbox.get(mail.batch_id);
+          if(batch.state!=='finished'){mailbox.begin(batch.id);mailbox.finish(batch.id,{processed_keys:[result.mail_key],note:'verified discovery turn ended; preserve pages and resume in a new generation'});}
+        }
         else if(input.op==='finish'){
           const b=control.discovery.batch(input.batch_id);result=control.discovery.finish(input);
           mailbox=new Mailbox(join(root,'mailbox.sqlite'));const mail=mailbox.db.prepare('SELECT batch_id FROM mail WHERE item_key=?').get(b.mail_key);
