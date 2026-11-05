@@ -37,7 +37,7 @@ export function sourceReadPlan(source,window) {
     for(const channel of arr(s.channel_ids).length?s.channel_ids:[null])requests.push({tool:s.access==='private'?'slack_search_public_and_private':'slack_search_public',arguments:{
       filters:[channel?`in:<#${channel}>`:null,s.with_user_id?`with:<@${s.with_user_id}>`:null].filter(Boolean).join(' '),keywords:[],natural_language_query:'',after:String(Date.parse(window.from)/1000),before:String(Date.parse(window.to)/1000),
       content_types:'messages',sort:'timestamp',sort_dir:'asc',limit:20,include_context:true}});
-    return {requests,observation_fields:{required:['entity_key','item_key','version','scope_key','summary','url',...(s.with_user_id?['relevant_user_id','professional_relevance']:[])],relevant_user_id:s.with_user_id,professional_relevance:true},
+    return {requests,observation_fields:{required:['entity_key','item_key','version','scope_key','summary','url','channel_id','thread_ts',...(s.with_user_id?['relevant_user_id','professional_relevance']:[])],relevant_user_id:s.with_user_id,professional_relevance:true},
       followups:'Follow all result cursors and read relevant full threads with slack_read_thread. Preserve root thread identity and reply/edit versions. Use relevant_user_id and professional_relevance for the verified user-directed scope. A field-schema error is repairable from the saved actual evidence; do not repeat the unchanged malformed payload indefinitely. Register watch_thread for an unfinished task with a verified source thread so later replies without @mentions are read independently. Private access must match the recorded explicit user grant.'};
   }
   if(source.kind==='calendar')return {requests:[{tool:'google_calendar_search_events',arguments:{calendar_id:s.calendar_id,time_min:window.to,
@@ -73,7 +73,8 @@ export class DiscoveryStore {
   }
   atomic(fn){this.db.exec('BEGIN IMMEDIATE');try{const r=fn();this.db.exec('COMMIT');return r;}catch(e){this.db.exec('ROLLBACK');throw e;}}
   sources(){return this.db.prepare('SELECT * FROM discovery_sources ORDER BY source_id').all().map(s=>({...s,scope:JSON.parse(s.scope),authority:s.authority?JSON.parse(s.authority):null}));}
-  watchThread({source_id='slack',task_id,channel_id,thread_ts,relevant_user_id,professional_relevance,identity_verified,evidence_ref}){
+  watchThread(input){return this.atomic(()=>this.watchThreadInside(input));}
+  watchThreadInside({source_id='slack',task_id,channel_id,thread_ts,relevant_user_id,professional_relevance,identity_verified,evidence_ref}){
     required(evidence_ref,'verified thread/task evidence');
     const parent=this.sources().find(s=>s.source_id===source_id),task=this.work.get(task_id);
     if(!parent?.enabled||parent.kind!=='slack'||parent.scope.watched_thread)throw new Error('An enabled original Slack source is required');
@@ -84,7 +85,7 @@ export class DiscoveryStore {
     if(!channel_id.startsWith('C')&&(parent.scope.access!=='private'||parent.scope.private_access_authorized!==true))throw new Error('Private thread access is not authorized');
     const id=`slack-thread:${channel_id}:${thread_ts}`,old=this.sources().find(s=>s.source_id===id);
     if(old&&old.scope.parent_source_id!==source_id)throw new Error('Thread watch belongs to another scoped source');
-    return this.atomic(()=>{
+    {
       const task_ids=[...new Set([...arr(old?.scope.task_ids),task_id])];
       const scope={...parent.scope,parent_source_id:source_id,parent_revision:parent.revision,channel_ids:[channel_id],watched_thread:{channel_id,thread_ts},task_ids};
       if(!old||JSON.stringify(old.scope)!==JSON.stringify(scope)||!old.enabled){
@@ -96,7 +97,7 @@ export class DiscoveryStore {
       const entity_key=`${id}:${task_id}`;
       this.work.linkSourceInside(task_id,entity_key,{kind:'slack',channel_id,thread_ts,evidence_ref});
       return {watching:true,source_id:id,task_id,entity_key,interval_ms:600000};
-    });
+    }
   }
   invalidateSourceBatches(sourceIds){
     for(const row of this.db.prepare("SELECT id,snapshot FROM discovery_batches WHERE state IN ('pending','running','checkpointed')").all()){
@@ -281,7 +282,11 @@ export class DiscoveryStore {
         subject:o.entity_key,type:'source_changed',observed_at:o.created_at,payload:data,evidence_ref:data.evidence_ref,debounce_ms:0});
       this.db.prepare('UPDATE discovery_observations SET disposition=?,task_id=?,decision=? WHERE observation_id=?')
         .run(disposition,task?.id??null,JSON.stringify({reason,evidence_ref}),observation_id);
-      return {classified:true,task_id:task?.id??null,execution_authorized:task?.state==='accepted',owner_required:task?.state==='accepted'&&!task.owner_thread_id};
+      const thread_watch=disposition!=='ignore'&&source.kind==='slack'&&!source.scope.watched_thread&&data.channel_id&&data.thread_ts&&
+        task?.state==='accepted'&&task.owner_thread_id&&this.reactive.task(task.id)?.status!=='complete'
+        ?this.watchThreadInside({source_id:source.source_id,task_id:task.id,channel_id:data.channel_id,thread_ts:data.thread_ts,
+          relevant_user_id:data.relevant_user_id,professional_relevance:data.professional_relevance,identity_verified:true,evidence_ref}):null;
+      return {classified:true,task_id:task?.id??null,execution_authorized:task?.state==='accepted',owner_required:task?.state==='accepted'&&!task.owner_thread_id,...(thread_watch?{thread_watch}:{})};
     });
   }
   finish({batch_id,generation,source_results}){
@@ -302,7 +307,7 @@ export class DiscoveryStore {
           const pending=this.db.prepare('SELECT 1 FROM discovery_observations WHERE source_id=? AND disposition IS NULL').get(s.source_id);
           if(pending)throw new Error('Classify source observations before completing the scan');
           this.db.prepare('UPDATE discovery_sources SET last_success_at=?,next_at=?,health=NULL WHERE source_id=?')
-            .run(Date.parse(s.window.to),this.now()+s.interval_ms,s.source_id);
+            .run(Date.parse(s.window.to),Math.min(this.now()+s.interval_ms,Date.parse(s.window.to)+s.interval_ms),s.source_id);
         }else{
           allComplete=false;
           required(result.reason,'source failure/partial reason');

@@ -55,6 +55,16 @@ test('access failure never advances source coverage or changes a saved scan wind
   assert.deepEqual(resumed.snapshot.sources[0].window,b.snapshot.sources[0].window);
  }finally{f.c.close();}
 });
+
+test('finishing an old window immediately catches up without skipping its coverage',()=>{
+ const f=workFixture();try{const d=f.c.discovery;configure(d);const old=scan(f);
+  f.advance(3600000);page(d,old,{observations:[]});finish(d,old);
+  const source=d.sources().find(s=>s.source_id==='linear');assert.equal(source.last_success_at,Date.parse(old.snapshot.sources[0].window.to));
+  assert.ok(source.next_at<=f.now());const fresh=scan(f);assert.notEqual(fresh.id,old.id);
+  assert.equal(Date.parse(fresh.snapshot.sources[0].window.from),source.last_success_at-120000);
+  assert.equal(Date.parse(fresh.snapshot.sources[0].window.to),f.now());
+ }finally{f.c.close();}
+});
 test('scope invalidation retires only with native execution proof and supports the same source version in a new scope revision',()=>{
  const f=workFixture();try{const d=f.c.discovery;configure(d);const b=scan(f);page(d,b);
   configure(d);assert.throws(()=>page(d,b),/scope changed/);assert.throws(()=>finish(d,b),/actual native proof/);
@@ -146,6 +156,18 @@ test('a watched reply without a new mention reaches the original owner while his
   assert.equal(d.finish({batch_id:next.id,generation:next.generation,source_results:[{source_id:watch.source_id,complete:true,followups_complete:true}]}).finished,true);
   assert.equal(d.sources().find(s=>s.source_id==='slack').last_success_at,null);
   assert.equal(d.batch(historical.id).pages[0].data.next_cursor,'history2');
+ }finally{f.c.close();}
+});
+
+test('classifying a real thread for an existing owner automatically retains future reply coverage',()=>{
+ const f=workFixture();try{const d=f.c.discovery,t=f.work.create(candidate).task;f.accept(t.id);f.bind(t.id);f.begin(t.id);
+  configure(d,{with_user_id:'U123',professional_only:true},'slack');const b=scan(f);
+  d.ingest({batch_id:b.id,generation:b.generation,source_id:'slack',page_key:'thread-source',complete:true,evidence_ref:'thread-readback',observations:[{
+    entity_key:'slack:C123:1793723567.440139',item_key:'1793882898.958309',version:'v1',scope_key:'U123',channel_id:'C123',thread_ts:'1793723567.440139',
+    relevant_user_id:'U123',professional_relevance:true,summary:'Deployment follow-up',url:'https://slack.com/archives/C123/p1793882898958309'}]});
+  const result=d.classify({observation_id:d.status().observations[0].observation_id,disposition:'existing',task_id:t.id,identity_verified:true,reason:'Existing task',evidence_ref:'task-thread-identity'});
+  assert.equal(result.thread_watch.watching,true);assert.equal(d.sources().find(s=>s.source_id===result.thread_watch.source_id).interval_ms,600000);
+  assert.equal(d.batch(b.id).state,'running');assert.equal(f.work.list().length,1);
  }finally{f.c.close();}
 });
 

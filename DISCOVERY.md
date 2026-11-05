@@ -32,6 +32,10 @@ Linear、Slack、Notion 各自默认关闭，和 PR 跟踪/外部写入配置独
 
 来源修改会使旧批次失效；旧原生消息不可撤回，接收方凭真实 proof 结束它而不读取来源。跨 control.sqlite/mailbox.sqlite 的完成回执可恢复，重启先关闭已完成扫描的旧邮箱回执，再生成后续页。对于尚无 durable finish 的 running/uncertain 批次，不自动重发或假定结束；通过真实原生状态恢复原批次。
 
+旧窗口完成后，若已经落后一个来源周期，立即采集下一窗口；不再额外等待一个周期。
+真实定时事件与发现消息同回合到达时，登记事件后继续完成或 checkpoint 已消费的发现
+批次。登记定时事件不代表发现扫描完成，不能把原批次留在 pending/running 后直接退出。
+
 若包含 exact prompt 的发现回合已终止却未 finish，主对话/既有维护可用 discovery
 op=recover，传 batch_id、generation、实际最新终态 native_proof、effects_reconciled=true
 及证据。守卫要求 owner 空闲、原消息确实被消费且无未对账效果；保留全部页游标和
@@ -42,6 +46,9 @@ op=recover，传 batch_id、generation、实际最新终态 native_proof、effec
 搜索用于发现新事项，已关联未完成任务的线程还必须持续读取后续回复。原消息带过
 @Yang 后，同线程的部署追问等新回复不要求再次 @Yang；仍需核对实际工作关联，
 不能把无关讨论当成执行授权。
+
+普通 Slack 观察保存准确 channel_id 和根 thread_ts；classify 归到已有未完成 owner
+后会自动登记跟踪。早期未带这些字段的记录，可用以下 watch_thread 补齐，不重做任务。
 
 用 discovery op=watch_thread 登记 source_id（原 Slack 来源）、task_id、channel_id、
 thread_ts（根消息）、relevant_user_id、professional_relevance=true、identity_verified=true
