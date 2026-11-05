@@ -59,3 +59,7 @@ user decisions, requested answers or important completion. Do not send cross-cha
 messages, open URLs to wake owners, or change selected windows/models/permissions.
 
 Repeated generations of the same lifecycle obligation remain separate pending events, but their counter, detection time and snapshot-file location do not invalidate an otherwise unchanged plan. Checkpoint and explicitly decide their disposition as usual. Actual source changes still mark the task dirty; existing human-decision waits are preserved.
+
+## Repeated reminders during a verified wait
+
+An already-handled lifecycle obligation with unchanged semantic facts stays in the durable input queue while the original owner has a clean, unexpired, source-verified wait. It does not trigger another model turn. The existing runtime loop releases it when that wait, its fact versions or the underlying condition changes or expires. New heads, findings and unhandled obligations are not suppressed. This does not remove the bounded expiry fallback or change CI-progress wake rules.

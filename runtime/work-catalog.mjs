@@ -156,6 +156,21 @@ export class WorkCatalog {
       return this.get(t.id);
     });
   }
+  reconcileHistory({task_id,expected_revision,completion_scope,evidence_refs,previous_owner_thread_id,original_scope_verified,completion_verified,delivery_verified,followthrough_task_ids=[]}){
+    if(!completion_scope?.trim()||!Array.isArray(evidence_refs)||!evidence_refs.length||evidence_refs.some(r=>!r?.trim())||
+      original_scope_verified!==true||completion_verified!==true||delivery_verified!==true)throw new Error('Verified original scope, completion and delivery evidence are required');
+    return this.atomic(()=>{
+      const t=this.get(task_id);
+      if(!t||t.revision!==expected_revision||t.state!=='candidate'||t.data.source?.kind!=='legacy_reference'||t.owner_thread_id||this.execution(task_id))
+        throw new Error('Only an unowned, unexecuted legacy reference can be reconciled as historical completion');
+      if(!previous_owner_thread_id||previous_owner_thread_id!==t.data.legacy_owner_thread_id)throw new Error('Historical owner identity must match');
+      if(!Array.isArray(followthrough_task_ids)||followthrough_task_ids.some(id=>id===task_id||!this.get(id)))throw new Error('Follow-through remains in distinct existing tasks');
+      const data={...t.data,historical_completion:{completion_scope,evidence_refs,previous_owner_thread_id,followthrough_task_ids,recorded_at:this.now()}};
+      this.db.prepare("UPDATE work_items SET state='completed',data=?,revision=revision+1,updated_at=? WHERE id=?").run(json(data),this.now(),task_id);
+      this.db.prepare("UPDATE work_notices SET state='superseded' WHERE task_id=? AND state='pending'").run(task_id);
+      return {task:this.get(task_id),execution_started:false,followthrough_preserved:followthrough_task_ids};
+    });
+  }
   assessDifficulty({task_id,expected_revision,difficulty_assessment}){
     const assessment=assessDifficulty(difficulty_assessment);
     return this.atomic(()=>{

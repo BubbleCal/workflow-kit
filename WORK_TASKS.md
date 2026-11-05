@@ -39,3 +39,7 @@ report 操作包含 task_id、owner_thread_id、report_key、outcome、summary�
 报告不自动完成任务。负责人继续以实际验收证据 decide complete 并 finish。若该探索是工作包，报告和子任务完成直接产生父任务事件；不会唤醒发现 Agent。父任务存在已接收未完成子项时不能完成；每个父目标还需自己的集成验收。一个任务可跟踪多个 PR，每个 PR 只归一个任务负责人，堆叠提交和复验要求写入各自合同/计划。
 
 Runtime-owned one-time and fixed-interval timers use SCHEDULES.md. They share the ordinary event/owner protocol; native schedule producers remain supported separately.
+
+## Historical completion reconciliation
+
+`task reconcile_history` records already-delivered original scope for an imported legacy_reference that remains an unowned, unexecuted candidate. It requires the current revision, original owner identity, explicit completion scope, supporting evidence and verified original acceptance/delivery. Keep adoption or other follow-through in distinct existing task IDs. This operation does not start work, archive a chat, publish a notice or complete the broader source project. It rejects ordinary candidates and any record with native execution.

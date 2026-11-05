@@ -147,3 +147,13 @@ test('difficulty is assessed for an accepted unowned task and carried into its o
   assert.throws(()=>f.work.assessDifficulty({task_id:t.id,expected_revision:assessed.revision,difficulty_assessment:{scope:'broad',uncertainty:'material',validation:'specialist',reason:'Changed assessment'}}),/unowned task/);
  }finally{f.c.close();}
 });
+
+test('historical completion repairs only imported references and preserves independent follow-through',()=>{
+ const f=workFixture();try{const follow=f.work.create({canonical_key:'follow',title:'Adoption decision',objective:'Decide adoption'}).task;
+ const old=f.work.create({canonical_key:'old-result',title:'Finished benchmark',objective:'Deliver benchmark',source:{kind:'legacy_reference',key:'legacy:old'}}).task;
+ f.c.db.prepare("UPDATE work_items SET data=json_set(data,'$.legacy_owner_thread_id','old-owner') WHERE id=?").run(old.id);
+ const result=f.work.reconcileHistory({task_id:old.id,expected_revision:old.revision,completion_scope:'Benchmark report and cleanup only',evidence_refs:['accepted-report','cleanup-receipt'],previous_owner_thread_id:'old-owner',original_scope_verified:true,completion_verified:true,delivery_verified:true,followthrough_task_ids:[follow.id]});
+ assert.equal(result.task.state,'completed');assert.equal(f.work.get(follow.id).state,'candidate');assert.equal(f.work.execution(old.id),null);
+ assert.throws(()=>f.work.reconcileHistory({task_id:follow.id,expected_revision:follow.revision,completion_scope:'Not authorized',evidence_refs:['invented'],previous_owner_thread_id:'old-owner',original_scope_verified:true,completion_verified:true,delivery_verified:true}),/legacy reference/);
+ }finally{f.c.close();}
+});

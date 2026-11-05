@@ -136,6 +136,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         else if(input.op==='policy')result=control.work.setPolicy(input);
         else if(input.op==='dismiss')result=control.work.dismiss(input);
         else if(input.op==='prepare_owner')result=await prepareMeetingOwner(control,input);
+        else if(input.op==='reconcile_history')result=control.work.reconcileHistory(input);
         else if(input.op==='assess_difficulty')result=control.work.assessDifficulty(input);
         else if(input.op==='request_owner')result=control.work.requestOwner(input);
         else if(input.op==='bind_owner')result=control.work.bindOwner(input);

@@ -58,3 +58,26 @@ test('unchanged lifecycle reminders preserve an actual pending human decision',(
  f.s.ingest(input(1));f.decide({disposition:'needs_decision',plan:undefined});f.s.ingest(input(2));assert.equal(f.s.task('T-1').status,'needs_decision');assert.equal(f.s.task('T-1').wake_at,null);
  }finally{f.close();}
 });
+
+function dependencyReminderFixture() {
+ const f=setup(),intent='lifecycle:repo#1:waiting',payload=n=>({event:'pr_lifecycle_action',task_id:'T-1',lifecycle_key:intent,lifecycle_generation:n,action:'obtain_readiness',head:'a'.repeat(40),detected_at:`generation-${n}`,snapshot_ref:`read-${n}`});
+ f.c.db.prepare("INSERT INTO lifecycle_intents(intent_key,pr_key,action,revision,payload,state,due_at,created_at) VALUES (?,?,?,?,?,?,?,?)").run(intent,'repo#1','obtain_readiness','same',JSON.stringify(payload(1)),'pending',f.now(),f.now());
+ const enqueue=n=>{f.c.db.prepare('UPDATE lifecycle_intents SET payload=? WHERE intent_key=?').run(JSON.stringify(payload(n)),intent);f.m.enqueue({key:`${intent}:${n}`,lane:'coordinator',kind:'event',payload:payload(n)});};
+ enqueue(1);f.route();f.m.waits.observe({fact_key:'dependency',kind:'dependency',subject:'required-release',data:{available:false,requirement:'published release'},observed_at:new Date(f.now()).toISOString(),expires_at:new Date(f.now()+3600000).toISOString(),evidence_ref:'actual-release-source'});
+ f.s.checkWait=c=>f.m.waits.check(c);const fact=f.s.checkpoint('T-1').facts[0];
+ f.decide({disposition:'wait',plan:plan('wait for release'),wait:{facts:[{subject:fact.subject,version:fact.version}],expires_at:f.now()+3600000,resume_condition:'Required release becomes available',condition:{kind:'dependency',fact_key:'dependency',subject:'required-release',requirement:'published release'}}});
+ f.mode('active');enqueue(2);return {...f,intent,payload,enqueue};
+}
+test('same reminder stays pending during a verified dependency wait and is released at expiry',()=>{
+ const f=dependencyReminderFixture();try{const rev=f.s.task('T-1').context_rev;f.route();f.route();assert.equal(f.s.task('T-1').wake_at,null);assert.equal(f.s.task('T-1').context_rev,rev);assert.equal(f.m.db.prepare('SELECT state FROM mail WHERE item_key=?').get(f.intent+':2').state,'pending');
+ f.advance(3600001);f.route();assert.notEqual(f.s.task('T-1').wake_at,null);assert.equal(f.s.checkpoint('T-1').events.length,1);assert.equal(f.m.db.prepare('SELECT state FROM mail WHERE item_key=?').get(f.intent+':2').state,'owner_routed');
+ }finally{f.close();}
+});
+test('dependency availability and genuinely changed obligations immediately release work',()=>{
+ for(const change of ['available','head','dirty']){const f=dependencyReminderFixture();try{f.route();
+  if(change==='available')f.m.waits.observe({fact_key:'dependency',kind:'dependency',subject:'required-release',data:{available:true,requirement:'published release'},observed_at:new Date(f.now()).toISOString(),expires_at:new Date(f.now()+3600000).toISOString(),evidence_ref:'new-release'});
+  if(change==='head'){const p={...f.payload(3),head:'b'.repeat(40)};f.c.db.prepare('UPDATE lifecycle_intents SET payload=? WHERE intent_key=?').run(JSON.stringify(p),f.intent);f.m.enqueue({key:f.intent+':3',lane:'coordinator',kind:'event',payload:p});}
+  if(change==='dirty')f.event('material-feedback',{review:'request changes'});
+  f.route();assert.notEqual(f.s.task('T-1').wake_at,null);
+ }finally{f.close();}}
+});
