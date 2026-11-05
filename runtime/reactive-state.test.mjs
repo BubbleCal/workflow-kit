@@ -6,6 +6,17 @@ import {join} from 'node:path';
 import {scopeActionReasons} from './scope-exclusions.mjs';
 import {fixture,contract,plan,nativeProof,NOW,OWNER,QUEUE_ID} from './test-fixtures/reactive.mjs';
 
+test('completed paused owners may be archived without resuming execution',()=>{
+ const f=fixture();try{f.mode('paused');const t=f.s.task('T-1'),payload={thread_id:OWNER,runtime_context:{contract_rev:t.contract_rev,context_rev:t.context_rev,plan_rev:t.plan_rev}};
+ assert.deepEqual(f.s.actionReasons('archive','T-1',payload),['reactive_task_paused']);
+ f.c.db.prepare("UPDATE rt_tasks SET status='complete',dirty=0 WHERE task_id='T-1'").run();
+ assert.deepEqual(f.s.actionReasons('archive','T-1',payload),[]);
+ assert.deepEqual(f.s.actionReasons('dispatch','T-1',payload),['reactive_task_paused']);
+ assert.deepEqual(f.s.actionReasons('archive','T-1',{...payload,runtime_context:{...payload.runtime_context,context_rev:999}}),['reactive_plan_or_evidence_changed']);
+ assert.equal(f.s.task('T-1').mode,'paused');
+ }finally{f.c.close();}
+});
+
 test('shared owners retain separate contracts and consume one grouped wake',()=>{
   const f=fixture();try{
     f.s.adopt({task_id:'T-2',owner_thread_id:OWNER,contract:{...contract(),canonical_key:'other-goal'},source_message_id:'human:migrate',actual_human_verified:true});

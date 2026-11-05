@@ -440,7 +440,7 @@ export class ReactiveState {
         canonical(payload.scope_keys??[])===canonical(task.contract.scope_keys??[]) ? [] : ['reactive_wake_changed_or_paused'];
     }
     if(!['dispatch','create_thread','archive','pr_ready','slack_pr','merge','notion_sync'].includes(kind))return [];
-    if(task.mode==='paused')return pausedMigrationSetup(kind,payload)&&payload.scope_handoff?.task_id===task_id ? [] : ['reactive_task_paused'];
+    if(task.mode==='paused'&&!(kind==='archive'&&task.status==='complete'))return pausedMigrationSetup(kind,payload)&&payload.scope_handoff?.task_id===task_id ? [] : ['reactive_task_paused'];
     const c=payload.runtime_context;
     if(!c || c.contract_rev!==task.contract_rev || c.plan_rev!==task.plan_rev || c.context_rev!==task.context_rev || task.dirty)
       return ['reactive_plan_or_evidence_changed'];
