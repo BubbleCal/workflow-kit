@@ -19,11 +19,12 @@ export function readTaskRegistry(databasePath) {
       const execution=db.prepare("SELECT 1 FROM sqlite_master WHERE name='rt_tasks'").get()?db.prepare('SELECT status FROM rt_tasks WHERE task_id=?').get(t.id):null;
       const completed=t.state==='completed'||execution?.status==='complete';
       items[t.id]={...items[t.id],id:t.id,canonical_key:t.canonical_key,owner_thread_id:t.owner_thread_id??(completed?data.legacy_owner_thread_id:null),status:completed?'complete':t.state,task_complete:completed,
+        native_owner_verified:t.state==='accepted'&&!!t.owner_thread_id&&!!t.binding&&authorization?.actual_human_verified===true,
         authorization_message_id:authorization?.source_message_id,source_user_message_id:authorization?.source_message_id,
         kind:t.kind,workspace:data.workspace,hold:t.state==='paused'};
     }}finally{db.close();}
   }
-  return {...legacy,instance_id:config.instance_id,scope:config.scope,policy_version:'native-0.5',
+  return {...legacy,native_catalog:true,instance_id:config.instance_id,scope:config.scope,policy_version:'native-0.5',
     hub_thread_id:config.threads.main,decision_inbox_thread_id:config.threads.main,discovery_thread_id:config.threads.discovery??null,
     coordinator_thread_id:null,setup_thread_id:null,state_writer_thread_id:null,task_registry:{items}};
 }
@@ -51,7 +52,8 @@ export function ownershipReasons(kind, taskId, payload, evidence, registry, db, 
     WHERE s.thread_id=? AND a.kind='create_thread' AND a.state='sent' ORDER BY a.created_at LIMIT 1`).get(payload.thread_id);
   const declared=registry.task_chat_bindings?.[payload.thread_id];
   const keys=created ? [JSON.parse(created.payload).canonical_task_key] : declared?.canonical_task_key && declared.evidence_ref ?
-    [declared.canonical_task_key] : [...new Set(Object.values(tasks).filter(t=>t.owner_thread_id===payload.thread_id).map(t=>t.canonical_key))];
+    [declared.canonical_task_key] : [...new Set(Object.values(tasks).filter(t=>t.owner_thread_id===payload.thread_id&&
+      !(registry.native_catalog===true&&task.native_owner_verified===true&&t.task_complete===true)).map(t=>t.canonical_key))];
   if(keys.length===1 && keys[0]===task.canonical_key)return [];
   // Only an actual scoped release instruction may address the mixed old writer;
   // it cannot start further implementation of the unrelated task.

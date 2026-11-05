@@ -25,6 +25,15 @@ test('same repository or ambiguous registry-only mappings do not establish task 
  assert.deepEqual(ownershipReasons('dispatch','T-190',{thread_id:'original-chat'},{owner_matches:true},registry,c.db),['chat_canonical_task_mismatch']);
  assert.deepEqual(ownershipReasons('dispatch','missing',{thread_id:'original-chat'},{},registry,c.db),['registered_task_owner_identity_required']);c.close();
 });
+test('verified native owner binding is not made ambiguous by completed historical references',()=>{
+ const {c,registry}=setup(true);c.db.prepare('DELETE FROM thread_setups').run();
+ registry.native_catalog=true;registry.task_registry.items['T-191'].native_owner_verified=true;
+ assert.deepEqual(ownershipReasons('human_input','T-191',{thread_id:'original-chat'},{},registry,c.db),[]);
+ registry.task_registry.items['T-190'].task_complete=false;
+ assert.deepEqual(ownershipReasons('human_input','T-191',{thread_id:'original-chat'},{},registry,c.db),['chat_canonical_task_mismatch']);
+ registry.task_registry.items['T-190'].task_complete=true;registry.task_registry.items['T-191'].native_owner_verified=false;
+ assert.deepEqual(ownershipReasons('human_input','T-191',{thread_id:'original-chat'},{},registry,c.db),['chat_canonical_task_mismatch']);c.close();
+});
 test('an actual scoped checkpoint release may reach the mixed writer but cannot start unrelated work',()=>{
  const {c,registry}=setup(),p={thread_id:'original-chat',intent:'scope_handoff_checkpoint',handoff_task_id:'T-191',handoff_canonical_task_key:'take-order'},e={actual_human_message_verified:true,scope_release_only:true,explicit_scope_split_verified:true};
  assert.deepEqual(ownershipReasons('human_input','T-191',p,e,registry,c.db),[]);
