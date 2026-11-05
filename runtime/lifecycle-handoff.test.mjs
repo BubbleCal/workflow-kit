@@ -123,3 +123,13 @@ test('duplicate CI handoff rejects another task, head, generation or decision ev
     }finally{x.close();}
   }
 });
+
+test('pre-transfer native evidence remains usable only through the recorded owner handoff',()=>{
+ for(const late of [false,true]){const x=setup();try{
+  const successor='successor';x.f.c.db.exec('CREATE TABLE rt_owner_transfers(task_id TEXT,from_owner TEXT,to_owner TEXT,created_at INTEGER)');
+  x.f.c.db.prepare('INSERT INTO rt_owner_transfers VALUES (?,?,?,?)').run('T-1',OWNER,successor,late?NOW-1:NOW+1);
+  x.f.c.db.prepare('UPDATE rt_tasks SET owner_id=?').run(successor);
+  x.m.taskRegistry=()=>({task_registry:{items:{'T-1':{owner_thread_id:successor}}}});
+  if(late)assert.throws(()=>x.m.recordProgress(x.input),/handoff/);else assert.equal(x.m.recordProgress(x.input).recorded,true);
+ }finally{x.close();}}
+});

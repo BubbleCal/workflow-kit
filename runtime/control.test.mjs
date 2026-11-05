@@ -711,3 +711,13 @@ test('archive claim rechecks an unloaded owner becoming busy after preparation',
   assert.equal(c.claim({key:a.key,owner:'coordinator',evidence:changed}).claimed,false);
   assert.equal(c.db.prepare('SELECT state FROM actions WHERE action_key=?').get(a.key).state,'prepared');c.close();
 });
+
+test('paused processing admits only explicitly authorized migration scope release, not engineering',()=>{
+  const s=new ControlStore(':memory:',{now:()=>NOW});s.processing(false);
+  const a={key:'pause-release',kind:'human_input',task_id:'T-010',payload:{thread_id:'worker',intent:'scope_handoff_checkpoint',migration_setup:true,
+    handoff_task_id:'T-010',handoff_canonical_task_key:'original',source_message_id:'human-split',verbatim_text:'Split this scope into its own owner.'},
+    evidence:{...common(),actual_human_message_verified:true,source_actor_verified:true,source_message_id:'human-split',source_text:'Split this scope into its own owner.',input_already_delivered:false,owner_matches:true,owner_thread_id:'worker',thread_status:'idle'}};
+  assert.equal(s.prepare(a).prepared,true);assert.equal(s.claim({key:a.key,owner:'migration',evidence:a.evidence}).claimed,true);
+  const regular=action('still-paused');assert.equal(s.prepare(regular).prepared,true);assert.equal(s.claim({key:regular.key,owner:'migration',evidence:regular.evidence}).reason,'processing_paused');
+  s.close();
+});

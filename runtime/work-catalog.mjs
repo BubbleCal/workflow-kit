@@ -159,7 +159,8 @@ export class WorkCatalog {
     required(owner_thread_id,'execution owner');required(evidence_ref,'native owner evidence');
     return this.atomic(()=>{
       const t=this.get(task_id);if(!t||t.state!=='accepted')throw new Error('Accept the task before binding its owner');
-      if(Object.values(this.config.threads??{}).includes(owner_thread_id))throw new Error('Control/discovery conversations cannot own ordinary execution or exploration tasks');
+      const protectedOwners=this.config.layout==='native'?[this.config.threads?.main,this.config.threads?.discovery]:Object.values(this.config.threads??{});
+      if(protectedOwners.includes(owner_thread_id))throw new Error('Control/discovery conversations cannot own ordinary execution or exploration tasks');
       if(t.owner_thread_id&&t.owner_thread_id!==owner_thread_id)throw new Error('Do not replace a live canonical owner');
       verifyNativeBinding(native_binding,{thread_id:owner_thread_id,workspace:t.data.workspace,now:this.now()});
       if(creation_action_key){
@@ -175,7 +176,7 @@ export class WorkCatalog {
     });
   }
   blockers(id){
-    const t=this.get(id);if(!t)return ['unknown_task'];
+    const t=this.get(id);if(!t)return ['unknown_task'];if(t.state==='completed')return [];
     const reasons=[];if(t.state!=='accepted')reasons.push('task_not_accepted');if(!t.owner_thread_id)reasons.push('owner_not_bound');
     for(const dependency of t.data.depends_on)if(this.execution(dependency)?.status!=='complete')reasons.push(`dependency:${dependency}`);
     return reasons;
@@ -191,7 +192,8 @@ export class WorkCatalog {
   }
   start(reactive,{task_id,queue_compatibility_verified}){
     if(queue_compatibility_verified!==true)throw new Error('Native desktop queue verification is required');
-    const t=this.get(task_id),reasons=this.blockers(task_id);if(reasons.length)throw new Error(reasons.join(', '));
+    const t=this.get(task_id);if(t?.state==='completed')return {started:false,reason:'already_complete',task:t};
+    const reasons=this.blockers(task_id);if(reasons.length)throw new Error(reasons.join(', '));
     if(this.execution(t.id)?.mode==='active')return reactive.checkpoint(t.id);
     const contract=this.contract(t.id),a=t.authorization;
     reactive.adopt({task_id:t.id,owner_thread_id:t.owner_thread_id,contract,source_message_id:a.source_message_id,actual_human_verified:true});

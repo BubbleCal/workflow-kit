@@ -1,6 +1,6 @@
 import { bindLifecycleHandoff } from './lifecycle-handoff.mjs';
 import { ImmediateTriggers } from './immediate-trigger.mjs';
-import { readTaskRegistry } from './task-ownership.mjs';
+import { readTaskRegistry, historicalOwnerTransfer } from './task-ownership.mjs';
 import { reactiveOwners, mailTaskIds, nativeControlRuntime } from './reactive-ownership.mjs';
 import { stageScopeExclusion } from './scope-exclusions.mjs';
 import { bindings, INSTANCE_ROOT, requireBindings, shellQuote } from './instance.mjs';
@@ -159,7 +159,7 @@ export class Mailbox {
   }
   enqueue({ key, lane, kind, payload, human_trigger }) {
     required(key, 'key');
-    if (!laneThread[lane]) throw new Error(`Unknown lane: ${lane}`);
+    if (!laneThread[lane] && !(service_task_id && ['coordinator','maintenance'].includes(lane))) throw new Error(`Unknown lane: ${lane}`);
     if (lane === 'inbox' && !['decision', 'action_required', 'important_completion', 'answer'].includes(kind)) throw new Error('Routine inbox notifications are forbidden');
     if (lane === 'coordinator' && !['human_command', 'event', 'worker_result', 'recovery', 'configuration'].includes(kind)) throw new Error('Unsupported coordinator input');
     if (kind === 'worker_result') {
@@ -239,8 +239,8 @@ export class Mailbox {
       return this.watchdog.observe(input);
     });
   }
-  reserve(lane, observation, { task_ids = null, native_queue = false } = {}) {
-    if (!laneThread[lane]) throw new Error(`Unknown lane: ${lane}`);
+  reserve(lane, observation, { task_ids = null, native_queue = false, service_task_id = null } = {}) {
+    if (!laneThread[lane] && !(service_task_id && ['coordinator','maintenance'].includes(lane))) throw new Error(`Unknown lane: ${lane}`);
     if (!native_queue&&(!isIdle(observation, this.now()) || observation.thread.id !== laneThread[lane])) return { reserved: false, reason: 'target_busy_or_unknown' };
     return this.atomic(() => {
       const current = this.db.prepare("SELECT id,state FROM batches WHERE lane=? AND state IN ('reserved','sending','sent','uncertain','running')").get(lane);
@@ -296,10 +296,10 @@ export class Mailbox {
       const signalled = lane === 'coordinator' && s.generation > s.acknowledged_generation;
       if (!rows.length && !signalled) return { reserved: false, reason: 'nothing_due' };
       const id = randomUUID();
-      const intakeDue = lane === 'coordinator' && this.now() - s.last_intake >= 3600000;
+      const intakeDue = !service_task_id && lane === 'coordinator' && this.now() - s.last_intake >= 3600000;
       const snapshot = { id, lane, run_id: id, transition_contract_version:this.transitionVersion(), created_at: new Date(this.now()).toISOString(),
         ...(cadence?{maintenance_interval_minutes:cadence.interval/60000}:{}),
-        ...(native_queue?{delivery_transport:'native_queue'}:{}),
+        ...(service_task_id?{delivery_transport:'native_task',service_task_id}:native_queue?{delivery_transport:'native_queue'}:{}),
         signal_generation: s.generation, intake_due: intakeDue, budget_minutes: lane === 'maintenance' ? 20 : 5,
         items: rows.map(r => ({ key: r.item_key, kind: r.kind, payload: JSON.parse(r.payload), seq: r.seq })) };
       const ids = rows.map(r => r.seq);
@@ -334,8 +334,8 @@ export class Mailbox {
       return {reserved:true,batch:this.get(id)};
     });
   }
-  reserveQueuedLane(lane) {
-    if(!laneThread[lane])throw new Error('Unknown control lane');
+  reserveQueuedLane(lane, { service_task_id = null } = {}) {
+    if(!laneThread[lane] && !(service_task_id && ['coordinator','maintenance'].includes(lane)))throw new Error('Unknown control lane');
     // A new event may wake the lane immediately. Reoffering the same unresolved
     // batch waits for the existing ten-minute fallback instead of spinning.
     const last=this.db.prepare("SELECT snapshot,finished_at FROM batches WHERE lane=? AND state='finished' ORDER BY finished_at DESC LIMIT 1").get(lane);
@@ -345,7 +345,7 @@ export class Mailbox {
       if(s.generation<=snapshot.signal_generation&&!this.db.prepare("SELECT 1 FROM mail WHERE lane=? AND state='pending' AND seq>?").get(lane,watermark))
         return {reserved:false,reason:'unchanged_batch_cooldown'};
     }
-    return this.reserve(lane,null,{native_queue:true});
+    return this.reserve(lane,null,{native_queue:true,service_task_id});
   }
   maintenanceCadence() {
     const schedule=maintenanceSchedule(this.maintenanceConfig());if(!schedule)return null;
@@ -378,7 +378,7 @@ export class Mailbox {
   authorizeSend(id, observation) {
     return this.atomic(() => {
       const b = this.get(id); if (!b) throw new Error('Unknown batch');
-      if(b.snapshot.delivery_transport==='native_queue')return {send:false,reason:'native_queue_transport_only'};
+      if(['native_queue','native_task'].includes(b.snapshot.delivery_transport))return {send:false,reason:'native_queue_transport_only'};
       if (b.state !== 'reserved') return { send: false, reason: b.state };
       const cadence=b.lane==='maintenance'?this.maintenanceCadence():null;
       if(cadence&&this.now()<cadence.eligible_at){
@@ -438,10 +438,30 @@ export class Mailbox {
       return { batch_id: id, state: outcome };
     });
   }
+  beginService(id, {task_id,owner_thread_id,wake_id,control_db}) {
+    return this.atomic(()=>{
+      const b=this.get(id),task=control_db.prepare('SELECT * FROM rt_tasks WHERE task_id=?').get(task_id);
+      const wake=control_db.prepare('SELECT * FROM rt_wakes WHERE id=?').get(wake_id);
+      const event=control_db.prepare('SELECT * FROM rt_events WHERE event_id=? AND task_id=?').get(`service:${id}`,task_id);
+      if(!b||b.snapshot.delivery_transport!=='native_task'||b.snapshot.service_task_id!==task_id||
+        task?.owner_id!==owner_thread_id||task.mode!=='active'||JSON.parse(task.contract).service_lane!==b.lane||
+        wake?.owner_id!==owner_thread_id||wake.state!=='running'||!wake.turn_id||!wake.started_at||
+        !event||!JSON.parse(wake.event_ids).includes(event.event_id)||JSON.parse(event.payload).batch_id!==id)
+        throw new Error('Actual native service wake and exact source batch are required');
+      if(b.state==='running'&&b.receipt?.native_wake_id===wake_id)return {begun:true,duplicate:true,batch:b};
+      if(b.state!=='reserved')throw new Error('Service batch already belongs to another execution');
+      const cadence=b.lane==='maintenance'?this.maintenanceCadence():null;
+      if(cadence&&this.now()<cadence.eligible_at)throw new Error('Maintenance interval has not elapsed');
+      const receipt={native_wake_id:wake_id,task_id,queue_id:wake.queue_id,queue_receipt_pending:!wake.queue_id,turn_id:wake.turn_id,execution_verified:true};
+      this.db.prepare("UPDATE batches SET state='running',started_at=?,turn_id=?,receipt=? WHERE id=?").run(this.now(),wake.turn_id,JSON.stringify(receipt),id);
+      return {begun:true,batch:this.get(id),deadline:new Date(this.now()+b.snapshot.budget_minutes*60000).toISOString()};
+    });
+  }
   begin(id) {
     return this.atomic(() => {
       const b = this.get(id); if (!b) throw new Error('Unknown batch');
       if (b.state === 'finished') return { begun: false, reason: 'already_finished' };
+      if(b.snapshot.delivery_transport==='native_task')throw new Error('Use runtime service_begin with the actual native task wake');
       if(b.state==='deferred'&&b.receipt?.deferred_by_cadence)return {begun:false,reason:'already_deferred_by_cadence',next:'End without auditing or finish; the same input is pending for its next eligible window.'};
       if (!['sending', 'sent', 'uncertain', 'running'].includes(b.state)) throw new Error(`Cannot begin ${b.state} batch`);
       const cadence=b.lane==='maintenance'&&b.state!=='running'?this.maintenanceCadence():null;
@@ -479,9 +499,9 @@ export class Mailbox {
       let item = batch.snapshot.items.find(x=>x.key===input.event_key), handoffBinding;
       if (input.handoff_event_key) {
         const handoff=batch.snapshot.items.find(x=>x.key===input.handoff_event_key);
-        const source=this.db.prepare('SELECT item_key,state,kind,payload FROM mail WHERE item_key=?').get(input.event_key);
+        const source=this.db.prepare('SELECT item_key,state,kind,payload,created_at FROM mail WHERE item_key=?').get(input.event_key);
         if (!handoff || !source) throw new Error('Progress handoff must be in the current coordinator batch');
-        item={key:source.item_key,state:source.state,kind:source.kind,payload:JSON.parse(source.payload)};
+        item={key:source.item_key,state:source.state,kind:source.kind,payload:JSON.parse(source.payload),created_at:source.created_at};
         handoffBinding=this.lifecycleAccess(l=>bindLifecycleHandoff({source:item,handoff,input,db:l.db,registry:this.taskRegistry()}));
         if (!handoffBinding) throw new Error('Native CI handoff evidence unavailable');
         const previous=this.db.prepare('SELECT binding FROM progress_handoffs WHERE source_event_key=?').get(input.event_key);
@@ -511,7 +531,7 @@ export class Mailbox {
           if (a.kind !== 'pr' || a.role !== 'deliverable') throw new Error('Explicit deliverable PR identity required');
           const stages = input.goals.flatMap(g=>g.stages).filter(s=>s.task_id===a.task_id && s.owner_thread_id===a.owner_thread_id);
           if (!stages.length || item.payload.task_id && item.payload.task_id!==a.task_id ||
-            resultOwner && resultOwner!==a.owner_thread_id)
+            resultOwner && resultOwner!==a.owner_thread_id && !this.lifecycleAccess(l=>historicalOwnerTransfer(l.db,a.task_id,resultOwner,a.owner_thread_id,this.db.prepare('SELECT created_at FROM mail WHERE item_key=?').get(item.key)?.created_at)))
             throw new Error('Deliverable must match the source task and owner');
           const goal = input.goals.find(g=>g.stages.includes(stages[0]));
           const tracked = this.lifecycleAccess(l=>l.track({repository:a.repository,pr_number:a.pr_number,task_id:a.task_id,
@@ -573,7 +593,7 @@ export class Mailbox {
     });
   }
   pause(lane, enabled) {
-    if (!laneThread[lane] || typeof enabled !== 'boolean') throw new Error('Valid lane and enabled flag required');
+    if ((!laneThread[lane] && !['coordinator','maintenance'].includes(lane)) || typeof enabled !== 'boolean') throw new Error('Valid lane and enabled flag required');
     this.db.prepare('UPDATE lane_state SET enabled=? WHERE lane=?').run(Number(enabled), lane);
     return { lane, enabled, running_work_interrupted: false };
   }

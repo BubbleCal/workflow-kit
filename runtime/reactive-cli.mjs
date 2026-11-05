@@ -1,3 +1,5 @@
+import {transferPausedOwner} from './owner-transfer.mjs';
+import {NativeServices} from './native-services.mjs';
 import {existsSync,readFileSync,writeFileSync,renameSync,mkdirSync,realpathSync} from 'node:fs';
 import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -29,6 +31,7 @@ export function runtimeConfig(root=ROOT) {
   if(!Number.isSafeInteger(c.poll_connections)||c.poll_connections<1||c.poll_connections>16||
     !Number.isSafeInteger(c.github_read_budget_per_hour)||c.github_read_budget_per_hour<120||c.github_read_budget_per_hour>5000)throw new Error('Invalid GitHub source budget');
   if(c.inbox&&(c.inbox.thread_id!==bindings.threads.inbox||c.inbox.project_id!==bindings.scope.project_id||!c.inbox.workspace))throw new Error('Inbox must match this instance');
+  if(bindings.layout==='native'&&c.control_lanes)throw new Error('Native layout uses ordinary service tasks, not legacy control lanes');
   if(c.control_lanes)for(const [lane,b]of Object.entries(c.control_lanes))
     if(!['coordinator','inbox','maintenance'].includes(lane)||b.thread_id!==bindings.threads[lane]||!b.workspace)throw new Error('Control lanes must match verified instance roles');
   if(c.desktop_loader?.enabled){
@@ -199,6 +202,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
       save(join(root,'runtime.json'),{...read(join(root,'runtime.json')),inbox});output({bound:true,inbox});return;
     }
     if(command==='bind-controls'){
+      if(bindings.layout==='native')throw new Error('Native layout cannot enable legacy control lanes');
       await queueCapability(config,queue);const proofs=read(inputFile()),lanes={};
       for(const lane of ['coordinator','inbox','maintenance']){
         const proof=proofs[lane],readback=nativeReadback(proof?.readback);
@@ -209,10 +213,11 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
     }
     if(command==='op'){
       const input=fileIndex>=0?read(inputFile()):JSON.parse(readFileSync(0,'utf8'));let result;
-      if(input.op==='adopt'){
+      if(input.op==='transfer_owner')result=transferPausedOwner(control,input);
+      else if(input.op==='adopt'){
         input.contract.workspace=realpathSync(input.contract.workspace);const existing=state.adopt(input),t=existing.task;
         const original=control.db.prepare('SELECT created_at FROM rt_contracts WHERE task_id=? AND revision=1').get(t.task_id);
-        state.ingest({event_id:`adopt:${t.task_id}:${input.source_message_id}`,task_id:t.task_id,source:'human_authorization',subject:`contract:${t.task_id}`,
+        if(!t.contract.service_lane)state.ingest({event_id:`adopt:${t.task_id}:${input.source_message_id}`,task_id:t.task_id,source:'human_authorization',subject:`contract:${t.task_id}`,
           type:'task_adopted',observed_at:original.created_at,payload:t.contract,evidence_ref:input.source_message_id,debounce_ms:0});result=existing;
       }else if(input.op==='mode'||input.op==='mode_group'){
         if(input.mode==='active')await queueCapability(config,queue);
@@ -224,6 +229,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
       else if(input.op==='begin')result=state.begin(input);
       else if(input.op==='decide'){
         mailbox=new Mailbox(join(root,'mailbox.sqlite'));state.checkWait=c=>['pr','review_request'].includes(c?.kind)?control.checkReactiveWait(c):mailbox.waits.check(c);
+        if(input.disposition==='cycle_complete')new NativeServices({root,control,config}).assertFinished(input.task_id,input.wake_id);
         result=state.decide(input);
       }else if(input.op==='finish'){const w=state.openWake(input.task_id);result=state.finish({...input,turn_id:input.turn_id??w?.turn_id});}
       else if(input.op==='wait_observe'){

@@ -1,16 +1,16 @@
 {
-  "version": "0.7.0",
-  "verified_at": "2026-11-05T05:08:36.876Z",
+  "version": "0.7.1",
+  "verified_at": "2026-11-05T06:11:39.139Z",
   "client_timezone": "Asia/Shanghai",
-  "node": "v26.4.0",
-  "command": "node workflow.mjs test",
+  "node": "v23.11.0",
+  "command": "npm test",
   "exit_code": 0,
-  "runtime_tests": 318,
+  "runtime_tests": 330,
   "portable_integration_tests": 9,
-  "passed": 327,
+  "passed": 339,
   "failed": 0,
-  "tested_sources_digest": "df2c22ce84d7e7ada288a4a7ded18c6a1563354481403d060ba31a4cc5d5f521",
-  "integrated_upstream_commit": "c7f4f3e854a5428028354f411ac6c2cc0fccaf39",
+  "tested_sources_digest": "549faa1afacce17f2db00b6539314d497bbc6a07a4b9171daea38efd87e20fe0",
+  "integrated_upstream_commit": "d8525e4c2815ac0e0a956460f954856c69dd4af1",
   "native_queue_validation": {
     "idle_and_busy_consumption": "verified on the installed desktop CLI",
     "shared_owner_execution": "actual original-owner grouped begin and independent task decisions observed",
@@ -37,9 +37,14 @@
     "Independent run acceptance through shared-owner queues and ordinary exploration CLI",
     "Pause/resume/cancel with preserved accepted work and terminal whole-task completion",
     "Calendar timestamp rejection, explicit offsets and fixed-duration DST semantics",
-    "Exploration reports from non-primary shared-wake members"
+    "Exploration reports from non-primary shared-wake members",
+    "exclusive catalog owner and verified paused scope transfer",
+    "native ordinary service batch binding and two-hour maintenance admission",
+    "native layout cannot revive a legacy control sender while paused",
+    "historical completion has no false owner-needed blocker",
+    "actual completed native handoffs remain source-bound across owner transfer"
   ],
-  "live_workflow_instances_modified": 0,
+  "live_workflow_instances_modified": true,
   "models_or_permissions_changed": false,
   "credentials_exported": false,
   "operational_data_exported": false,
@@ -54,5 +59,15 @@
     "storage": "file-backed SQLite restart and second-client checks",
     "native_transport": "existing CLI fixture",
     "actual_live_schedules_created": 0
+  },
+  "tested_sources_digest_algorithm": "SHA256 of JSON.stringify(PROVENANCE.source_files)",
+  "native_migration_validation": {
+    "single_owner_catalog": true,
+    "original_task_ids_and_receipts_preserved": true,
+    "completed_records_not_restarted": true,
+    "ordinary_delivery_and_maintenance_services": true,
+    "isolated_migration_and_native_owner_readbacks_verified": true,
+    "raw_operational_evidence": "retained only in the local instance",
+    "resume_requires_verified_cutover": true
   }
 }

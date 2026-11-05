@@ -188,15 +188,20 @@ test('native layout migration preserves legacy records and imports existing task
   db=new DatabaseSync(join(dir,'control.sqlite'));
   const contract={canonical_key:'existing-goal',objective:'Existing authorized work',workspace,requirements:[{id:'r',text:'Deliver'}],constraints:[],job_sources:['native'],pull_requests:[]};
   db.prepare("INSERT INTO rt_tasks(task_id,owner_id,mode,contract,authorization_ref,mode_source,updated_at) VALUES ('T-existing',?,'paused',?,'actual-user-goal','actual-enable',0)").run(OWNER,JSON.stringify(contract));
+  db.prepare("INSERT INTO rt_tasks(task_id,owner_id,mode,status,contract,authorization_ref,mode_source,updated_at) VALUES ('T-completed',?,'paused','complete',?,'actual-user-goal','actual-enable',0)").run(OWNER,JSON.stringify({...contract,canonical_key:'completed-history'}));
   const migration={actual_human_verified:true,source_message_id:'user:migrate',legacy_scheduler_paused:true,scheduler_evidence_ref:'scheduler-readback',
    native_verified:true,evidence_ref:'native-main',project_id:old.project_id,threads:{main:MAIN},thread_workspaces:{main:workspace}};
   writeFileSync(join(dir,'migration.json'),JSON.stringify(migration));
   const result=run(dir,'workflow.mjs',['migrate','--file','migration.json']);assert.equal(result.status,0,result.stderr);
-  assert.deepEqual(result.json.imported_execution_tasks,['T-existing']);assert.equal(result.json.native_chats_created,0);assert.equal(existsSync(result.json.backup),true);
+  assert.deepEqual(result.json.imported_execution_tasks,['T-existing','T-completed']);assert.equal(result.json.native_chats_created,0);assert.equal(existsSync(result.json.backup),true);
   assert.equal(readFileSync(join(dir,'registry.json'),'utf8'),registry);
   const list=run(dir,'workflow.mjs',['task','list']).json;
   assert.equal(list.find(t=>t.id==='T-existing').owner_thread_id,OWNER);assert.equal(list.find(t=>t.id==='T-existing').execution.mode,'paused');
   assert.equal(list.filter(t=>t.kind==='exploration').length,1);
+  assert.equal(list.find(t=>t.id==='T-completed').owner_thread_id,null);
+  assert.equal(list.find(t=>t.id==='T-completed').state,'completed');
+  assert.equal(Object.hasOwn(JSON.parse(readFileSync(join(dir,'runtime.json'),'utf8')),'control_lanes'),false);
+  assert.equal(run(dir,'workflow.mjs',['runtime','bind-controls']).status,1);
  }finally{db?.close();rmSync(root,{recursive:true,force:true});}
 });
 

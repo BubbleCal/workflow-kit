@@ -16,7 +16,9 @@ export function readTaskRegistry(databasePath) {
     const db=new DatabaseSync(catalogPath,{readOnly:true});
     try{if(db.prepare("SELECT 1 FROM sqlite_master WHERE name='work_items'").get())for(const t of db.prepare('SELECT * FROM work_items').all()){
       const data=JSON.parse(t.data),authorization=t.authorization?JSON.parse(t.authorization):null;
-      items[t.id]={id:t.id,canonical_key:t.canonical_key,owner_thread_id:t.owner_thread_id,status:t.state,
+      const execution=db.prepare("SELECT 1 FROM sqlite_master WHERE name='rt_tasks'").get()?db.prepare('SELECT status FROM rt_tasks WHERE task_id=?').get(t.id):null;
+      const completed=t.state==='completed'||execution?.status==='complete';
+      items[t.id]={...items[t.id],id:t.id,canonical_key:t.canonical_key,owner_thread_id:t.owner_thread_id??(completed?data.legacy_owner_thread_id:null),status:completed?'complete':t.state,task_complete:completed,
         authorization_message_id:authorization?.source_message_id,source_user_message_id:authorization?.source_message_id,
         kind:t.kind,workspace:data.workspace,hold:t.state==='paused'};
     }}finally{db.close();}
@@ -72,4 +74,19 @@ export function scopedHandoffReasons(taskId,payload,evidence) {
       reasons.push('scope_handoff_checkpoint_changed');
   } catch { reasons.push('scope_handoff_checkpoint_unavailable'); }
   return reasons;
+}
+
+// An actual human may provision a paused migration without resuming execution.
+// All normal source, placement and immutable scope-handoff checks still apply.
+export function pausedMigrationSetup(kind,payload) {
+  if(payload?.migration_setup!==true)return false;
+  if(kind==='human_input')return payload.intent==='scope_handoff_checkpoint' && !!payload.handoff_task_id && !!payload.handoff_canonical_task_key;
+  return kind==='create_thread' && payload.permission_probe_only===true && payload.starts_heavy_work===false &&
+    !!payload.scope_handoff?.task_id && payload.scope_handoff.canonical_task_key===payload.canonical_task_key;
+}
+
+export function historicalOwnerTransfer(db,taskId,from,to,sourceAt) {
+  if(!Number.isFinite(sourceAt)||!db.prepare("SELECT 1 FROM sqlite_master WHERE name='rt_owner_transfers'").get())return null;
+  const row=db.prepare('SELECT * FROM rt_owner_transfers WHERE task_id=? AND from_owner=? AND to_owner=?').get(taskId,from,to);
+  return row&&sourceAt<=row.created_at?row:null;
 }

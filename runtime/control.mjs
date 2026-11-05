@@ -20,7 +20,7 @@ import { readDependencyPolicy, dependencyReasons } from './dependency-provenance
 import { retainedApprovalReasons } from './merge-approval.mjs';
 import { readDecisionState, taskDisplayText, taskId, resolveReply } from './task-decisions.mjs';
 import { reviewStageReasons } from './pr-review-gates.mjs';
-import { readTaskRegistry, ownershipReasons, scopedHandoffReasons } from './task-ownership.mjs';
+import { readTaskRegistry, ownershipReasons, scopedHandoffReasons, pausedMigrationSetup } from './task-ownership.mjs';
 import { isReviewDelivery, readReviewWindow, reviewWindowAt, withReviewWindowGuidance, REVIEW_WINDOW } from './review-window.mjs';
 
 export const INBOX = bindings.threads.inbox;
@@ -499,7 +499,8 @@ export class ControlStore {
       if (!row) throw new Error(`Unknown action: ${key}`);
       if (row.kind === 'notify' || row.kind === 'human_input' && JSON.parse(row.payload).thread_id === COORDINATOR)
         return { claimed: false, reason: 'control_plane_delivery_requires_mailbox', send_tool_forbidden: true };
-      if (this.db.prepare("SELECT value FROM settings WHERE key='processing'").get().value !== 'on') return { claimed: false, reason: 'processing_paused' };
+      if (this.db.prepare("SELECT value FROM settings WHERE key='processing'").get().value !== 'on' &&
+        !pausedMigrationSetup(row.kind,JSON.parse(row.payload))) return { claimed: false, reason: 'processing_paused' };
       if (!['prepared','deferred'].includes(row.state)) return { claimed: false, reason: row.state };
       if (isReviewDelivery(row.kind) && reviewWindowAt(this.now(),this.reviewRule()).blocked)
         return { claimed: false, ...this.deferReview(key,this.reviewRule()) };

@@ -223,3 +223,8 @@ do not gain a source through this path. Existing source rate limits and grouped
 owner wake guards remain in force; registration itself sends no worker message.
 
 Runtime-owned one-time and fixed-interval timers use SCHEDULES.md. They share the ordinary event/owner protocol; native schedule producers remain supported separately.
+
+For large native readback proofs, save exact JSON in a local file and use
+`runtime op --file <file>`. This preserves the real envelope and avoids nested
+stdin pipelines. A blocked local metadata process is not evidence that an owner
+operation failed; inspect the durable receipt before any retry.

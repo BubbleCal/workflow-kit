@@ -28,3 +28,18 @@ Linear、Slack、Notion 各自默认关闭，和 PR 跟踪/外部写入配置独
 来源修改会使旧批次失效；旧原生消息不可撤回，接收方凭真实 proof 结束它而不读取来源。跨 control.sqlite/mailbox.sqlite 的完成回执可恢复，重启先关闭已完成扫描的旧邮箱回执，再生成后续页。对于尚无 durable finish 的 running/uncertain 批次，不自动重发或假定结束；通过真实原生状态恢复原批次。
 
 任务候选和已接收但无 owner 的任务用持久通知送主对话；普通无变化扫描静默。自主探索报告直接给父任务，发现角色不参与研究结果处理。
+
+## Preserved migration scopes
+
+A verified assigned-user Linear scope may use `assignment_only:true` and an exact
+`assignee_id` instead of a project/team; ingestion rejects another assignee.
+A previously authorized professional Slack scope may use `with_user_id` and
+`professional_only:true`; private access still needs its actual recorded grant.
+Only professional observations tied to that exact user may be retained.
+
+Optional `codex` discovery is limited to the configured local project. Read the
+actual user request before classifying work, keep the original conversation and
+running jobs, and ignore control/discovery chats and unrelated projects. Native
+listing or a title is not implementation authority. The preserved standing
+enrollment rule can register an actual authorized existing task without asking
+for a second handoff; it cannot broaden that task or create a replacement owner.

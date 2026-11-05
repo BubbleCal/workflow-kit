@@ -1,3 +1,4 @@
+import {NativeServices} from './native-services.mjs';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {mkdirSync,readFileSync,writeFileSync,existsSync} from 'node:fs';
@@ -37,6 +38,7 @@ export function wakePrompt(root,task,wake,checkpoint) {
   // plan and event bodies are fetched from checkpoint after actual consumption.
   const packet={task_id:task.task_id,owner_thread_id:task.owner_id,wake_id:wake.id,
     task_ids:wake.member_ids,context_rev:task.context_rev,pending_event_count:checkpoint.events.length};
+  const service=task.contract.service_lane?`\n这是统一任务账本中的 ${task.contract.service_lane} 服务任务。先按普通任务协议 begin；从 checkpoint 的 service_batch_ready 事件取得 batch_id，再通过 runtime op service_begin(task_id,owner_thread_id,wake_id,batch_id) 领取固定输入。按 INSTANCE_ROOT/NATIVE_SERVICES.md 和该批真实范围执行，沿用原 mailbox 的 record_progress/ack/finish；不得直接发送旧控制消息。先完成 mailbox batch，再 decide cycle_complete 并 finish 当前普通任务；剩余输入按原间隔续接，服务本身不标为永久完成。`.replace('INSTANCE_ROOT',root):'';
   const exploration=task.contract.task_kind==='exploration'?`\n这是普通的自主探索任务。读取 ${join(root,'WORK_TASKS.md')}，按合同中的 exploration 范围自行选择代码、论文、博客或现有 benchmark 调查。先建立假设、基线、指标和停止条件；不要求一定找到改进。不修改产品代码或使用云资源，除非合同明确授权。用 task report 保存证据、findings/no_actionable_findings/inconclusive 结果；后续建议是普通候选任务，不交给发现 Agent 执行研究。` : '';
   return `[workflow-event:${wake.id}]
 这是通过 Codex 原生队列送达的工作流事件，不是新的人类授权。桌面 App 管理本回合、队列、模型、权限和审批；工作流程序不接管会话。
@@ -48,7 +50,7 @@ begin 后读取 checkpoint。排队期间可能已有新事件，以下摘要不
 依据新信息选择 continue/revise/wait/needs_decision/complete，并记录理由、证据和版本。方案可调整，用户验收条件不可自行删掉。若假设被推翻或同一失败反复出现且没有新证据，重新比较方案。保护健康作业，不把队列回执、回合结束或测试通过当成整个任务完成。
 decide 返回的 action_context 放入外部动作 payload.runtime_context；继续使用原 control 守卫、当前 head、CI、审批、范围排除和送审窗口。自然阶段边界和外部动作前再次 checkpoint。完成本次处置后 finish；需要用户决定或重要完成时使用既有 notify。
 不要运行会话恢复、回合启动或远程控制命令，不改变模型/权限，不发送跨对话消息。原生审批由桌面 App 处理。
-${JSON.stringify(packet,null,2)}${exploration}`;
+${JSON.stringify(packet,null,2)}${service}${exploration}`;
 }
 
 export class ReactiveDriver {
@@ -297,7 +299,7 @@ export class ReactiveDriver {
   }
   async tick({wait=false}={}) {
     this.control.scheduler.tick();
-    this.configurePolls();this.bridgeLegacy();this.state.expireWaits();
+    this.configurePolls();this.bridgeLegacy();new NativeServices({root:this.root,control:this.control,config:this.config,now:this.now}).bridge();this.state.expireWaits();
     if(!this.rate.paused())for(const row of this.control.db.prepare("SELECT p.* FROM rt_polls p JOIN rt_tasks t ON t.task_id=p.task_id WHERE p.enabled=1 AND p.next_at<=? AND t.mode IN ('active','shadow') AND t.status<>'complete' ORDER BY p.next_at").all(this.now())){
       if(this.polling.size>=(this.config.poll_connections??2))break;
       this.launch(this.polling,row.subject,()=>this.poll(row));

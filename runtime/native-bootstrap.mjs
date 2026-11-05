@@ -36,7 +36,7 @@ export function nativeBootstrap(command,args,root) {
       input.native_verified!==true||!input.evidence_ref||!input.threads?.main||!input.thread_workspaces?.main)
       throw new Error('Actual migration authority, paused scheduler evidence and verified main binding are required');
     if(input.project_id!==config.scope.project_id)throw new Error('Migration cannot change the instance project');
-    const db=new DatabaseSync(join(root,'control.sqlite'));const imported=[];
+    const db=new DatabaseSync(join(root,'control.sqlite'));const imported=[],references=[];
     try{
       if(db.prepare("SELECT 1 FROM sqlite_master WHERE name='rt_process'").get()){
         const old=db.prepare('SELECT pid FROM rt_process WHERE id=1').get();if(old){let live=true;try{process.kill(old.pid,0);}catch(e){if(e.code==='ESRCH')live=false;else throw e;}if(live)throw new Error('Stop the existing runtime before layout migration');}
@@ -47,12 +47,14 @@ export function nativeBootstrap(command,args,root) {
         if(mailbox.prepare("SELECT 1 FROM sqlite_master WHERE name='batches'").get()&&mailbox.prepare("SELECT 1 FROM batches WHERE state IN ('reserved','sending','sent','uncertain','running')").get())
           throw new Error('Finish existing control batches before migration');
       }finally{mailbox.close();}}
+      const historicalRegistry=existsSync(join(root,'registry.json'))?read(join(root,'registry.json')):{};
       const next={...config,schema_version:2,layout:'native',legacy_roles:{...config.threads},
         threads:{main:input.threads.main,discovery:input.threads.discovery??null},
         thread_workspaces:{main:realpathSync(input.thread_workspaces.main),...(input.threads.discovery?{discovery:realpathSync(input.thread_workspaces.discovery)}:{})},
         migration:{source_message_id:input.source_message_id,scheduler_evidence_ref:input.scheduler_evidence_ref,evidence_ref:input.evidence_ref},
-        models:{...config.models,roles:{...config.models?.roles,main:null,discovery:null}},native_bindings_verified:true};
+        models:{...config.models,roles:{...config.models?.roles,execution:config.models?.roles?.execution??historicalRegistry.model_preference?.new_chat??historicalRegistry.model_preference??null,main:null,discovery:null}},native_bindings_verified:true};
       if(next.threads.discovery===next.threads.main)throw new Error('Discovery and main must be separate conversations');
+      if(db.prepare("SELECT owner_id FROM rt_tasks WHERE status<>'complete' GROUP BY owner_id HAVING count(*)>1").get())throw new Error('Assign one owner to each unfinished task before native migration');
       const work=new WorkCatalog(db,{config:next});
       work.atomic(()=>{
         if(db.prepare("SELECT 1 FROM sqlite_master WHERE name='rt_tasks'").get())for(const t of db.prepare('SELECT * FROM rt_tasks').all()){
@@ -60,18 +62,38 @@ export function nativeBootstrap(command,args,root) {
           const item=work.createInside({id:t.task_id,canonical_key:c.canonical_key,kind:c.task_kind??'work',title:c.objective,objective:c.objective,
             workspace:c.workspace,requirements:c.requirements,constraints:c.constraints,job_sources:c.job_sources,pull_requests:c.pull_requests,
             exploration:c.exploration,source:{kind:'migrated_runtime',key:`legacy:${t.task_id}`}}).task;
-          db.prepare("UPDATE work_items SET state='accepted',owner_thread_id=?,authorization=?,binding=? WHERE id=?")
-            .run(t.owner_id,JSON.stringify({source_message_id:t.mode_source,evidence_ref:t.authorization_ref,actual_human_verified:true}),
-              JSON.stringify({evidence_ref:input.evidence_ref,migrated_verified_owner:true}),item.id);imported.push(item.id);
+          db.prepare("UPDATE work_items SET state=?,owner_thread_id=?,authorization=?,binding=? WHERE id=?")
+            .run(t.status==='complete'?'completed':'accepted',t.status==='complete'?null:t.owner_id,JSON.stringify({source_message_id:t.mode_source,evidence_ref:t.authorization_ref,actual_human_verified:true}),
+              JSON.stringify({evidence_ref:input.evidence_ref,migrated_verified_owner:true}),item.id);
+          if(t.status==='complete')db.prepare("UPDATE work_items SET data=json_set(data,'$.legacy_owner_thread_id',?) WHERE id=?").run(t.owner_id,item.id);
+          imported.push(item.id);
+        }
+      });
+      const legacyRecords=existsSync(join(root,'registry.json'))?read(join(root,'registry.json')).task_registry?.items??{}:{};
+      work.atomic(()=>{
+        db.exec('CREATE TABLE IF NOT EXISTS work_legacy_references (task_id TEXT PRIMARY KEY,catalog_task_id TEXT NOT NULL,data TEXT NOT NULL,imported_at INTEGER NOT NULL)');
+        for(const [id,record]of Object.entries(legacyRecords)){
+          if(work.get(id))continue;
+          const canonical=record.canonical_key??`legacy:${config.instance_id}:${id}`;
+          const complete=record.task_complete===true||record.completed===true||['complete','completed','complete_archived','completed_archived','complete_archived_verified','archived_completed_reference','completed_reference_human_reply_sent'].includes(record.status);
+          const result=work.createInside({id,canonical_key:canonical,kind:'work',state:'draft',title:record.title??id,
+            objective:record.bounded_scope??(typeof record.contract==='string'?record.contract:record.title)??`Preserve original scope of ${id}`,
+            workspace:typeof record.worktree==='string'?record.worktree:typeof record.workspace==='string'?record.workspace:config.scope.project_root,
+            requirements:[{id:'original-scope',text:'Reconcile the preserved original source, scope and acceptance before any execution; migration does not grant implementation authority.'}],
+            constraints:['Migration reference only; preserve original holds, completion and authorization boundaries'],
+            source:{kind:'legacy_reference',key:`legacy:${id}`,evidence_ref:input.evidence_ref}});
+          if(result.created){const data={...result.task.data,legacy_record:record,legacy_owner_thread_id:record.owner_thread_id??null};
+            db.prepare('UPDATE work_items SET state=?,data=? WHERE id=?').run(complete?'completed':'candidate',JSON.stringify(data),id);}
+          db.prepare('INSERT OR IGNORE INTO work_legacy_references VALUES (?,?,?,?)').run(id,result.task.id,JSON.stringify(record),Date.now());references.push(id);
         }
       });
       work.seedBuiltins();
       const backup=path+'.pre-native-layout.'+Date.now();writeFileSync(backup,readFileSync(path),{mode:0o600});save(path,next);
-      if(existsSync(join(root,'runtime.json'))){const runtime=read(join(root,'runtime.json'));save(join(root,'runtime.json'),{...runtime,
+      if(existsSync(join(root,'runtime.json'))){const {control_lanes,...runtime}=read(join(root,'runtime.json'));save(join(root,'runtime.json'),{...runtime,
         inbox:{thread_id:next.threads.main,project_id:next.scope.project_id,workspace:next.thread_workspaces.main}});}
       const legacy=existsSync(join(root,'registry.json'))?read(join(root,'registry.json')):{};
       return {migrated:true,backup,imported_execution_tasks:imported,
-        remaining_legacy_tasks:Object.keys(legacy.task_registry?.items??{}).filter(id=>!imported.includes(id)),
+        imported_legacy_references:references,remaining_legacy_tasks:Object.keys(legacy.task_registry?.items??{}).filter(id=>!imported.includes(id)&&!references.includes(id)),
         native_chats_created:0,legacy_schedules_changed:false,receipts_preserved:true};
     }finally{db.close();}
   }

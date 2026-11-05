@@ -117,3 +117,20 @@ test('an exploration member can report when another task is primary in the share
   assert.equal(result.recorded,true);
  }finally{f.c.close();}
 });
+
+test('historical control aliases do not prevent native ordinary service ownership',()=>{
+ const f=workFixture();try{
+  f.config.threads.coordinator=OWNER;
+  const task=f.work.seedBuiltins().task;f.accept(task.id);f.bind(task.id);
+  assert.equal(f.work.get(task.id).owner_thread_id,OWNER);
+ }finally{f.c.close();}
+});
+
+
+test('completed history has no owner-needed blocker and cannot start again',()=>{
+ const f=workFixture();try{
+  const task=f.work.seedBuiltins().task;f.c.db.prepare("UPDATE work_items SET state='completed' WHERE id=?").run(task.id);
+  assert.deepEqual(f.work.blockers(task.id),[]);assert.equal(f.work.start(f.c.reactive,{task_id:task.id,queue_compatibility_verified:true}).reason,'already_complete');
+  assert.equal(f.c.reactive.task(task.id),null);
+ }finally{f.c.close();}
+});

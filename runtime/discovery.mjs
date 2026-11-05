@@ -9,17 +9,18 @@ export function sourceReadPlan(source,window) {
   const s=source.scope,requests=[];
   if(source.kind==='linear'){
     requests.push({tool:'linear_list_issues',arguments:{...(s.project?{project:s.project}:{}),...(s.team?{team:s.team}:{}),
-      assignee:s.assignee??'me',updatedAt:window.from,orderBy:'updatedAt',limit:50,includeArchived:false,
+      assignee:s.assignee_id??s.assignee??'me',updatedAt:window.from,orderBy:'updatedAt',limit:50,includeArchived:false,
       fields:['id','uuid','title','description','url','updatedAt','status','statusType','assigneeId','projectId','teamId']}});
     for(const issueId of arr(s.issue_ids))requests.push({tool:'linear_list_comments',arguments:{issueId,orderBy:'updatedAt',limit:100}});
     return {requests,followups:'Follow all cursors. Read comments on newly returned and watched issues; do not assume a comment necessarily updates its parent issue timestamp.'};
   }
   if(source.kind==='slack'){
-    for(const channel of s.channel_ids)requests.push({tool:s.access==='private'?'slack_search_public_and_private':'slack_search_public',arguments:{
-      filters:`in:<#${channel}>`,keywords:[],natural_language_query:'',after:String(Date.parse(window.from)/1000),before:String(Date.parse(window.to)/1000),
+    for(const channel of arr(s.channel_ids).length?s.channel_ids:[null])requests.push({tool:s.access==='private'?'slack_search_public_and_private':'slack_search_public',arguments:{
+      filters:[channel?`in:<#${channel}>`:null,s.with_user_id?`with:<@${s.with_user_id}>`:null].filter(Boolean).join(' '),keywords:[],natural_language_query:'',after:String(Date.parse(window.from)/1000),before:String(Date.parse(window.to)/1000),
       content_types:'messages',sort:'timestamp',sort_dir:'asc',limit:20,include_context:true}});
     return {requests,followups:'Follow all result cursors and read relevant full threads with slack_read_thread. Preserve root thread identity and reply/edit versions. Private access must match the recorded explicit user grant.'};
   }
+  if(source.kind==='codex')return {requests:[{tool:'list_threads',arguments:{mode:'history',source:'codex',hostId:s.host_id??'local',archived:false,limit:50}}],followups:'Filter by the exact configured project before reading actual human requests. Ignore control/discovery chats and other projects; never infer scope from a title. Preserve existing owners and running jobs. Register verified existing work without starting or duplicating it; source listing alone is not implementation authority.'};
   for(const id of arr(s.page_ids))requests.push({tool:'notion_fetch',arguments:{id,include_discussions:true}});
   for(const view_url of arr(s.view_urls))requests.push({tool:'notion_query_data_sources',arguments:{data:{mode:'view',view_url,page_size:100,is_archived:false}}});
   return {requests,followups:'Check Notion tool access, fetch source/view metadata when required, follow cursors and inspect truncation/unknown blocks. Read relevant discussions. Do not silently treat missing subtrees as no change.'};
@@ -44,7 +45,7 @@ export class DiscoveryStore {
         observation_id TEXT PRIMARY KEY,source_id TEXT NOT NULL,entity_key TEXT NOT NULL,item_key TEXT NOT NULL,version TEXT NOT NULL,
         data TEXT NOT NULL,disposition TEXT,task_id TEXT,decision TEXT,created_at INTEGER NOT NULL);
     `);
-    for(const [kind,interval] of [['linear',300000],['slack',300000],['notion',900000]])
+    for(const [kind,interval] of [['linear',300000],['slack',300000],['notion',900000],['codex',600000]])
       db.prepare('INSERT OR IGNORE INTO discovery_sources(source_id,kind,interval_ms) VALUES (?,?,?)').run(kind,kind,interval);
   }
   atomic(fn){this.db.exec('BEGIN IMMEDIATE');try{const r=fn();this.db.exec('COMMIT');return r;}catch(e){this.db.exec('ROLLBACK');throw e;}}
@@ -52,12 +53,14 @@ export class DiscoveryStore {
   configure({source_id,enabled,scope={},interval_ms,source_message_id,actual_human_verified,evidence_ref}){
     required(source_message_id,'source configuration authorization');required(evidence_ref,'scope evidence');
     if(actual_human_verified!==true)throw new Error('Source configuration requires actual user authorization');
-    const old=this.sources().find(s=>s.source_id===source_id);if(!old)throw new Error('Only Linear, Slack and Notion discovery sources are supported');
+    const old=this.sources().find(s=>s.source_id===source_id);if(!old)throw new Error('Unknown configured discovery source');
     if(enabled){
-      if(old.kind==='linear'&&!scope.project&&!scope.team)throw new Error('Configure a specific Linear project or team');
-      if(old.kind==='slack'&&(!arr(scope.channel_ids).length||scope.channel_ids.some(id=>!/^([CGD])[A-Z0-9]+$/.test(id))))throw new Error('Configure exact Slack channel/DM IDs');
+      if(old.kind==='linear'&&!scope.project&&!scope.team&&!(scope.assignment_only===true&&typeof scope.assignee_id==='string'&&scope.assignee_id))throw new Error('Configure a specific Linear project or team');
+      if(old.kind==='slack'&&((!arr(scope.channel_ids).length&&!/^U[A-Z0-9]+$/.test(scope.with_user_id??''))||arr(scope.channel_ids).some(id=>!/^([CGD])[A-Z0-9]+$/.test(id))))throw new Error('Configure exact Slack channel/DM IDs');
       if(old.kind==='slack'&&scope.access==='private'&&scope.private_access_authorized!==true)throw new Error('Private Slack source access needs its explicit user grant');
-      if(old.kind==='slack'&&scope.access!=='private'&&scope.channel_ids.some(id=>!id.startsWith('C')))throw new Error('Private channels/DMs cannot be queried through the public source');
+      if(old.kind==='slack'&&scope.access!=='private'&&arr(scope.channel_ids).some(id=>!id.startsWith('C')))throw new Error('Private channels/DMs cannot be queried through the public source');
+      if(old.kind==='slack'&&scope.with_user_id&&scope.professional_only!==true)throw new Error('User-directed Slack discovery must be limited to professional work');
+      if(old.kind==='codex'&&(scope.project_id!==this.config.scope.project_id||scope.host_id!=='local'))throw new Error('Codex discovery must use this exact local project');
       if(old.kind==='notion'&&!arr(scope.page_ids).length&&!arr(scope.view_urls).length)throw new Error('Configure specific Notion pages or saved views');
     }
     const interval=interval_ms??old.interval_ms;if(!Number.isSafeInteger(interval)||interval<60000)throw new Error('A discovery source interval must be at least one minute');
@@ -148,7 +151,10 @@ export class DiscoveryStore {
       if(previous?.complete || cursor!==(previous?.next_cursor??null))throw new Error('Resume the exact saved source cursor; do not skip or restart a partial stream');
       for(const o of observations){
         for(const k of ['entity_key','item_key','version','scope_key','summary','url'])required(o[k],k);
-        const allowed=source.kind==='linear'?[source.scope.project,source.scope.team].filter(Boolean):source.kind==='slack'?source.scope.channel_ids:[...arr(source.scope.page_ids),...arr(source.scope.view_urls)];
+        const allowed=source.kind==='linear'?[source.scope.project,source.scope.team,source.scope.assignment_only?source.scope.assignee_id:null].filter(Boolean):source.kind==='slack'?[...arr(source.scope.channel_ids),source.scope.with_user_id].filter(Boolean):source.kind==='codex'?[source.scope.project_id]:[...arr(source.scope.page_ids),...arr(source.scope.view_urls)];
+        if(source.kind==='linear'&&source.scope.assignment_only&&o.assignee_id!==source.scope.assignee_id)throw new Error('Observation has a different assigned user');
+        if(source.kind==='slack'&&source.scope.with_user_id&&(o.relevant_user_id!==source.scope.with_user_id||o.professional_relevance!==true))throw new Error('Observation is outside the user-directed professional scope');
+        if(source.kind==='codex'&&(o.project_id!==source.scope.project_id||Object.values(this.config.threads??{}).includes(o.item_key)))throw new Error('Observation is outside ordinary work in this project');
         if(!allowed.includes(o.scope_key))throw new Error('Observation is outside the configured source scope');
         const id=`${source_id}:${source.revision}:${o.item_key}:${o.version}`,stored={...o,evidence_ref,source_kind:source.kind,source_revision:source.revision};
         const previous=this.db.prepare('SELECT data FROM discovery_observations WHERE observation_id=?').get(id);

@@ -93,3 +93,18 @@ test('an unavailable optional source does not freeze a healthy sources later win
   assert.equal(d.sources().find(s=>s.kind==='notion').last_success_at,null);
  }finally{f.c.close();}
 });
+
+test('migration preserves assigned-user intake and scoped native chat discovery without widening access',()=>{
+ const f=workFixture(),d=f.c.discovery;try{
+  configure(d,{assignment_only:true,assignee_id:'user-1'},'linear');
+  configure(d,{with_user_id:'U123',professional_only:true,access:'private',private_access_authorized:true},'slack');
+  configure(d,{project_id:'project',host_id:'local'},'codex');
+  const b=scan(f),plans=Object.fromEntries(b.snapshot.sources.map(s=>[s.kind,s.plan]));
+  assert.equal(plans.linear.requests[0].arguments.assignee,'user-1');
+  assert.equal(plans.slack.requests[0].arguments.filters,'with:<@U123>');
+  assert.equal(plans.codex.requests[0].arguments.archived,false);
+  assert.throws(()=>page(d,b,{observations:[{...observation,scope_key:'user-1',assignee_id:'other'}]}),/different assigned user/);
+  assert.throws(()=>d.ingest({batch_id:b.id,generation:b.generation,source_id:'codex',page_key:'wrong',complete:true,evidence_ref:'native',observations:[{...observation,entity_key:'codex:other',scope_key:'project',project_id:'other'}]}),/outside/);
+  assert.throws(()=>configure(d,{project_id:'other',host_id:'local'},'codex'),/exact local project/);
+ }finally{f.c.close();}
+});

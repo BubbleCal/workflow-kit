@@ -25,6 +25,8 @@
 
 旧实例保持兼容，不在启动时隐式迁移。先停止旧 runtime 和十分钟调度，核验没有在途控制批次或不确定外部动作。保护工程任务、作业、原始回执及旧 registry。
 
+一个负责人只绑定一个独立未完成任务。旧实例若有共享负责人，保留各 T 编号，先按实际用户的新建授权建立独立负责人；旧 owner 保存范围释放 checkpoint，经过现有 create/claim/settle 和原生回读后，用 runtime op transfer_owner 迁移暂停任务。已完成项只保留历史，不新建 owner。迁移命令拒绝未处理的共享负责人；不会通过合并任务规避唯一性。
+
 在实际迁移授权下保存 migration.json，包含 actual_human_verified、source_message_id、legacy_scheduler_paused、scheduler_evidence_ref、native_verified、evidence_ref、相同 project_id、threads.main 和 thread_workspaces.main；可选 discovery 同绑定格式。执行：
 
 ```sh
@@ -32,6 +34,6 @@ node workflow.mjs migrate --file observations/migration.json
 node workflow.mjs doctor
 ```
 
-命令备份 instance.json，导入已登记 rt_tasks 的原负责人和合同，保留任务模式、队列回执和旧文件，更新主对话通知目标，并列出尚未导入的旧账本任务。它不会修改或归档原生角色、停用 App 定时任务或擅自接管旧任务。未迁移任务需逐项核验后登记，原调度不得与新执行器同时驱动同一任务。再次检查 runtime 队列配置和迁移输出，再按实际授权恢复服务。
+命令备份 instance.json，导入已登记 rt_tasks 的原负责人和合同，保留任务模式、队列回执和旧文件，更新主对话通知目标，导入旧候选/历史记录并保留原授权边界。旧 control_lanes 自动移除；需要继续的交付/维护职责按 NATIVE_SERVICES.md 登记为普通任务。它不会修改或归档原生角色、停用 App 定时任务或擅自接管旧任务。未迁移任务需逐项核验后登记，原调度不得与新执行器同时驱动同一任务。再次检查 runtime 队列配置和迁移输出，再按实际授权恢复服务。
 
 旧四角色从零安装必须显式使用 init --legacy，并只遵循 LEGACY_START_HERE.md 和 LEGACY_ROLE_PROMPTS.md。

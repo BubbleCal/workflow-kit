@@ -19,8 +19,12 @@ export function reactiveOwners(databasePath) {
 export function nativeControlRuntime(databasePath) {
   if(databasePath===':memory:')return false;
   const root=dirname(databasePath),config=resolve(root,'runtime.json'),instance=resolve(root,'instance.json'),path=resolve(root,'control.sqlite');
-  if(![config,instance,path].every(existsSync))return false;
-  const settings=JSON.parse(readFileSync(config,'utf8')),binding=JSON.parse(readFileSync(instance,'utf8'));
+  if(!existsSync(instance))return false;
+  const binding=JSON.parse(readFileSync(instance,'utf8'));
+  // A paused native instance still owns its inputs; never revive the old trigger.
+  if(binding.layout==='native')return true;
+  if(![config,path].every(existsSync))return false;
+  const settings=JSON.parse(readFileSync(config,'utf8'));
   if(!settings.control_lanes||settings.control_lanes.coordinator?.thread_id!==binding.threads?.coordinator)return false;
   const db=new DatabaseSync(path,{readOnly:true});
   try{

@@ -1,5 +1,12 @@
 # Changes
 
+## 0.7.1
+
+- Complete paused native-layout migrations with one owner per independent unfinished task; retain completed work and historical candidate records without granting execution.
+- Add verified scope release, setup-only provisioning during a pause, and receipt-bound owner transfers that preserve jobs, task IDs and original acceptance.
+- Run optional delivery and maintenance as ordinary native-queue tasks with immutable batches, existing cadence and no legacy control sender.
+- Preserve scoped assigned-user, professional Slack and project-chat discovery alongside optional Notion intake; never revive the legacy trigger for a paused native instance.
+
 ## 0.7.0
 
 - Add durable one-time and fixed-interval runtime schedules with explicit timezone/offset semantics and user-source authorization.

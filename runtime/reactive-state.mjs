@@ -1,3 +1,4 @@
+import {pausedMigrationSetup} from './task-ownership.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { activeScopeExclusions } from './scope-exclusions.mjs';
 import { verifyExecutionProof, verifyNativeBinding } from './native-queue.mjs';
@@ -110,6 +111,7 @@ export class ReactiveState {
       }
       this.db.prepare(`INSERT INTO rt_tasks(task_id,owner_id,mode,contract,authorization_ref,mode_source,updated_at)
         VALUES (?,?,'shadow',?,?,?,?)`).run(task_id, owner_thread_id, canonical(contract), contract.authorization_ref, source_message_id, this.now());
+      if(contract.service_lane)this.db.prepare("UPDATE rt_tasks SET status='waiting' WHERE task_id=?").run(task_id);
       this.db.prepare('INSERT INTO rt_contracts VALUES (?,1,?,?,?)').run(task_id,canonical(contract),source_message_id,this.now());
       return { adopted: true, task: this.task(task_id) };
     });
@@ -411,7 +413,7 @@ export class ReactiveState {
         canonical(payload.scope_keys??[])===canonical(task.contract.scope_keys??[]) ? [] : ['reactive_wake_changed_or_paused'];
     }
     if(!['dispatch','create_thread','archive','pr_ready','slack_pr','merge','notion_sync'].includes(kind))return [];
-    if(task.mode==='paused')return ['reactive_task_paused'];
+    if(task.mode==='paused')return pausedMigrationSetup(kind,payload)&&payload.scope_handoff?.task_id===task_id ? [] : ['reactive_task_paused'];
     const c=payload.runtime_context;
     if(!c || c.contract_rev!==task.contract_rev || c.plan_rev!==task.plan_rev || c.context_rev!==task.context_rev || task.dirty)
       return ['reactive_plan_or_evidence_changed'];

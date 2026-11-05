@@ -66,7 +66,7 @@ export class ImmediateTriggers {
     if(old?.state==='sent')return {send:false,reason:'already_invoked',key:row.action_key,receipt:JSON.parse(old.receipt??'{}')};
     if(old&&!['prepared','deferred'].includes(old.state))return {send:false,reason:'preserve_existing_invocation_state',transport_state:old.state};
     if(row.covered_seq>=row.max_seq)return {send:false,reason:'already_observed',coverage:JSON.parse(row.coverage??'{}')};
-    if(this.nativeControlRuntime?.())return {send:false,reason:'native_queue_control_runtime',key:row.action_key,next:'The existing programmatic runtime will admit this durable input; do not invoke a second dispatcher.'};
+    if(this.nativeControlRuntime?.())return {send:false,reason:'native_queue_control_runtime',key:row.action_key,next:'The native workflow owns this durable input. Preserve it while paused; do not invoke a legacy dispatcher.'};
     if(!idle(snapshot,d.dispatcher_id,this.now()))return {send:false,coalesced:true,reason:'preserve_busy_or_unknown_dispatcher',
       next_native:{tool:'wait_threads',arguments:{targets:[{threadId:d.dispatcher_id,hostId:'local',...(snapshot?.cursor?{afterCursor:snapshot.cursor}:{})}],timeoutMs:15000}},
       next:'After the existing short turn ends, recheck human_trigger_status. If still uncovered, immediately prepare/claim once; never inject into an active turn.'};
