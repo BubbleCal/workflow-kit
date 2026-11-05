@@ -1,3 +1,4 @@
+import {reviewCreationReasons} from './review-intake.mjs';
 import {verifyNativeBinding,nativeReadback} from './native-queue.mjs';
 import {nativeLifecycleProgress,ownerActionReasons} from './owner-delivery.mjs';
 import { bindings, INSTANCE_ROOT, requireBindings, instancePolicyReasons } from './instance.mjs';
@@ -441,6 +442,8 @@ export class ControlStore {
   }
   prepare(input) {
     const key = required(input.key, 'action key');
+    const reviewReasons=reviewCreationReasons(this,input);
+    if(reviewReasons.length)return {prepared:false,allowed:false,reasons:reviewReasons};
     if(isQueuedResume(input.kind,input.payload)){
       const prefix=input.payload.intent==='resume_existing_wake'?'resume-execute':'resume-input';
       if(key!==`${prefix}:${input.task_id}:${input.payload.existing_queue_id}`)
