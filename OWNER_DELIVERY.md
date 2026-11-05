@@ -57,3 +57,5 @@ the authoritative native task has all acceptance and delivery obligations comple
 Routine updates remain in task evidence and bound pages. Use inbox only for actual
 user decisions, requested answers or important completion. Do not send cross-chat
 messages, open URLs to wake owners, or change selected windows/models/permissions.
+
+Repeated generations of the same lifecycle obligation remain separate pending events, but their counter, detection time and snapshot-file location do not invalidate an otherwise unchanged plan. Checkpoint and explicitly decide their disposition as usual. Actual source changes still mark the task dirty; existing human-decision waits are preserved.

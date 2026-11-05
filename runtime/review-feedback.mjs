@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+export const reviewSurface = reviews => (reviews??[]).map(r=>({id:String(r.database_id??r.id??''),body:String(r.body??''),state:r.state??null,
+  commit_id:r.commit_id??null,submitted_at:r.submitted_at??null,login:r.user?.login??r.author?.login??null,user_id:r.user?.id??r.author?.id??null,
+  app_id:r.app?.id??r.user?.app?.id??null})).sort((a,b)=>a.id.localeCompare(b.id));
+export const reviewSurfaceDigest = reviews => hash(reviewSurface(reviews));
 const required = (value, name) => { if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required`); };
 const fresh = (at, now) => Number.isFinite(Date.parse(at)) && Date.parse(at) <= now+5000 && now-Date.parse(at) <= 60000;
 export function pullRequestIdentity(payload) {
@@ -16,6 +20,7 @@ export class ReviewFeedback {
       CREATE TABLE IF NOT EXISTS feedback_items(item_key TEXT PRIMARY KEY,repository TEXT,pr_number INTEGER,data TEXT,digest TEXT);
       CREATE TABLE IF NOT EXISTS feedback_assessments(item_key TEXT,head TEXT,digest TEXT,disposition TEXT,reason TEXT,evidence_ref TEXT,validation_ref TEXT,PRIMARY KEY(item_key,head,digest));
       CREATE TABLE IF NOT EXISTS feedback_routes(route_key TEXT PRIMARY KEY,repository TEXT,pr_number INTEGER,head TEXT,owner_id TEXT,task_id TEXT,item_keys TEXT,control_action_key TEXT,evidence_ref TEXT);`);
+    db.exec('CREATE TABLE IF NOT EXISTS feedback_source_versions(repository TEXT,pr_number INTEGER,head TEXT,checked_at TEXT,surface_digest TEXT,review_digest TEXT,PRIMARY KEY(repository,pr_number))');
   }
   ingest(snapshot) {
     const {repository,pr_number,head_sha,checked_at,evidence_ref}=snapshot;
@@ -44,6 +49,8 @@ export class ReviewFeedback {
     }
     this.db.prepare('INSERT INTO feedback_snapshots VALUES (?,?,?,?,?) ON CONFLICT(repository,pr_number) DO UPDATE SET head=excluded.head,checked_at=excluded.checked_at,evidence_ref=excluded.evidence_ref')
       .run(repository,pr_number,head_sha,checked_at,evidence_ref);
+    const surface={reviews:reviewSurface(snapshot.reviews),inline:snapshot.review_comments,issue:snapshot.issue_comments,threads:snapshot.review_threads};
+    this.db.prepare('INSERT INTO feedback_source_versions VALUES (?,?,?,?,?,?) ON CONFLICT(repository,pr_number) DO UPDATE SET head=excluded.head,checked_at=excluded.checked_at,surface_digest=excluded.surface_digest,review_digest=excluded.review_digest').run(repository,pr_number,head_sha,checked_at,hash(surface),reviewSurfaceDigest(snapshot.reviews));
     return {recorded:true,items:items.length,...this.status(repository,pr_number)};
   }
   status(repository,pr_number) {

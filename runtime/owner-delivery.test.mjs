@@ -32,3 +32,29 @@ test('native lifecycle progress binds the actual handled source generation',()=>
  assert.throws(()=>nativeLifecycleProgress(f.c,{key,generation:2,native_decision_id:d.decision_id,owner_thread_id:OWNER,evidence_ref:'triage'}),/exact lifecycle/);
  }finally{f.close();}
 });
+
+test('same lifecycle facts keep a clean publication plan while the new generation remains pending',()=>{
+ const f=setup();try{
+  const original={event:'pr_lifecycle_action',task_id:'T-1',lifecycle_key:'lifecycle:repo#1:same',lifecycle_generation:1,detected_at:'first',snapshot_ref:'first-file',action:'deliver_review',head:'a'.repeat(40)};
+  const input=(n,patch={})=>({event_id:`owner-input:lifecycle:repo#1:same:${n}:T-1`,task_id:'T-1',source:'owner_delivery',subject:'lifecycle:lifecycle:repo#1:same',type:'owned_followthrough',observed_at:f.now(),payload:{source_event_key:`lifecycle:repo#1:same:${n}`,source_kind:'event',original:{...original,lifecycle_generation:n,detected_at:`time-${n}`,snapshot_ref:`file-${n}`,...patch},instruction:'same original scope'},evidence_ref:`mail:${n}`,debounce_ms:0});
+  f.s.ingest(input(1));f.decide({disposition:'continue',plan:plan('deliver')});const before=f.s.task('T-1');f.advance(600001);
+  const repeat=f.s.ingest(input(2));assert.equal(repeat.obligation_queued,true);assert.equal(f.s.task('T-1').context_rev,before.context_rev);assert.equal(f.s.task('T-1').dirty,false);assert.equal(f.s.checkpoint('T-1').events[0].payload.original.lifecycle_generation,2);
+  const result=f.decide({disposition:'continue',plan:undefined});assert.equal(f.c.db.prepare('SELECT decision_id FROM rt_events WHERE event_id=?').get(input(2).event_id).decision_id,result.decision_id);
+  f.advance(1);f.s.ingest(input(3,{head:'b'.repeat(40)}));assert.equal(f.s.task('T-1').dirty,true);assert.equal(f.s.task('T-1').context_rev,before.context_rev+1);
+ }finally{f.close();}
+});
+
+test('a repeated lifecycle obligation never clears a dirty source update',()=>{
+ const f=setup();try{const payload={source_event_key:'intent:1',original:{event:'pr_lifecycle_action',task_id:'T-1',lifecycle_key:'intent',lifecycle_generation:1,action:'deliver_review',head:'a'.repeat(40)}};
+ const base={task_id:'T-1',source:'owner_delivery',subject:'lifecycle:intent',type:'owned_followthrough',observed_at:f.now(),evidence_ref:'original'};
+ f.s.ingest({...base,event_id:'first',payload});f.decide({disposition:'continue',plan:plan('deliver')});f.event('real-finding',{review:'request changes'});const revision=f.s.task('T-1').context_rev;
+ f.s.ingest({...base,event_id:'second',payload:{...payload,source_event_key:'intent:2',original:{...payload.original,lifecycle_generation:2}}});assert.equal(f.s.task('T-1').dirty,true);assert.equal(f.s.task('T-1').context_rev,revision);
+ }finally{f.close();}
+});
+
+test('unchanged lifecycle reminders preserve an actual pending human decision',()=>{
+ const f=setup();try{const original={event:'pr_lifecycle_action',task_id:'T-1',lifecycle_key:'held',lifecycle_generation:1,action:'deliver_review'};
+ const input=n=>({event_id:`held-${n}`,task_id:'T-1',source:'owner_delivery',subject:'lifecycle:held',type:'owned_followthrough',observed_at:f.now(),payload:{source_event_key:`held:${n}`,original:{...original,lifecycle_generation:n}},evidence_ref:`held:${n}`,debounce_ms:0});
+ f.s.ingest(input(1));f.decide({disposition:'needs_decision',plan:undefined});f.s.ingest(input(2));assert.equal(f.s.task('T-1').status,'needs_decision');assert.equal(f.s.task('T-1').wake_at,null);
+ }finally{f.close();}
+});

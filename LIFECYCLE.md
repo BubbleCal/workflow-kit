@@ -326,3 +326,7 @@ handoff includes the actual merge SHA. Recording progress itself does not retire
 anything: the coordinator then uses ordinary exact-generation `lifecycle_resolve`
 to retire only that merged watch, preserving the parent and other PR successors.
 No second merge, worker dispatch, CI rerun or task completion is implied.
+
+## Stable-source publication evidence
+
+Metadata-only observations can retain an existing Gatekeeper proof only when the exact head/state/draft/update identity, complete current feedback surface and observed check surface still match its stored binding. Review removal, content/state/producer changes and expiry invalidate retention. The original proof timestamp and evidence remain unchanged; final publication still requires fresh current proof. A missing binding is never inferred retroactively.

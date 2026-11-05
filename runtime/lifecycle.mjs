@@ -1,3 +1,4 @@
+import {reviewSurfaceDigest} from './review-feedback.mjs';
 import { scopeActionReasons } from './scope-exclusions.mjs';
 import { createHash } from 'node:crypto';
 import { reviewWindowAt, readReviewWindow } from './review-window.mjs';
@@ -57,6 +58,24 @@ export class LifecycleLedger {
       .run(key, task_id, owner_thread_id, authorization_ref, readiness ? stable(readiness) : null, this.now());
     return { tracked: true, pr_key: key };
   }
+  gatekeeperBinding(snapshot) {
+    const g=snapshot.gatekeeper;
+    if(!g||!snapshot.ci?.complete||!fresh(g.checked_at,this.now())||!g.identity?.verified||!g.reviews_complete)return null;
+    const feedback=this.db.prepare('SELECT * FROM feedback_source_versions WHERE repository=? AND pr_number=?').get(snapshot.repository,snapshot.pr_number);
+    if(!feedback?.surface_digest||feedback.head!==snapshot.head_sha||!fresh(feedback.checked_at,this.now(),60000)||
+      feedback.review_digest!==reviewSurfaceDigest(g.reviews))return null;
+    if(reviewStageReasons('slack_pr',{pr_url:`https://github.com/${snapshot.repository}/pull/${snapshot.pr_number}`,expected_head_sha:snapshot.head_sha},snapshot,this.now(),20*60000).some(r=>r.includes('Gatekeeper')))return null;
+    return {surface_digest:feedback.surface_digest,review_digest:feedback.review_digest,checks_digest:hash(checkSurface(snapshot.ci.checks)),identity_digest:hash(g.identity)};
+  }
+  retainedGatekeeper(snapshot,previous) {
+    if(snapshot.gatekeeper!==undefined||!previous?.gatekeeper_binding||!previous.gatekeeper||!fresh(previous.gatekeeper.checked_at,this.now())||
+      ['head_sha','state','draft','updated_at'].some(k=>snapshot[k]!==previous[k]))return {};
+    const feedback=this.db.prepare('SELECT * FROM feedback_source_versions WHERE repository=? AND pr_number=?').get(snapshot.repository,snapshot.pr_number),binding=previous.gatekeeper_binding;
+    if(!feedback||feedback.head!==snapshot.head_sha||!fresh(feedback.checked_at,this.now(),60000)||feedback.surface_digest!==binding.surface_digest||
+      feedback.review_digest!==binding.review_digest||hash(previous.gatekeeper.identity)!==binding.identity_digest)return {};
+    if(snapshot.ci!==undefined&&(!snapshot.ci?.complete||snapshot.ci.head_sha!==snapshot.head_sha||hash(checkSurface(snapshot.ci.checks))!==binding.checks_digest))return {};
+    return {gatekeeper:previous.gatekeeper,gatekeeper_binding:binding};
+  }
   observe(snapshot, { feedbackCollected = false } = {}) {
     const key = prKey(snapshot.repository, snapshot.pr_number);
     if (!this.db.prepare('SELECT 1 FROM lifecycle_prs WHERE pr_key=?').get(key)) return { tracked: false };
@@ -68,7 +87,7 @@ export class LifecycleLedger {
     const previous = old.snapshot ? JSON.parse(old.snapshot) : null;
     if (previous && Date.parse(previous.checked_at) > Date.parse(snapshot.checked_at)) throw new Error('Out-of-order PR snapshot');
     const stateChanged = !previous || ['state','head_sha','draft'].some(k=>previous[k]!==snapshot[k]);
-    const saved = { ...snapshot, ...retainedApplicableCI(snapshot,previous), ...(snapshot.ci === undefined && previous?.head_sha === snapshot.head_sha && previous.ci ? {ci:previous.ci} : {}), state_revision:(previous?.state_revision ?? 0)+Number(stateChanged) };
+    const saved = { ...snapshot, gatekeeper_binding:snapshot.gatekeeper!==undefined?this.gatekeeperBinding(snapshot):null, ...this.retainedGatekeeper(snapshot,previous), ...retainedApplicableCI(snapshot,previous), ...(snapshot.ci === undefined && previous?.head_sha === snapshot.head_sha && previous.ci ? {ci:previous.ci} : {}), state_revision:(previous?.state_revision ?? 0)+Number(stateChanged) };
     this.db.prepare('UPDATE lifecycle_prs SET snapshot=?,feedback_updated_at=CASE WHEN ? THEN ? ELSE feedback_updated_at END,updated_at=? WHERE pr_key=?')
       .run(stable(saved), Number(feedbackCollected), snapshot.updated_at, this.now(), key);
     return { observed: true, pr_key: key };

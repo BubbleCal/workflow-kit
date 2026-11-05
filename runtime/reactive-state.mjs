@@ -219,7 +219,12 @@ export class ReactiveState {
       return { recorded: false, duplicate: true, context_rev: old.context_rev };
     }
     const fact = this.db.prepare('SELECT * FROM rt_facts WHERE task_id=? AND subject=?').get(task_id,subject);
-    const version = fingerprint(payload), stale = fact && at < fact.observed_at;
+    const lifecycle=source==='owner_delivery' && type==='owned_followthrough' && payload?.original?.event==='pr_lifecycle_action' &&
+      payload.original.task_id===task_id && payload.source_event_key===`${payload.original.lifecycle_key}:${payload.original.lifecycle_generation}` &&
+      subject===`lifecycle:${payload.original.lifecycle_key}`;
+    let contextPayload=payload;
+    if(lifecycle){const {source_event_key,...envelope}=payload;const {lifecycle_generation,detected_at,snapshot_ref,...original}=payload.original;contextPayload={...envelope,original};}
+    const version = fingerprint(contextPayload), stale = fact && at < fact.observed_at;
     const unchanged = !stale && fact?.version === version;
     const revision = task.context_rev + (stale || unchanged ? 0 : 1);
     this.db.prepare('INSERT INTO rt_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL)').run(event_id,task_id,source,subject,type,at,this.now(),digest,canonical(payload),evidence_ref,revision,stale?'stale':unchanged?'unchanged':null);
@@ -227,6 +232,13 @@ export class ReactiveState {
     this.db.prepare(`INSERT INTO rt_facts VALUES (?,?,?,?,?,?,?) ON CONFLICT(task_id,subject) DO UPDATE SET
       version=excluded.version,observed_at=excluded.observed_at,checked_at=excluded.checked_at,data=excluded.data,evidence_ref=excluded.evidence_ref`)
       .run(task_id,subject,version,at,this.now(),canonical(payload),evidence_ref);
+    if (unchanged && lifecycle && task.status!=='complete') {
+      // A new generation requests follow-through on the same facts. Keep the
+      // exact event for acknowledgement without invalidating a valid plan.
+      this.db.prepare('UPDATE rt_events SET disposition=NULL WHERE event_id=?').run(event_id);
+      if(task.status!=='needs_decision')this.db.prepare('UPDATE rt_tasks SET first_pending_at=COALESCE(first_pending_at,?),wake_at=COALESCE(wake_at,?),updated_at=? WHERE task_id=?').run(this.now(),this.now(),this.now(),task_id);
+      return {recorded:true,unchanged:true,obligation_queued:true,context_rev:revision};
+    }
     if (unchanged) return { recorded: true, unchanged: true, context_rev: revision };
     if(task.contract.service_lane && type!=='service_batch_ready' && !this.openWake(task_id)) {
       this.db.prepare("UPDATE rt_events SET disposition='service_observation' WHERE event_id=?").run(event_id);
