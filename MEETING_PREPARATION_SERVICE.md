@@ -2,6 +2,8 @@
 
 When accept_calendar_preparation names service_task_id, every authorized meeting
 occurrence belongs to that single recurring task and its dedicated conversation.
+Name this recurring conversation simply “会议准备”, without a task-number prefix;
+retain its stable task ID internally and preserve the user's manual title.
 The configured lead_minutes is the start lead, not a completion deadline. Use the
 actual user rule; Yang selected 90 minutes on 2026-11-05. Keep existing exclusions,
 Chinese briefs and English speaking points. Recording summaries remain separate.
