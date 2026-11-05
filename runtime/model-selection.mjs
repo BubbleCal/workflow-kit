@@ -14,7 +14,12 @@ export function assessDifficulty(input) {
     if (!allowed.includes(input[key])) throw new Error(`Invalid difficulty ${key}`);
   if (typeof input.reason !== 'string' || !input.reason.trim() || input.reason.length > 1000)
     throw new Error('Task difficulty needs a concise reason grounded in its full scope');
-  return { level:input.scope==='bounded'&&input.uncertainty==='low'&&input.validation==='routine'?'simple':'other',
+  if (input.complexity!==undefined && !['difficult','extreme'].includes(input.complexity)) throw new Error('Invalid task complexity');
+  if (input.target_repositories!==undefined && (!Array.isArray(input.target_repositories)||input.target_repositories.some(r=>typeof r!=='string'||!/^[-\w.]+\/[-\w.]+$/.test(r))||!input.repository_evidence_ref?.trim()))
+    throw new Error('Target repositories need exact owner/repo names and scope evidence');
+  return { ...(input.complexity?{complexity:input.complexity}:{}),
+    ...(input.target_repositories?{target_repositories:[...new Set(input.target_repositories)],repository_evidence_ref:input.repository_evidence_ref}:{}),
+    level:!input.complexity&&input.scope==='bounded'&&input.uncertainty==='low'&&input.validation==='routine'?'simple':'other',
     scope:input.scope,uncertainty:input.uncertainty,validation:input.validation,reason:input.reason.trim() };
 }
 
@@ -31,6 +36,13 @@ export function withCreationModel(kind, payload, selection) {
       throw new Error('Difficulty routing needs both configured model and effort pairs');
     const assessment=assessDifficulty(payload.difficulty_assessment);
     let chosen=selection.routes[assessment.level];
+    if (selection.repository_routes && assessment.target_repositories?.length) {
+      const tier=assessment.level==='simple'?'simple':assessment.complexity??([assessment.scope,assessment.uncertainty,assessment.validation].includes('unknown')?'unknown':'difficult');
+      const candidates=assessment.target_repositories.map(repo=>selection.repository_routes[repo]?.[tier]??chosen);
+      for (const route of candidates) if (!route.model||!route.thinking||!Number.isFinite(route.priority))
+        throw new Error('Repository routing needs model, effort and priority for every applicable route');
+      chosen=candidates.reduce((a,b)=>b.priority>a.priority?b:a);
+    }
     const override=payload.model_override;
     if (override) {
       if (override.actual_human_verified!==true || !override.source_message_id || !override.verbatim_text || !override.evidence_ref || !override.model || !override.thinking || !payload.canonical_task_key || override.canonical_task_key!==payload.canonical_task_key)

@@ -760,3 +760,12 @@ test('difficulty routing reaches claimed create arguments and remains frozen on 
  const b=createAction('difficulty-unknown','unassessed-work');assert.equal(s.prepare(b).prepared,true);const claimed=s.claim({key:b.key,owner:'creator',evidence:b.evidence});assert.equal(claimed.payload.native.model,'gpt-6-astra');assert.equal(claimed.payload.native.thinking,'xhigh');
  }finally{s.close();}
 });
+
+test('repository PR routing is preserved in actual claimed creation arguments',()=>{
+ const sol={model:'gpt-6.1-sol',thinking:'high',priority:1},hard={...sol,thinking:'xhigh',priority:2},astra={model:'gpt-6-astra',thinking:'xhigh',priority:3};
+ const policy={version:3,mode:'task_difficulty',source_message_id:'human:repo-policy',routes:{simple:sol,other:astra},repository_routes:{'lance-format/lance':{simple:sol,difficult:hard,extreme:astra,unknown:astra}}};
+ const s=new ControlStore(':memory:',{now:()=>NOW,modelSelection:()=>policy});
+ try{const a=createAction('repo-difficulty','oss-change');a.payload.difficulty_assessment={scope:'bounded',uncertainty:'material',validation:'specialist',complexity:'difficult',target_repositories:['lance-format/lance'],repository_evidence_ref:'actual-issue',reason:'Nontrivial implementation within one known index path.'};
+ assert.equal(s.prepare(a).prepared,true);const claim=s.claim({key:a.key,owner:'creator',evidence:a.evidence});assert.equal(claim.claimed,true);assert.equal(claim.payload.native.model,'gpt-6.1-sol');assert.equal(claim.payload.native.thinking,'xhigh');assert.deepEqual(claim.payload.difficulty_assessment.target_repositories,['lance-format/lance']);
+ }finally{s.close();}
+});

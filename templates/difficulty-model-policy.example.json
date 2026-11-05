@@ -1,10 +1,86 @@
 {
-  "version": 2,
+  "version": 3,
   "mode": "task_difficulty",
   "source_message_id": "<actual-user-model-policy-message>",
   "scope": "New task conversations only; explicit per-task user choices take precedence",
   "routes": {
-    "simple": { "model": "gpt-6.1-sol", "thinking": "high" },
-    "other": { "model": "gpt-6-astra", "thinking": "xhigh" }
+    "simple": {
+      "model": "gpt-6.1-sol",
+      "thinking": "high",
+      "priority": 1
+    },
+    "other": {
+      "model": "gpt-6-astra",
+      "thinking": "xhigh",
+      "priority": 3
+    }
+  },
+  "repository_routes": {
+    "lance-format/lance": {
+      "simple": {
+        "model": "gpt-6.1-sol",
+        "thinking": "high",
+        "priority": 1
+      },
+      "difficult": {
+        "model": "gpt-6.1-sol",
+        "thinking": "xhigh",
+        "priority": 2
+      },
+      "extreme": {
+        "model": "gpt-6-astra",
+        "thinking": "xhigh",
+        "priority": 3
+      },
+      "unknown": {
+        "model": "gpt-6-astra",
+        "thinking": "xhigh",
+        "priority": 3
+      }
+    },
+    "lancedb/lancedb": {
+      "simple": {
+        "model": "gpt-6.1-sol",
+        "thinking": "high",
+        "priority": 1
+      },
+      "difficult": {
+        "model": "gpt-6.1-sol",
+        "thinking": "xhigh",
+        "priority": 2
+      },
+      "extreme": {
+        "model": "gpt-6-astra",
+        "thinking": "xhigh",
+        "priority": 3
+      },
+      "unknown": {
+        "model": "gpt-6-astra",
+        "thinking": "xhigh",
+        "priority": 3
+      }
+    },
+    "lancedb/sophon": {
+      "simple": {
+        "model": "gpt-6.1-sol",
+        "thinking": "high",
+        "priority": 1
+      },
+      "difficult": {
+        "model": "gpt-6-astra",
+        "thinking": "xhigh",
+        "priority": 3
+      },
+      "extreme": {
+        "model": "gpt-6-astra",
+        "thinking": "xhigh",
+        "priority": 3
+      },
+      "unknown": {
+        "model": "gpt-6-astra",
+        "thinking": "xhigh",
+        "priority": 3
+      }
+    }
   }
 }

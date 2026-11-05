@@ -4,10 +4,17 @@ The authoritative policy is `instance.json.models.roles.execution`. Read it at
 creation time; do not copy model names into individual task-role prompts.
 Existing conversations and immutable creation actions retain their configuration.
 
-Under the user's difficulty policy, the configured routes are:
+Under the user's repository-specific policy, the configured PR-work routes are:
 
-- Simple: `gpt-6.1-sol`, reasoning `high`.
-- Other or uncertain: `gpt-6-astra`, reasoning `xhigh`.
+| Target repository | Simple | Difficult | Extremely difficult |
+| --- | --- | --- | --- |
+| lance-format/lance | GPT-6.1 Sol / high | GPT-6.1 Sol / xhigh | GPT-6 Astra / xhigh |
+| lancedb/lancedb | GPT-6.1 Sol / high | GPT-6.1 Sol / xhigh | GPT-6 Astra / xhigh |
+| lancedb/sophon | GPT-6.1 Sol / high | GPT-6 Astra / xhigh | GPT-6 Astra / xhigh |
+
+Other tasks retain the existing simple/other routes. Unknown repository or
+difficulty uses that existing fallback, not a guess from the sidebar project.
+For mixed-repository scope, use the highest-priority applicable route.
 
 The main/discovery agent assesses the whole task before requesting its owner.
 Do not judge by the short setup prompt, title, file count or the word "docs".
@@ -23,6 +30,15 @@ A task is simple only when all three dimensions qualify:
 Use `scope="broad"`, `uncertainty="material"`, `validation="specialist"` as
 applicable. Unknown dimensions use `"unknown"`. Include a short, task-specific
 `reason`. The runtime derives simple/other; a simple label alone is insufficient.
+For non-simple PR work, use complexity="difficult" or "extreme". Ordinary
+nontrivial fixes/features are difficult. Extreme requires a concrete reason, such
+as complex low-level optimization with interacting algorithm, memory-layout and
+concurrency constraints; specialist validation alone does not imply extreme.
+Record target_repositories as exact owner/repo names and repository_evidence_ref
+from the actual task/source scope inside difficulty_assessment. Do this before
+requesting the owner even if no PR exists yet. The shared LanceDB sidebar project
+or a Lance checkout does not establish a PR destination. These fields are saved
+and carried to native creation arguments with the assessment.
 Routine authorized meeting preparation is simple when it follows established
 profiles: source gathering, summarizing, and drafting speaking points. A recurring
 service or multiple information sources alone does not make that work broad or
@@ -34,7 +50,7 @@ that assessment. Preserve any explicit task-specific user model choice.
 After accepting an unowned task, call:
 
 ```json
-{"op":"assess_difficulty","task_id":"T-...","expected_revision":1,"difficulty_assessment":{"scope":"bounded","uncertainty":"low","validation":"routine","reason":"One documented option correction with an established example and a focused check."}}
+{"op":"assess_difficulty","task_id":"T-...","expected_revision":1,"difficulty_assessment":{"scope":"bounded","uncertainty":"low","validation":"routine","target_repositories":["lance-format/lance"],"repository_evidence_ref":"<actual task scope>","reason":"One documented option correction with an established example and a focused check."}}
 ```
 
 Use JSON stdin with `node workflow.mjs task op`. `request_owner` also accepts
