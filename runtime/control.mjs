@@ -1,3 +1,4 @@
+import {reviewClosureArchiveActor} from './review-closure.mjs';
 import {readReviewReportPolicy,reviewReportTaskReasons} from './review-report.mjs';
 import {deliveryGuardKind,reviewDecisionReasons,reviewDecisionTaskReasons} from './review-decision.mjs';
 import {reviewCreationReasons} from './review-intake.mjs';
@@ -460,7 +461,7 @@ export class ControlStore {
       if(reasons.length)return {prepared:false,allowed:false,reasons};
       input={...input,evidence:{...input.evidence,queued_resume_verified:true}};
     }
-    if(bindings.delivery.owner_managed){const reasons=ownerActionReasons(this,input.kind,input.task_id,input.payload,input.evidence);if(reasons.length)return {prepared:false,allowed:false,reasons};}
+    if(bindings.delivery.owner_managed&&!reviewClosureArchiveActor(this,input.kind,input.task_id,input.payload,input.evidence)){const reasons=ownerActionReasons(this,input.kind,input.task_id,input.payload,input.evidence);if(reasons.length)return {prepared:false,allowed:false,reasons};}
     const scopeReasons=scopeActionReasons(this.taskRegistry(),deliveryGuardKind(input.kind),input.task_id,input.payload,input.evidence);
     if(scopeReasons.length)return {prepared:false,allowed:false,reasons:scopeReasons};
     const ownership = ownershipReasons(input.kind,input.task_id,input.payload,input.evidence,this.taskRegistry(),this.db,input.key);
@@ -558,7 +559,7 @@ export class ControlStore {
         if(reasons.length)return {claimed:false,reasons};
         evidence={...evidence,queued_resume_verified:true};
       }
-      if(bindings.delivery.owner_managed){const reasons=ownerActionReasons(this,row.kind,row.task_id,payload,evidence,owner);if(reasons.length)return {claimed:false,reasons};}
+      if(bindings.delivery.owner_managed&&!reviewClosureArchiveActor(this,row.kind,row.task_id,payload,evidence,owner)){const reasons=ownerActionReasons(this,row.kind,row.task_id,payload,evidence,owner);if(reasons.length)return {claimed:false,reasons};}
       const reactiveReasons = this.reactive.actionReasons(deliveryGuardKind(row.kind),row.task_id,payload);
       if (reactiveReasons.length) return { claimed:false, reasons:reactiveReasons };
       const scopeReasons=scopeActionReasons(this.taskRegistry(),deliveryGuardKind(row.kind),row.task_id,payload,evidence);

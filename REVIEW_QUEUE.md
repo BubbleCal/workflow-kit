@@ -1,3 +1,5 @@
+> Terminal PR rule: at the start and end of every normal Review Queue cycle, reconcile **all existing review owners**, including completed reports and eligibility waits, under REVIEW_TASK_CLOSURE.md. Closed or merged PRs end review scope and their conversations are archived; this cleanup does not consume the five-new-PR limit. Preserve this recurring service.
+
 > Completed reviews must reach Yang in main, not just an artifact or the original chat. Follow REVIEW_RESULT_DELIVERY.md. Review Queue checks actual notification receipts, while each original reviewer sends its result; reuse main messages already presented and do not repeat unchanged conclusions.
 
 # Review Queue: discovery and independent read-only reviews
