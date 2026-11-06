@@ -1,7 +1,9 @@
+import {OwnerHealth} from './owner-health.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {workFixture,DISCOVERY} from './test-fixtures/work.mjs';
 import {nativeProof} from './test-fixtures/reactive.mjs';
+import {DiscoveryStore} from './discovery.mjs';
 
 const configure=(d,scope={project:'project'},source_id='linear')=>d.configure({source_id,enabled:true,scope,
   source_message_id:'user:sources',actual_human_verified:true,evidence_ref:'actual-scope'});
@@ -13,6 +15,43 @@ const page=(d,b,patch={})=>d.ingest({batch_id:b.id,generation:b.generation,sourc
 const classify=(d,disposition='candidate',patch={})=>d.classify({observation_id:d.status().observations.find(o=>o.disposition===null).observation_id,
   disposition,reason:'Compared against task identities',evidence_ref:'source-readback',candidate,...patch});
 const finish=(d,b,patch={})=>d.finish({batch_id:b.id,generation:b.generation,source_results:[{source_id:'linear',complete:true,followups_complete:true}],...patch});
+
+test('discovery start interval spans fresh scans, repeated begin and store restart',()=>{
+ const f=workFixture();try{let d=f.c.discovery;f.config.discovery={min_start_interval_ms:900000};configure(d);
+  const started=f.now(),b=scan(f);f.advance(120000);
+  d.begin({batch_id:b.id,generation:b.generation,native_proof:nativeProof({thread:DISCOVERY,message:b.prompt,now:f.now()})});
+  page(d,b,{observations:[]});finish(d,b);f.advance(180000);
+  let calls=0;const mailbox={enqueue:()=>{calls++;return {queued:true};}};
+  assert.deepEqual(d.enqueueDue(mailbox,'/instance'),{queued:false,reason:'discovery_start_interval',eligible_at:started+900000});
+  d=new DiscoveryStore(f.c.db,{config:f.config,work:f.work,reactive:f.c.reactive,now:f.now});f.c.discovery=d;
+  f.advance(599999);assert.equal(d.enqueueDue(mailbox,'/instance').queued,false);assert.equal(calls,0);
+  f.advance(1);const next=scan(f);assert.notEqual(next.id,b.id);
+  assert.equal(Date.parse(next.snapshot.sources[0].window.from),Date.parse(b.snapshot.sources[0].window.to)-120000);
+ }finally{f.c.close();}
+});
+
+test('discovery start interval holds checkpoint retries without losing source cursors',()=>{
+ const f=workFixture();try{const d=f.c.discovery;f.config.discovery={min_start_interval_ms:900000};configure(d);
+  const b=scan(f);page(d,b,{observations:[],complete:false,next_cursor:'next-2'});
+  finish(d,b,{source_results:[{source_id:'linear',complete:false,reason:'bounded scan budget'}]});
+  f.advance(60000);
+  assert.equal(d.enqueueDue({enqueue(){assert.fail('Checkpoint must remain deferred');}},'/instance').reason,'discovery_start_interval');
+  assert.equal(d.batch(b.id).generation,1);assert.equal(d.batch(b.id).pages[0].data.next_cursor,'next-2');
+  f.advance(840000);const resumed=scan(f);assert.equal(resumed.id,b.id);assert.equal(resumed.generation,2);
+  assert.deepEqual(resumed.snapshot.sources[0].window,b.snapshot.sources[0].window);
+  page(d,resumed,{page_key:'page-2',cursor:'next-2',observations:[]});assert.equal(finish(d,resumed).finished,true);
+ }finally{f.c.close();}
+});
+
+test('enabling a discovery start interval honors native starts recorded before the upgrade',()=>{
+ const f=workFixture();try{const d=f.c.discovery;
+  f.config.discovery={owner_health_interval_ms:1800000};configure(d);const b=scan(f);
+  page(d,b,{observations:[]});finish(d,b);
+  f.c.db.prepare('UPDATE discovery_batches SET started_at=NULL').run();
+  f.config.discovery.min_start_interval_ms=900000;f.advance(300000);
+  assert.equal(d.enqueueDue({enqueue(){assert.fail('Recent pre-upgrade start must be retained');}},'/instance').reason,'discovery_start_interval');
+ }finally{f.c.close();}
+});
 
 test('source plans remain scoped and private Slack needs a recorded user grant',()=>{
  const f=workFixture();try{const d=f.c.discovery;
@@ -166,7 +205,7 @@ test('classifying a real thread for an existing owner automatically retains futu
     entity_key:'slack:C123:1793723567.440139',item_key:'1793882898.958309',version:'v1',scope_key:'U123',channel_id:'C123',thread_ts:'1793723567.440139',
     relevant_user_id:'U123',professional_relevance:true,summary:'Deployment follow-up',url:'https://slack.com/archives/C123/p1793882898958309'}]});
   const result=d.classify({observation_id:d.status().observations[0].observation_id,disposition:'existing',task_id:t.id,identity_verified:true,reason:'Existing task',evidence_ref:'task-thread-identity'});
-  assert.equal(result.thread_watch.watching,true);assert.equal(d.sources().find(s=>s.source_id===result.thread_watch.source_id).interval_ms,600000);
+  assert.equal(result.thread_watch.watching,true);assert.equal(d.sources().find(s=>s.source_id===result.thread_watch.source_id).interval_ms,d.sources().find(s=>s.source_id==='slack').interval_ms);
   assert.equal(d.batch(b.id).state,'running');assert.equal(f.work.list().length,1);
  }finally{f.c.close();}
 });
@@ -218,5 +257,54 @@ test('a discovery turn that ended without finish resumes its preserved pages onl
   const resumed=scan(f);assert.equal(resumed.id,b.id);assert.equal(resumed.generation,b.generation+1);
   assert.equal(resumed.pages[0].data.next_cursor,'page2');
   assert.throws(()=>d.recover(req),/Stale/);
+ }finally{f.c.close();}
+});
+
+test('cadence changes preserve active scan evidence and finish with the current aligned interval',()=>{
+ const f=workFixture();try{const d=f.c.discovery;f.config.discovery={align_poll_slots:true};configure(d);const b=scan(f);
+  page(d,b,{observations:[]});const rev=d.sources().find(s=>s.source_id==='linear').revision;
+  d.setCadences({intervals:{linear:900000},source_message_id:'user:cadence',actual_human_verified:true,evidence_ref:'source'});
+  assert.equal(d.batch(b.id).state,'running');assert.equal(d.batch(b.id).pages.length,1);
+  assert.equal(d.sources().find(s=>s.source_id==='linear').revision,rev);finish(d,b);
+  const current=d.sources().find(s=>s.source_id==='linear');
+  assert.equal(current.next_at,(Math.floor(Date.parse(b.snapshot.sources[0].window.to)/900000)+1)*900000);
+  assert.equal(current.last_success_at,Date.parse(b.snapshot.sources[0].window.to));
+ }finally{f.c.close();}
+});
+
+test('compact discovery retains the latest cursor and explicit access to unclassified raw evidence',()=>{
+ const f=workFixture();try{const d=f.c.discovery;configure(d);const b=scan(f);
+  page(d,b,{complete:false,next_cursor:'next-2'});
+  const compact=d.plan(b.id);assert.equal(compact.pages,undefined);assert.equal(compact.stored_page_count,1);
+  assert.equal(compact.streams[0].next_cursor,'next-2');assert.equal(compact.prompt,undefined);
+  assert.deepEqual(d.page({batch_id:b.id,page_key:compact.streams[0].last_page_key}).data.observations,[observation]);
+  assert.equal(d.pending({source_id:'linear'}).length,1);
+  assert.equal(d.plan(b.id,{full:true}).pages.length,1);
+ }finally{f.c.close();}
+});
+
+test('unchanged blocked-source retries back off without advancing coverage or replaying pages',()=>{
+ const f=workFixture();try{const d=f.c.discovery;f.config.discovery={failure_backoff_max_ms:{linear:28800000}};configure(d);const b=scan(f);
+  const fail=b=>finish(d,b,{source_results:[{source_id:'linear',complete:false,reason:'unchanged capability unavailable'}]});
+  fail(b);f.advance(300000);const resumed=scan(f);fail(resumed);
+  const s=d.sources().find(s=>s.source_id==='linear');assert.equal(s.next_at,f.now()+600000);assert.equal(s.last_success_at,null);
+  assert.equal(JSON.parse(s.health).failure_streak,2);assert.equal(d.batch(b.id).state,'checkpointed');
+ }finally{f.c.close();}
+});
+
+
+test('blocked source history cannot skip due owner recovery or turn it into repeated scans',()=>{
+ const f=workFixture();try{
+  f.config.discovery={owner_health_interval_ms:1800000};
+  const d=f.c.discovery,t=f.work.create(candidate).task;f.accept(t.id);f.bind(t.id);f.begin(t.id);configure(d);
+  const b=scan(f),targets=d.plan(b.id).owner_health.targets;
+  assert.equal(targets.length,1);assert.equal(targets[0].task_id,t.id);
+  const failed={source_results:[{source_id:'linear',complete:false,reason:'Provider history unavailable'}]};
+  assert.throws(()=>finish(d,b,failed),/Observe owner health/);
+  const h=new OwnerHealth(f.c,{now:f.now});h.observe({task_id:t.id,native_proof:nativeProof({now:f.now()})});
+  assert.equal(finish(d,b,failed).checkpointed,true);
+  assert.equal(d.sources()[0].last_success_at,null);
+  f.advance(300000);const resumed=scan(f);assert.equal(d.plan(resumed.id).owner_health.targets.length,0);
+  assert.equal(finish(d,resumed,failed).checkpointed,true);
  }finally{f.c.close();}
 });

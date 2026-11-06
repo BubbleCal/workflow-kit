@@ -1,6 +1,7 @@
+import {DesktopLoader} from './desktop-loader.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync} from 'node:fs';
+import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {ReactiveDriver} from './reactive-driver.mjs';
@@ -258,6 +259,122 @@ test('maintenance wakes contain only the maintenance role and its fixed-batch pr
  const {wakePrompt}=await import('./reactive-driver.mjs');
  const task={task_id:'T-maintenance',owner_id:OWNER,context_rev:1,contract:{service_lane:'maintenance'}};
  const prompt=wakePrompt('/instance',task,{id:'wake',member_ids:['T-maintenance']},{events:[{type:'service_batch_ready',payload:{batch_id:'actual-batch'}}]});
- assert.match(prompt,/工作流维护/);assert.match(prompt,/actual-batch/);assert.match(prompt,/120分钟/);
+ assert.match(prompt,/工作流维护/);assert.match(prompt,/actual-batch/);assert.match(prompt,/daily-review\/config.json/);
  assert.doesNotMatch(prompt,/多个任务|PR 反馈|implements|产品实现/);assert.ok(prompt.length<1400);
+});
+
+
+test('on-request main retains notifications without reserving batches while owners continue',async()=>{
+  const f=setup();let m;try{
+    f.activate();m=new Mailbox(join(f.root,'mailbox.sqlite'),{now:f.now});
+    m.enqueue({key:'on-request-answer',lane:'inbox',kind:'answer',payload:{task_id:'T-1',text:'Verified result'}});
+    f.driver.config.inbox={thread_id:INBOX,delivery_mode:'on_request'};
+    await f.driver.deliverInbox();await f.driver.deliverInbox();
+    assert.equal(f.queue.calls.length,0);assert.equal(m.db.prepare("SELECT COUNT(*) AS n FROM batches WHERE lane='inbox'").get().n,0);
+    assert.equal(m.readInbox().items[0].state,'pending');
+    await f.driver.tick({wait:true});
+    assert.equal(f.queue.calls.length,1);assert.equal(f.queue.calls[0].thread,OWNER);
+    assert.equal(m.readInbox().items[0].state,'pending');
+  }finally{m?.close();await f.close();}
+});
+
+const idlePolicy=()=>({enabled:true,mode:'idle_only',authorization_ref:'human:idle-only',bundle_id:'com.openai.codex',min_idle_ms:600000,check_interval_ms:15000,open_interval_ms:30000,retry_interval_ms:300000,queue_grace_ms:30000});
+function enableIdleLoader(f,read){
+ let calls=0;f.driver.config.desktop_loader=idlePolicy();f.driver.readActivity=read??(async()=>({source:'macos_hid_and_power_assertions',checked_at:f.now(),idle_ms:600000,user_active:false,display_busy:false}));
+ f.driver.desktopLoader=new DesktopLoader({bundle_id:'com.openai.codex',now:f.now,read_activity:()=>f.driver.readActivity(),run:async()=>{calls++;}});
+ return ()=>calls;
+}
+
+test('an active user keeps the existing queue untouched; idle later loads once with durable backoff',async()=>{
+ const f=setup();try{
+  f.activate();await f.driver.deliver(f.state.task('T-1'));const original=f.state.openWake('T-1'),calls=enableIdleLoader(f);f.advance(30000);
+  const idle=f.driver.readActivity;f.driver.readActivity=async()=>({...await idle(),idle_ms:599999});
+  assert.equal((await f.driver.loadPendingDesktopChats()).opened,false);assert.equal(calls(),0);
+  f.advance(15000);f.driver.readActivity=idle;assert.equal((await f.driver.loadPendingDesktopChats()).opened,true);assert.equal(calls(),1);
+  assert.equal(f.queue.calls.length,1);assert.equal(f.state.openWake('T-1').queue_id,original.queue_id);assert.equal(f.state.openWake('T-1').state,'queued');
+  // Restarting the driver does not erase the exact-wake cooldown.
+  f.driver.desktopCheckAt=undefined;f.advance(30001);assert.equal((await f.driver.loadPendingDesktopChats()).opened,false);assert.equal(calls(),1);
+  f.advance(270000);assert.equal((await f.driver.loadPendingDesktopChats()).opened,true);assert.equal(calls(),2);
+ }finally{await f.close();}
+});
+
+test('user input between candidate selection and the final activity check prevents open',async()=>{
+ const f=setup();try{
+  f.activate();await f.driver.deliver(f.state.task('T-1'));f.advance(30000);let reads=0;
+  const calls=enableIdleLoader(f,async()=>({source:'macos_hid_and_power_assertions',checked_at:f.now(),idle_ms:++reads===1?600000:0,user_active:false,display_busy:false}));
+  assert.equal((await f.driver.loadPendingDesktopChats()).opened,false);assert.equal(calls(),0);assert.equal(f.queue.calls.length,1);
+ }finally{await f.close();}
+});
+
+for(const protection of ['paused','hold','excluded','needs_decision','main','uncertain','running'])test(`idle loading preserves ${protection}`,async()=>{
+ const f=setup();try{
+  f.activate();await f.driver.deliver(f.state.task('T-1'));f.advance(30000);const calls=enableIdleLoader(f),task=f.state.task('T-1');
+  if(protection==='paused')f.state.setMode({task_id:'T-1',mode:'paused',source_message_id:'human:pause',actual_human_verified:true});
+  if(protection==='hold')f.control.db.prepare('UPDATE rt_tasks SET contract=? WHERE task_id=?').run(JSON.stringify({...task.contract,execution_hold:'Human hold'}),'T-1');
+  if(protection==='excluded')f.driver.config.desktop_loader.excluded_task_ids=['T-1'];
+  if(protection==='needs_decision')f.control.db.prepare("UPDATE rt_tasks SET status='needs_decision' WHERE task_id='T-1'").run();
+  if(protection==='main')f.driver.config.inbox={thread_id:OWNER,delivery_mode:'on_request'};
+  if(['uncertain','running'].includes(protection))f.control.db.prepare('UPDATE rt_wakes SET state=? WHERE task_id=?').run(protection,'T-1');
+  assert.equal((await f.driver.loadPendingDesktopChats()).opened,false);assert.equal(calls(),0);assert.equal(f.queue.calls.length,1);
+ }finally{await f.close();}
+});
+
+test('queue consumption while activity is checked prevents loading and never changes its native turn',async()=>{
+ const f=setup();try{
+  f.activate();await f.driver.deliver(f.state.task('T-1'));f.advance(30000);const w=f.state.openWake('T-1');
+  const calls=enableIdleLoader(f,async()=>{
+   f.state.begin({task_id:'T-1',wake_id:w.id,native_proof:nativeProof({workspace:f.root,message:w.prompt,turn:'already-consumed',now:f.now()})});
+   return {source:'macos_hid_and_power_assertions',checked_at:f.now(),idle_ms:600000,user_active:false,display_busy:false};
+  });
+  assert.equal((await f.driver.loadPendingDesktopChats()).opened,false);assert.equal(calls(),0);assert.equal(f.state.openWake('T-1').turn_id,'already-consumed');
+ }finally{await f.close();}
+});
+
+test('ten-minute input-idle threshold reloads from runtime.json without restarting',async()=>{
+ const f=setup();try{
+  f.activate();await f.driver.deliver(f.state.task('T-1'));f.advance(30000);const calls=enableIdleLoader(f);
+  writeFileSync(join(f.root,'runtime.json'),JSON.stringify({desktop_loader:{...idlePolicy(),min_idle_ms:900000}}));
+  assert.equal((await f.driver.loadPendingDesktopChats()).opened,false);assert.equal(calls(),0);
+  f.advance(15000);writeFileSync(join(f.root,'runtime.json'),JSON.stringify({desktop_loader:idlePolicy()}));
+  assert.equal((await f.driver.loadPendingDesktopChats()).opened,true);assert.equal(calls(),1);
+ }finally{await f.close();}
+});
+
+test('idle loader keeps old loader receipts intact and treats open failure as bounded uncertainty',async()=>{
+ const f=setup();try{
+  f.activate();await f.driver.deliver(f.state.task('T-1'));f.advance(30000);enableIdleLoader(f);
+  f.control.db.exec("CREATE TABLE rt_desktop_loads (key TEXT PRIMARY KEY,owner_id TEXT,state TEXT,receipt TEXT,created_at INTEGER); INSERT INTO rt_desktop_loads VALUES ('historical','owner','requested','old receipt',1)");
+  let calls=0;f.driver.desktopLoader=new DesktopLoader({bundle_id:'com.openai.codex',now:f.now,read_activity:f.driver.readActivity,run:async()=>{calls++;throw new Error('open result unknown');}});
+  assert.equal((await f.driver.loadPendingDesktopChats()).reason,'desktop_open_failed');f.advance(30001);assert.equal((await f.driver.loadPendingDesktopChats()).opened,false);
+  assert.equal(calls,1);assert.equal(f.control.db.prepare('SELECT receipt FROM rt_desktop_loads').get().receipt,'old receipt');assert.equal(f.queue.calls.length,1);
+ }finally{await f.close();}
+});
+
+test('idle loading also activates the existing queued discovery batch without another source message',async()=>{
+ const f=setup();let m;try{
+  const discovery='55555555-5555-4555-8555-555555555555';
+  f.control.discovery.config={...f.control.discovery.config,threads:{...f.control.discovery.config.threads,discovery}};
+  f.control.discovery.configure({source_id:'linear',enabled:true,scope:{project:'project'},source_message_id:'human:source',actual_human_verified:true,evidence_ref:'source-grant'});
+  m=new Mailbox(join(f.root,'mailbox.sqlite'),{now:f.now});f.control.discovery.enqueueDue(m,f.root);
+  const b=m.reserveQueuedInbox(null,'discovery').batch;assert.ok(b);
+  m.setPrompt(b.id,'fixed source batch');assert.equal(m.authorizeQueueSend(b.id).send,true);
+  m.delivery(b.id,{outcome:'sent',receipt:{queue_receipt:receipt(discovery,'fixed source batch',f.now()),execution_verified:false}});
+  f.advance(30000);const calls=enableIdleLoader(f);
+  assert.equal((await f.driver.loadPendingDesktopChats()).opened,true);assert.equal(calls(),1);assert.equal(f.queue.calls.length,0);
+  assert.equal(m.get(b.id).state,'sent');assert.equal(f.control.discovery.batch(b.snapshot.items[0].payload.batch_id).state,'pending');
+  f.advance(300001);m.begin(b.id);
+  assert.equal((await f.driver.loadPendingDesktopChats()).opened,false);assert.equal(calls(),1);
+ }finally{m?.close();await f.close();}
+});
+
+test('disabling idle navigation during the activity read cancels the already selected open',async()=>{
+ const f=setup();try{
+  f.activate();await f.driver.deliver(f.state.task('T-1'));f.advance(30000);
+  writeFileSync(join(f.root,'runtime.json'),JSON.stringify({desktop_loader:idlePolicy()}));
+  let reads=0;const calls=enableIdleLoader(f,async()=>{
+   if(++reads===2)writeFileSync(join(f.root,'runtime.json'),JSON.stringify({desktop_loader:{...idlePolicy(),enabled:false}}));
+   return {source:'macos_hid_and_power_assertions',checked_at:f.now(),idle_ms:600000,user_active:false,display_busy:false};
+  });
+  assert.equal((await f.driver.loadPendingDesktopChats()).opened,false);assert.equal(calls(),0);assert.equal(f.queue.calls.length,1);
+ }finally{await f.close();}
 });

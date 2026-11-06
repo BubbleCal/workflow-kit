@@ -1,3 +1,5 @@
+import {OwnerHealth} from './owner-health.mjs';
+import {compactDiscoveryBatch,nextDiscoverySlot} from './discovery-efficiency.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {verifyExecutionProof,nativeReadback} from './native-queue.mjs';
 
@@ -43,7 +45,7 @@ export function sourceReadPlan(source,window) {
   if(source.kind==='calendar')return {requests:[{tool:'google_calendar_search_events',arguments:{calendar_id:s.calendar_id,time_min:window.to,
     time_max:new Date(Date.parse(window.to)+(s.lookahead_days??7)*86400000).toISOString(),timezone_str:s.timezone??'Asia/Shanghai',max_results:100}}],
     followups:'Follow every page and read changed events. Use the configured accept_calendar_preparation lead_minutes and service_task_id. In unified mode all occurrences belong to that one service and owner; do not create per-meeting tasks or chats. Classify changed/cancelled events with their full meeting data so obsolete timers are cancelled; task start/reconcile_meeting reconciles shared timers. Preserve exclusions, language, event IDs and completed results. This does not authorize modifying meetings or sending messages. Read MEETING_PREPARATION_INTAKE.md; discovery maintains schedules, never writes the meeting brief.'};
-  if(source.kind==='codex')return {requests:[{tool:'list_threads',arguments:{mode:'history',source:'codex',hostId:s.host_id??'local',archived:false,limit:50}}],followups:'Filter by the exact configured project before reading actual human requests. Ignore control/discovery chats and other projects; never infer scope from a title. Preserve existing owners and running jobs. Register verified existing work without starting or duplicating it; source listing alone is not implementation authority. Also read OWNER_RECOVERY.md and run runtime op health_targets (limit 8). Obtain the requested compact native snapshots and persist health_observe. Under the recorded standing recovery authority, reconcile exact failed/context-window turns and follow up unconsumed queues without waiting for the 120-minute maintenance audit. Preserve running owners, genuine waits and original receipts; verify actual execution before considering recovery successful.'};
+  if(source.kind==='codex')return {requests:[{tool:'list_threads',arguments:{mode:'history',source:'codex',hostId:s.host_id??'local',archived:false,limit:50}}],followups:'Filter by the exact configured project before reading actual human requests. Ignore control/discovery chats and other projects; never infer scope from a title. Preserve existing owners and running jobs. Register verified existing work without starting or duplicating it; source listing alone is not implementation authority. Also read OWNER_RECOVERY.md and run runtime op health_targets (limit 8). Obtain the requested compact native snapshots and persist health_observe. Under the recorded standing recovery authority, reconcile exact failed/context-window turns and follow up unconsumed queues without waiting for the maintenance audit. Preserve running owners, genuine waits and original receipts; verify actual execution before considering recovery successful.'};
   for(const id of arr(s.page_ids))requests.push({tool:'notion_fetch',arguments:{id,include_discussions:true}});
   for(const view_url of arr(s.view_urls))requests.push({tool:'notion_query_data_sources',arguments:{data:{mode:'view',view_url,page_size:100,is_archived:false}}});
   return {requests,followups:'Check Notion tool access, fetch source/view metadata when required, follow cursors and inspect truncation/unknown blocks. Read relevant discussions. Do not silently treat missing subtrees as no change.'};
@@ -54,7 +56,9 @@ export function sourceReadPlan(source,window) {
 export class DiscoveryStore {
   constructor(db,{config,work,reactive,now=()=>Date.now()}={}){
     this.db=db;this.config=config??{};this.work=work;this.reactive=reactive;this.now=now;
-    db.exec(`CREATE TABLE IF NOT EXISTS discovery_sources (
+    db.exec(`CREATE TABLE IF NOT EXISTS discovery_health_batches (
+      batch_id TEXT NOT NULL,generation INTEGER NOT NULL,selected_at INTEGER NOT NULL,targets TEXT NOT NULL,PRIMARY KEY(batch_id,generation));
+      CREATE TABLE IF NOT EXISTS discovery_sources (
       source_id TEXT PRIMARY KEY,kind TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 0,revision INTEGER NOT NULL DEFAULT 0,
       scope TEXT NOT NULL DEFAULT '{}',interval_ms INTEGER NOT NULL,last_success_at INTEGER,next_at INTEGER NOT NULL DEFAULT 0,
       authority TEXT,health TEXT);
@@ -68,11 +72,49 @@ export class DiscoveryStore {
         observation_id TEXT PRIMARY KEY,source_id TEXT NOT NULL,entity_key TEXT NOT NULL,item_key TEXT NOT NULL,version TEXT NOT NULL,
         data TEXT NOT NULL,disposition TEXT,task_id TEXT,decision TEXT,created_at INTEGER NOT NULL);
     `);
+    if(!db.prepare('PRAGMA table_info(discovery_batches)').all().some(column=>column.name==='started_at'))
+      db.exec('ALTER TABLE discovery_batches ADD COLUMN started_at INTEGER');
     for(const [kind,interval] of [['linear',300000],['slack',300000],['notion',900000],['codex',600000],['calendar',3600000]])
       db.prepare('INSERT OR IGNORE INTO discovery_sources(source_id,kind,interval_ms) VALUES (?,?,?)').run(kind,kind,interval);
   }
   atomic(fn){this.db.exec('BEGIN IMMEDIATE');try{const r=fn();this.db.exec('COMMIT');return r;}catch(e){this.db.exec('ROLLBACK');throw e;}}
   sources(){return this.db.prepare('SELECT * FROM discovery_sources ORDER BY source_id').all().map(s=>({...s,scope:JSON.parse(s.scope),authority:s.authority?JSON.parse(s.authority):null}));}
+  setCadences({intervals,source_message_id,actual_human_verified,evidence_ref}) {
+    if(actual_human_verified!==true)throw new Error('Actual human cadence instruction required');
+    required(source_message_id,'source_message_id');required(evidence_ref,'cadence evidence');
+    if(!intervals||!Object.keys(intervals).length)throw new Error('Source cadence mapping required');
+    for(const [kind,ms] of Object.entries(intervals))if(!['linear','slack','notion','codex','calendar'].includes(kind)||!Number.isSafeInteger(ms)||ms<60000)throw new Error('Invalid source cadence');
+    return this.atomic(()=>{
+      const changed=[];
+      for(const source of this.sources())if(intervals[source.kind]!==undefined){
+        const interval=intervals[source.kind],next=nextDiscoverySlot(this.now(),interval,this.config.discovery?.align_poll_slots===true);
+        // Cadence does not change source scope, pagination or queue identity.
+        const authority={...source.authority,cadence:{source_message_id,evidence_ref}};
+        this.db.prepare('UPDATE discovery_sources SET interval_ms=?,next_at=?,authority=? WHERE source_id=?').run(interval,next,JSON.stringify(authority),source.source_id);
+        changed.push({source_id:source.source_id,interval_ms:interval,next_at:next});
+      }
+      for(const row of this.db.prepare("SELECT id,snapshot FROM discovery_batches WHERE state='checkpointed'").all()){
+        const due=JSON.parse(row.snapshot).sources.map(s=>({saved:s,current:this.sources().find(c=>c.source_id===s.source_id)}))
+          .filter(({saved,current})=>current&& (current.last_success_at===null||current.last_success_at<Date.parse(saved.window.to))).map(x=>x.current.next_at);
+        if(due.length)this.db.prepare('UPDATE discovery_batches SET next_at=? WHERE id=?').run(Math.min(...due),row.id);
+      }
+      return {updated:changed,preserved_inflight_batches:true};
+    });
+  }
+  plan(id,{full=false}={}) {
+    const batch=this.checkBatch(id);
+    return full?batch:compactDiscoveryBatch(batch,this.sources());
+  }
+  page({batch_id,page_key}) {
+    required(page_key,'page_key');
+    const row=this.db.prepare('SELECT * FROM discovery_pages WHERE batch_id=? AND page_key=?').get(batch_id,page_key);
+    return row?{...row,data:JSON.parse(row.data)}:null;
+  }
+  pending({source_id,limit=20}) {
+    if(!Number.isInteger(limit)||limit<1||limit>100)throw new Error('Use a bounded observation limit');
+    return this.db.prepare('SELECT * FROM discovery_observations WHERE disposition IS NULL AND (? IS NULL OR source_id=?) ORDER BY created_at LIMIT ?')
+      .all(source_id??null,source_id??null,limit).map(o=>({...o,data:JSON.parse(o.data)}));
+  }
   watchThread(input){return this.atomic(()=>this.watchThreadInside(input));}
   watchThreadInside({source_id='slack',task_id,channel_id,thread_ts,relevant_user_id,professional_relevance,identity_verified,evidence_ref}){
     required(evidence_ref,'verified thread/task evidence');
@@ -90,13 +132,13 @@ export class DiscoveryStore {
       const scope={...parent.scope,parent_source_id:source_id,parent_revision:parent.revision,channel_ids:[channel_id],watched_thread:{channel_id,thread_ts},task_ids};
       if(!old||JSON.stringify(old.scope)!==JSON.stringify(scope)||!old.enabled){
         this.db.prepare(`INSERT INTO discovery_sources(source_id,kind,enabled,revision,scope,interval_ms,next_at,authority)
-          VALUES (?,'slack',1,1,?,600000,?,?) ON CONFLICT(source_id) DO UPDATE SET enabled=1,revision=revision+1,scope=excluded.scope,next_at=excluded.next_at,health=NULL,authority=excluded.authority`)
-          .run(id,JSON.stringify(scope),this.now(),JSON.stringify({parent_authority:parent.authority,evidence_ref}));
+          VALUES (?,'slack',1,1,?,?,?,?) ON CONFLICT(source_id) DO UPDATE SET enabled=1,revision=revision+1,scope=excluded.scope,next_at=excluded.next_at,health=NULL,authority=excluded.authority`)
+          .run(id,JSON.stringify(scope),parent.interval_ms,this.now(),JSON.stringify({parent_authority:parent.authority,evidence_ref}));
         this.invalidateSourceBatches([id]);
       }
       const entity_key=`${id}:${task_id}`;
       this.work.linkSourceInside(task_id,entity_key,{kind:'slack',channel_id,thread_ts,evidence_ref});
-      return {watching:true,source_id:id,task_id,entity_key,interval_ms:600000};
+      return {watching:true,source_id:id,task_id,entity_key,interval_ms:this.sources().find(s=>s.source_id===id).interval_ms};
     }
   }
   invalidateSourceBatches(sourceIds){
@@ -145,8 +187,29 @@ export class DiscoveryStore {
       return {task_id:id,title:t.data.title,owner_thread_id:t.owner_thread_id,schedule_id:p.schedule_id,prep_at:p.prep_at,needs_owner:!t.owner_thread_id,needs_schedule:!s,source_message_id:p.source_message_id};
     }).filter(t=>t.needs_owner||t.needs_schedule);
   }
-  batch(id){const b=this.db.prepare('SELECT * FROM discovery_batches WHERE id=?').get(id);return b?{...b,snapshot:JSON.parse(b.snapshot),calendar_followups:this.calendarFollowups(),
-    pages:this.db.prepare('SELECT source_id,request_index,data FROM discovery_pages WHERE batch_id=? ORDER BY rowid').all(id).map(p=>({...p,data:JSON.parse(p.data)}))}:null;}
+  healthBatch(batch) {
+    const row=this.db.prepare('SELECT * FROM discovery_health_batches WHERE batch_id=? AND generation=?').get(batch.id,batch.generation);
+    return row?{selected_at:row.selected_at,targets:JSON.parse(row.targets),instruction:'Before source history reads, observe these owners through OWNER_RECOVERY.md and execute its authorized single recovery hint for an unconsumed terminal owner. Source errors do not skip this step. Preserve active work and human holds; record actual execution or the client blocker.'}:null;
+  }
+  selectHealth(batch) {
+    if(!this.reactive||!Number.isSafeInteger(this.config.discovery?.owner_health_interval_ms)||this.healthBatch(batch))return;
+    const health=new OwnerHealth({db:this.db,reactive:this.reactive,work:this.work},{now:this.now});
+    this.db.prepare('INSERT INTO discovery_health_batches VALUES (?,?,?,?)').run(batch.id,batch.generation,this.now(),JSON.stringify(health.targets()));
+  }
+  assertHealthObserved(batch) {
+    this.selectHealth(batch);
+    const health=this.healthBatch(batch);if(!health)return;
+    for(const target of health.targets){
+      const task=this.reactive.task(target.task_id);
+      if(!task||task.mode!=='active'||['complete','needs_decision'].includes(task.status)||task.owner_id!==target.thread_id)continue;
+      const observed=this.db.prepare('SELECT checked_at,owner_id FROM rt_owner_health WHERE task_id=?').get(target.task_id);
+      if(!observed||observed.checked_at<health.selected_at||observed.owner_id!==target.thread_id)
+        throw new Error(`Observe owner health for ${target.task_id} before finishing or checkpointing source coverage`);
+    }
+  }
+  batch(id){const b=this.db.prepare('SELECT * FROM discovery_batches WHERE id=?').get(id),snapshot=b&&JSON.parse(b.snapshot),pending=this.work?.followthrough.pending();return b?{...b,snapshot,owner_health:this.healthBatch(b),calendar_followups:this.calendarFollowups(),
+    result_followthrough:{reviews:(pending?.reviews??[]).filter(r=>snapshot.result_work?.review_keys.includes(r.review_key)),owners:(pending?.owners??[]).filter(r=>snapshot.result_work?.followup_keys.includes(r.followup_key))},
+    pages:this.db.prepare('SELECT page_key,source_id,request_index,data FROM discovery_pages WHERE batch_id=? ORDER BY rowid').all(id).map(p=>({...p,data:JSON.parse(p.data)}))}:null;}
   checkBatch(id){
     const b=this.batch(id);if(!b||!['pending','running'].includes(b.state))throw new Error('Discovery batch is unavailable or its source scope changed');
     for(const source of b.snapshot.sources){const current=this.sources().find(s=>s.source_id===source.source_id);
@@ -171,20 +234,34 @@ export class DiscoveryStore {
       if(!active){this.db.prepare('UPDATE discovery_sources SET enabled=0,health=? WHERE source_id=?').run(JSON.stringify({reason:'watched_tasks_complete'}),source.source_id);this.invalidateSourceBatches([source.source_id]);}
     }
     const sources=this.sources().filter(s=>s.enabled&&s.next_at<=this.now());
-    if(!sources.length)return {queued:false,reason:'no_enabled_source_due'};
+    const resultWork=this.work?.followthrough.pending()??{reviews:[],owners:[]};
+    const reviewKeys=resultWork.reviews.map(r=>r.review_key),followupKeys=resultWork.owners.map(r=>r.followup_key);
+    if(!sources.length&&!reviewKeys.length&&!followupKeys.length)return {queued:false,reason:'no_enabled_source_due'};
     if(!this.config.threads?.discovery)return {queued:false,reason:'discovery_role_not_bound'};
     let b=this.db.prepare("SELECT id FROM discovery_batches WHERE state IN ('pending','running') ORDER BY created_at LIMIT 1").get();
     if(b)b=this.batch(b.id);
+    if(!b){
+      const interval=this.config.discovery?.min_start_interval_ms??0;
+      if(!Number.isSafeInteger(interval)||interval<0||interval>0&&interval<60000)throw new Error('Discovery start interval must be zero or at least one minute');
+      // Health selection preserves the actual start of pre-migration generations.
+      const last=this.db.prepare('SELECT MAX(at) AS at FROM (SELECT MAX(started_at) AS at FROM discovery_batches UNION ALL SELECT MAX(selected_at) AS at FROM discovery_health_batches)').get().at;
+      if(interval&&last!==null&&this.now()<last+interval)
+        return {queued:false,reason:'discovery_start_interval',eligible_at:last+interval};
+    }
     const checkpoints=this.db.prepare("SELECT id FROM discovery_batches WHERE state='checkpointed' ORDER BY next_at,created_at").all().map(r=>this.batch(r.id));
     const unfinished=s=>{const current=this.sources().find(c=>c.source_id===s.source_id);return current.last_success_at===null||current.last_success_at<Date.parse(s.window.to);};
     const owned=new Set(checkpoints.flatMap(c=>c.snapshot.sources.filter(unfinished).map(s=>s.source_id)));
     const fresh=sources.filter(s=>!owned.has(s.source_id));
-    const resume=checkpoints.find(c=>c.next_at<=this.now()&&c.snapshot.sources.some(s=>unfinished(s)&&sources.some(d=>d.source_id===s.source_id)));
-    if(!b&&resume&&(!fresh.length||resume.next_at<Math.min(...fresh.map(s=>s.next_at))))b=resume;
-    if(!b&&!fresh.length)return {queued:false,reason:'discovery_checkpoint_backoff'};
+    const ownedReviews=new Set(checkpoints.flatMap(c=>c.snapshot.result_work?.review_keys??[])),ownedFollowups=new Set(checkpoints.flatMap(c=>c.snapshot.result_work?.followup_keys??[]));
+    const freshResults={review_keys:reviewKeys.filter(k=>!ownedReviews.has(k)),followup_keys:followupKeys.filter(k=>!ownedFollowups.has(k))};
+    const newResults=freshResults.review_keys.length+freshResults.followup_keys.length;
+    const resume=checkpoints.find(c=>c.next_at<=this.now()&&(c.snapshot.sources.some(s=>unfinished(s)&&sources.some(d=>d.source_id===s.source_id))||
+      c.snapshot.result_work?.review_keys.some(k=>reviewKeys.includes(k))||c.snapshot.result_work?.followup_keys.some(k=>followupKeys.includes(k))));
+    if(!b&&resume&&!newResults&&(!fresh.length||resume.next_at<Math.min(...fresh.map(s=>s.next_at))))b=resume;
+    if(!b&&!fresh.length&&!newResults)return {queued:false,reason:'discovery_checkpoint_backoff'};
     if(!b)b=this.atomic(()=>{
       const id=randomUUID(),to=new Date(this.now()).toISOString();
-      const snapshot={sources:fresh.map(s=>{const window={from:new Date(Math.max(0,(s.last_success_at??this.now()-86400000)-120000)).toISOString(),to};
+      const snapshot={...(newResults?{result_work:freshResults}:{}),sources:fresh.map(s=>{const window={from:new Date(Math.max(0,(s.last_success_at??this.now()-86400000)-120000)).toISOString(),to};
         return {...s,window,plan:sourceReadPlan(s,window)};})};
       this.db.prepare("INSERT INTO discovery_batches(id,state,snapshot,mail_key,created_at) VALUES (?,'pending',?,?,?)").run(id,JSON.stringify(snapshot),`discovery:${id}:1`,this.now());return this.batch(id);
     });
@@ -194,7 +271,7 @@ export class DiscoveryStore {
       this.db.prepare("UPDATE discovery_batches SET state='pending',generation=generation+1,prompt=NULL,mail_key=? WHERE id=?").run(`discovery:${b.id}:${b.generation+1}`,b.id);
       b=this.batch(b.id);
     }
-    const prompt=`[workflow-discovery:${b.id}:${b.generation}]\nRun one source-only discovery scan for this instance. Read ${root}/DISCOVERY.md. Use the App's connected tools; do not open a session client. First obtain a real read_thread proof and call workflow discovery begin with batch_id and generation. If invalidated, stop without reading sources. Then read the batch plan. Handle its authorized calendar_followups first using task request_owner/prepare_owner, bind_owner and start; this is scheduled setup, not early brief preparation. Afterwards resume saved source cursors and collect only configured source changes, including authorized calendar preparation schedule upkeep, ingest pages and classify observations as an existing task, a candidate, or irrelevant. Preserve cursors and raw evidence. Do not explore code, papers or blogs, run benchmarks, implement work, or manufacture user authorization. Such work belongs to ordinary accepted tasks. For calendar observations read full event details and pass meeting to classify; the saved preparation policy accepts only its scope and exclusions. Follow MEETING_PREPARATION_INTAKE.md to provision authorized owners and schedule them without notifying main. For an accepted unowned task, follow WORK_TASKS.md to create its owner only under the saved explicit creation policy. Finish the batch only with complete source coverage and durable dispositions; otherwise checkpoint the partial cursor. No routine message to the main conversation. Batch: ${b.id}; generation: ${b.generation}.`;
+    const prompt=`[workflow-discovery:${b.id}:${b.generation}]\nRead ${root}/DISCOVERY.md and run one fixed intake batch. Obtain exact current native read_thread proof, then discovery begin with batch_id=${b.id} and generation=${b.generation}. Stop if invalidated. Begin returns the compact plan: handle its owner_health targets first under OWNER_RECOVERY.md, even if source history is blocked; then use saved stream cursors and discovery pending/page only when needed; do not dump prior batches, full histories or handled observations. Process fixed result_followthrough reviews and owner creation under RESULT_FOLLOWTHROUGH.md: prepare_owner, actual native creation/project guards, bind/start and verify owner execution; a candidate or queue receipt is insufficient. Process authorized calendar_followups under MEETING_PREPARATION_INTAKE.md without notifying main. Collect only due configured source changes, preserve raw evidence, classify and finish complete coverage or checkpoint the real blocker. No engineering, external replies or new authority. End with one brief source/change-count or blocker line here; no routine main notification.`;
     this.db.prepare('UPDATE discovery_batches SET prompt=COALESCE(prompt,?) WHERE id=?').run(prompt,b.id);
     const queued=mailbox.enqueue({key:b.mail_key,lane:'discovery',kind:'source_scan',payload:{batch_id:b.id,text:prompt}});
     return {...queued,batch_id:b.id};
@@ -204,8 +281,9 @@ export class DiscoveryStore {
       const b=this.batch(batch_id);if(!b||b.generation!==generation)throw new Error('Stale discovery generation');
       verifyExecutionProof(native_proof,{thread_id:this.config.threads.discovery,workspace:this.config.thread_workspaces?.discovery??this.config.scope.project_root,prompt:b.prompt,now:this.now()});
       if(b.state==='invalidated')return {...b,invalidated:true};
-      this.checkBatch(batch_id);
-      this.db.prepare("UPDATE discovery_batches SET state='running' WHERE id=?").run(batch_id);return this.checkBatch(batch_id);
+      this.checkBatch(batch_id);this.selectHealth(b);
+      this.db.prepare("UPDATE discovery_batches SET state='running',started_at=? WHERE id=?").run(b.state==='pending'?this.now():b.started_at,batch_id);
+      return compactDiscoveryBatch(this.checkBatch(batch_id),this.sources());
     });
   }
   recover({batch_id,generation,native_proof,effects_reconciled,evidence_ref}){
@@ -294,13 +372,20 @@ export class DiscoveryStore {
       return {classified:true,task_id:task?.id??null,execution_authorized:task?.state==='accepted',owner_required:task?.state==='accepted'&&!task.owner_thread_id,...(thread_watch?{thread_watch}:{})};
     });
   }
-  finish({batch_id,generation,source_results}){
+  finish({batch_id,generation,source_results,result_followups_reason}){
     return this.atomic(()=>{
       const saved=this.batch(batch_id);if(!saved||saved.generation!==generation)throw new Error('Stale discovery generation');
       if(['finished','checkpointed'].includes(saved.state))return {finished:saved.state==='finished',checkpointed:saved.state==='checkpointed',duplicate:true};
       if(saved.state==='invalidated')throw new Error('Begin the invalidated scan with actual native proof to retire its receipt');
       const b=this.checkBatch(batch_id);if(b.state!=='running')throw new Error('Discovery scan has not begun');
+      this.assertHealthObserved(b);
       let allComplete=true,nextAt=Infinity;
+      const followups=this.batch(batch_id).result_followthrough;
+      if(followups.reviews.length||followups.owners.length){
+        required(result_followups_reason,'Verify actual followup execution or checkpoint the exact blocker');
+        this.db.prepare('UPDATE discovery_batches SET snapshot=? WHERE id=?').run(JSON.stringify({...b.snapshot,result_checkpoint:{reason:result_followups_reason,checked_at:this.now()}}),batch_id);
+        allComplete=false;nextAt=this.now()+Math.max(60000,this.config.discovery?.min_start_interval_ms??900000);
+      }
       for(const s of b.snapshot.sources){
         const current=this.sources().find(c=>c.source_id===s.source_id);
         if(current.last_success_at!==null&&current.last_success_at>=Date.parse(s.window.to))continue;
@@ -312,12 +397,19 @@ export class DiscoveryStore {
           const pending=this.db.prepare('SELECT 1 FROM discovery_observations WHERE source_id=? AND disposition IS NULL').get(s.source_id);
           if(pending)throw new Error('Classify source observations before completing the scan');
           this.db.prepare('UPDATE discovery_sources SET last_success_at=?,next_at=?,health=NULL WHERE source_id=?')
-            .run(Date.parse(s.window.to),Math.min(this.now()+s.interval_ms,Date.parse(s.window.to)+s.interval_ms),s.source_id);
+            .run(Date.parse(s.window.to),nextDiscoverySlot(Date.parse(s.window.to),current.interval_ms,this.config.discovery?.align_poll_slots===true),s.source_id);
         }else{
           allComplete=false;
           required(result.reason,'source failure/partial reason');
           const hasCursor=pages.some(p=>!p.data.complete&&p.data.next_cursor);
-          const retry=this.now()+(hasCursor?60000:s.interval_ms);nextAt=Math.min(nextAt,retry);
+          const previous=current.health?JSON.parse(current.health):null;
+          const progress_digest=hash(pages.map(p=>p.data));
+          const unchanged=previous?.reason===result.reason&&previous?.progress_digest===progress_digest;
+          const streak=unchanged?(previous.failure_streak??1)+1:1;
+          const ceiling=this.config.discovery?.failure_backoff_max_ms?.[s.kind]??current.interval_ms;
+          const interval=Math.min(ceiling,current.interval_ms*2**Math.min(streak-1,8));
+          const retry=hasCursor&&!unchanged?this.now()+60000:nextDiscoverySlot(this.now(),interval,this.config.discovery?.align_poll_slots===true);
+          Object.assign(result,{failure_streak:streak,progress_digest});nextAt=Math.min(nextAt,retry);
           this.db.prepare('UPDATE discovery_sources SET next_at=?,health=? WHERE source_id=?').run(retry,JSON.stringify(result),s.source_id);
         }
       }

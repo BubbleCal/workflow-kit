@@ -1,3 +1,5 @@
+import {verifyQueuedRecoveryProof} from './queued-resume.mjs';
+import {prWakeProjection,prChangeReasons} from './owner-wake.mjs';
 import {pausedMigrationSetup} from './task-ownership.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { activeScopeExclusions } from './scope-exclusions.mjs';
@@ -225,7 +227,11 @@ export class ReactiveState {
       subject===`lifecycle:${payload.original.lifecycle_key}`;
     let contextPayload=payload;
     if(lifecycle){const {source_event_key,...envelope}=payload;const {lifecycle_generation,detected_at,snapshot_ref,...original}=payload.original;contextPayload={...envelope,original};}
-    const version = fingerprint(contextPayload), stale = fact && at < fact.observed_at;
+    const isPr=source==='github'&&type==='pr_changed'&&!!payload?.pr?.head_sha;
+    const projected=isPr?prWakeProjection(payload):contextPayload;
+    // Keep the old version for equivalent pre-upgrade facts and existing waits.
+    const samePr=isPr&&fact&&fingerprint(prWakeProjection(parse(fact.data)))===fingerprint(projected);
+    const version = samePr?fact.version:fingerprint(projected), stale = fact && at < fact.observed_at;
     const unchanged = !stale && fact?.version === version;
     const revision = task.context_rev + (stale || unchanged ? 0 : 1);
     this.db.prepare('INSERT INTO rt_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL)').run(event_id,task_id,source,subject,type,at,this.now(),digest,canonical(payload),evidence_ref,revision,stale?'stale':unchanged?'unchanged':null);
@@ -267,7 +273,9 @@ export class ReactiveState {
     const task = this.task(task_id); if (!task) throw new Error('Unknown task');
     return { task, plan: this.plan(task_id),scope_exclusions:activeScopeExclusions(this.registry(),task_id),
       facts: this.db.prepare('SELECT * FROM rt_facts WHERE task_id=? ORDER BY subject').all(task_id).map(f=>({...f,data:parse(f.data)})),
-      events: this.db.prepare('SELECT * FROM rt_events WHERE task_id=? AND disposition IS NULL ORDER BY context_rev,event_id').all(task_id).map(e=>({...e,payload:parse(e.payload)})),
+      events: this.db.prepare('SELECT * FROM rt_events WHERE task_id=? AND disposition IS NULL ORDER BY context_rev,event_id').all(task_id).map(e=>{const payload=parse(e.payload);
+        const previous=e.source==='github'&&payload?.pr?.head_sha?this.db.prepare("SELECT payload FROM rt_events WHERE task_id=? AND subject=? AND source='github' AND rowid<(SELECT rowid FROM rt_events WHERE event_id=?) ORDER BY rowid DESC LIMIT 1").get(task_id,e.subject,e.event_id):null;
+        return {...e,payload,...(payload?.pr?.head_sha?{wake_reasons:prChangeReasons(parse(previous?.payload),payload)}:{})};}),
       wait: this.db.prepare('SELECT * FROM rt_waits WHERE task_id=?').get(task_id) ?? null,
       wake: this.openWake(task_id),schedule_runs:this.scheduleRuns?.(task_id)??[],
       owner_tasks:this.tasks().filter(t=>t.owner_id===task.owner_id).map(t=>({task_id:t.task_id,mode:t.mode,status:t.status,dirty:t.dirty,objective:t.contract.objective})) };
@@ -397,8 +405,16 @@ export class ReactiveState {
       if(!task || task.mode!=='active' || wake?.id!==wake_id || wake.transport!=='native_queue' ||
         !['claimed','queued','uncertain','running'].includes(wake.state))
         throw new Error('Execution must match the original task, wake and actual new turn');
-      const {turn_id,evidence_ref}=verifyExecutionProof(native_proof,{thread_id:task.owner_id,workspace:task.contract.workspace,prompt:wake.prompt,now:this.now()});
+      let execution;
+      try{execution=verifyExecutionProof(native_proof,{thread_id:task.owner_id,workspace:task.contract.workspace,prompt:wake.prompt,now:this.now()});}
+      catch(error){
+        const action=this.db.prepare('SELECT * FROM actions WHERE action_key=?').get(`resume-input:${task_id}:${wake.queue_id}`);
+        if(!action)throw error;
+        execution=verifyQueuedRecoveryProof(native_proof,{task,wake,action,now:this.now()});
+      }
+      const {turn_id,evidence_ref}=execution;
       if(wake.turn_id&&wake.turn_id!==turn_id)return {begun:false,skipped:true,quiet:true,reason:'wake_owned_by_another_turn',instruction:'Another actual turn already owns this wake. End this duplicate delivery without work or finish; preserve current jobs and receipts.'};
+      if(execution.recovery_action_key)this.diagnostic(`recovery-execution:${wake_id}`,execution);
       this.db.prepare("UPDATE rt_wakes SET state='running',turn_id=?,started_at=COALESCE(started_at,?),evidence_ref=? WHERE id=?").run(turn_id,this.now(),evidence_ref,wake_id);
       this.db.prepare("UPDATE actions SET state='sent',receipt=?,updated_at=? WHERE action_key=? AND kind='task_queue' AND state IN ('claimed','uncertain')")
         .run(canonical({outcome:'sent',native_consumption:{turn_id,evidence_ref}}),this.now(),wake_id);

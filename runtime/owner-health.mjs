@@ -31,7 +31,7 @@ export class OwnerHealth {
       (this.control.reactive.openWake(t.task_id)||t.status==='ready'));
     return tasks.map(t=>({task:t,health:this.db.prepare('SELECT * FROM rt_owner_health WHERE task_id=?').get(t.task_id),wake:this.control.reactive.openWake(t.task_id)}))
       .filter(x=>!x.health||x.health.next_check_at<=this.now())
-      .sort((a,b)=>(a.health?.checked_at??0)-(b.health?.checked_at??0)||(a.wake?.created_at??a.task.updated_at)-(b.wake?.created_at??b.task.updated_at))
+      .sort((a,b)=>Number(!['queued','uncertain'].includes(a.wake?.state))-Number(!['queued','uncertain'].includes(b.wake?.state))||(a.health?.checked_at??0)-(b.health?.checked_at??0)||(a.wake?.created_at??a.task.updated_at)-(b.wake?.created_at??b.task.updated_at))
       .slice(0,limit).map(x=>({task_id:x.task.task_id,thread_id:x.task.owner_id,host_id:'local',wake_id:x.wake?.id??null,
         queue_id:x.wake?.queue_id??null,previous_state:x.health?.state??null,tool:'wait_threads',arguments:{targets:[{threadId:x.task.owner_id,hostId:'local'}],timeoutMs:0}}));
   }
@@ -52,13 +52,14 @@ export class OwnerHealth {
     if(snapshot.thread?.id!==task.owner_id||snapshot.thread.hostId!=='local'||!snapshot.latestTurn?.id)
       throw new Error('Observed owner identity is missing or changed');
     const wake=this.control.reactive.openWake(task_id);let state=classifyOwnerHealth(task,wake,snapshot);
-    const resume=wake?.queue_id&&this.db.prepare('SELECT state FROM actions WHERE action_key=?').get(`resume-execute:${task_id}:${wake.queue_id}`);
+    const resume=wake?.queue_id&&this.db.prepare('SELECT state FROM actions WHERE action_key IN (?,?) ORDER BY updated_at DESC LIMIT 1').get(`resume-input:${task_id}:${wake.queue_id}`,`resume-execute:${task_id}:${wake.queue_id}`);
     if(state==='queued_unconsumed'&&['uncertain','failed'].includes(resume?.state))state='native_recovery_blocked';
     const prior=this.db.prepare('SELECT * FROM rt_owner_health WHERE task_id=?').get(task_id);
     let failures=prior?.context_failures??0;
     if(state==='context_window_exhausted'&&(prior?.state!==state||prior?.turn_id!==snapshot.latestTurn.id))failures++;
     else if(snapshot.latestTurn.status==='completed'&&!snapshot.latestTurn.error)failures=0;
-    const next=at+(state==='running'?600000:['queued_unconsumed','active_unbound','uncertain_delivery'].includes(state)?300000:600000);
+    const interval=this.control.work?.config?.discovery?.owner_health_interval_ms;
+    const next=at+(Number.isSafeInteger(interval)&&interval>=60000?interval:(state==='running'?600000:['queued_unconsumed','active_unbound','uncertain_delivery'].includes(state)?300000:600000));
     this.db.prepare(`INSERT INTO rt_owner_health VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET
       owner_id=excluded.owner_id,state=excluded.state,turn_id=excluded.turn_id,wake_id=excluded.wake_id,
       checked_at=excluded.checked_at,next_check_at=excluded.next_check_at,context_failures=excluded.context_failures,
@@ -67,6 +68,6 @@ export class OwnerHealth {
       ['turn_failed','unfinished_terminal_turn'].includes(state)?'inspect_and_recover_exact_turn':
       state==='queued_unconsumed'?'reconcile_unconsumed_queue':state==='native_recovery_blocked'?'report_verified_client_blocker':state==='continuation_needed'?'continue_authorized_work':'preserve';
     return {task_id,state,next_action:action,context_failures:failures,next_check_at:next,task_complete:task.status==='complete',
-      queue_consumed:wake?.state==='running'&&wake.turn_id===snapshot.latestTurn.id,original_queue_id:wake?.queue_id??null};
+      queue_consumed:wake?.state==='running'&&wake.turn_id===snapshot.latestTurn.id&&!this.db.prepare('SELECT 1 FROM rt_diagnostics WHERE key=?').get(`recovery-execution:${wake.id}`),execution_started:wake?.state==='running'&&wake.turn_id===snapshot.latestTurn.id,original_queue_id:wake?.queue_id??null};
   }
 }

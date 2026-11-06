@@ -41,3 +41,12 @@ test('acknowledged health mail does not permanently hide an unconsumed wake',()=
 test('future scheduled and genuinely waiting tasks do not receive premature recovery',()=>{
  const f=fixture();try{f.activate();f.c.db.prepare("UPDATE rt_tasks SET status='waiting',wake_at=NULL WHERE task_id='T-1'").run();const h=new OwnerHealth(f.c,{now:f.now});assert.deepEqual(h.targets(),[]);f.event();assert.equal(h.targets().length,1);}finally{f.c.close();}
 });
+
+
+test('unconsumed queues are inspected before healthy owners in a bounded health sweep',()=>{
+ const f=fixture();try{
+  const tasks=[{...task,task_id:'busy',owner_id:'busy-owner',updated_at:1},{...task,task_id:'queued',owner_id:'queued-owner',updated_at:2}];
+  const h=new OwnerHealth({db:f.c.db,reactive:{tasks:()=>tasks,openWake:id=>({id,created_at:id==='busy'?1:2,state:id==='busy'?'running':'queued'})},work:f.c.work},{now:f.now});
+  assert.equal(h.targets({limit:1})[0].task_id,'queued');
+ }finally{f.c.close();}
+});

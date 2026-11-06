@@ -82,3 +82,16 @@ test('dependency availability and genuinely changed obligations immediately rele
   f.route();assert.notEqual(f.s.task('T-1').wake_at,null);
  }finally{f.close();}}
 });
+
+test('a freshly reverified dependency wait also holds the existing lifecycle reminder',async()=>{
+ const {renewVerifiedWaits}=await import('./wait-renewal.mjs');
+ const f=dependencyReminderFixture();try{f.route();f.advance(3600001);
+  f.m.waits.observe({fact_key:'dependency',kind:'dependency',subject:'required-release',data:{available:false,requirement:'published release'},observed_at:new Date(f.now()).toISOString(),expires_at:new Date(f.now()+15000).toISOString(),evidence_ref:'new-actual-release-source'});
+  assert.deepEqual(renewVerifiedWaits({root:f.root,control:f.c,now:f.now}),['T-1']);
+  assert.equal(JSON.parse(f.s.checkpoint('T-1').wait.condition).expires_at,f.now()+15000);
+  f.route();f.s.expireWaits();assert.equal(f.s.task('T-1').wake_at,null);
+  assert.equal(f.m.db.prepare('SELECT state FROM mail WHERE item_key=?').get(f.intent+':2').state,'pending');
+  f.advance(15001);assert.deepEqual(renewVerifiedWaits({root:f.root,control:f.c,now:f.now}),[]);
+  f.route();assert.notEqual(f.s.task('T-1').wake_at,null);
+ }finally{f.close();}
+});

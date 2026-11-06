@@ -8,7 +8,7 @@ const source=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const dir=mkdtempSync(join(tmpdir(),'workflow-kit-tests-'));
 try {
   cpSync(join(source,'runtime'),join(dir,'runtime'),{recursive:true});
-  const fixture={instance_id:'fixture',threads:{coordinator:'fixture-coordinator',inbox:'fixture-inbox',maintenance:'fixture-maintenance',dispatcher:'fixture-dispatcher'},
+  const fixture={instance_id:'fixture',threads:{coordinator:'fixture-coordinator',inbox:'fixture-inbox',maintenance:'fixture-maintenance',dispatcher:'fixture-dispatcher',discovery:'fixture-discovery'},
     scope:{project_id:null,repositories:['example/service','example/client','example/format']},identity:{github_login:'test-author'},
     delivery:{slack_enabled:true,slack_channel_id:'fixture-pr-channel',ready_enabled:true,merge_enabled:true,approver_login:'test-reviewer',notion_enabled:true,notion_page_id:'fixture-notion-page'}};
   writeFileSync(join(dir,'instance.json'),JSON.stringify(fixture));

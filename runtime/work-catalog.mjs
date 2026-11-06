@@ -2,6 +2,7 @@ import {assessDifficulty,routineMeetingDifficulty} from './model-selection.mjs';
 import {calendarPreparation} from './calendar-preparation.mjs';
 import {createHash} from 'node:crypto';
 import {verifyNativeBinding,nativeReadback} from './native-queue.mjs';
+import {ResultFollowthrough} from './result-followthrough.mjs';
 
 const json=value=>JSON.stringify(value);
 const parse=value=>value?JSON.parse(value):null;
@@ -39,6 +40,7 @@ export class WorkCatalog {
       CREATE TABLE IF NOT EXISTS work_rules (key TEXT PRIMARY KEY,data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS work_notices (key TEXT PRIMARY KEY,task_id TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL);
     `);
+    this.followthrough=new ResultFollowthrough(this);
   }
   atomic(fn){this.db.exec('BEGIN IMMEDIATE');try{const r=fn();this.db.exec('COMMIT');return r;}catch(e){this.db.exec('ROLLBACK');throw e;}}
   get(id){const r=this.db.prepare('SELECT * FROM work_items WHERE id=? OR canonical_key=?').get(id,id);return r?{...r,data:parse(r.data),authorization:parse(r.authorization),binding:parse(r.binding)}:null;}
@@ -109,7 +111,7 @@ export class WorkCatalog {
   }
   taskForSource(key){const r=this.db.prepare('SELECT task_id FROM work_sources WHERE source_key=?').get(key);return r?this.get(r.task_id):null;}
   setPolicy({key,enabled,allowed_kinds,assignee_id,calendar_id,self_email,lead_minutes=45,service_task_id,timezone,profiles,exclusions,source_message_id,verbatim_text,evidence_ref,actual_human_verified}){
-    if(!['create_owner','accept_assigned_linear','accept_calendar_preparation'].includes(key))throw new Error('Unknown work policy');
+    if(!['create_owner','accept_assigned_linear','accept_calendar_preparation','accept_result_followups'].includes(key))throw new Error('Unknown work policy');
     if(actual_human_verified!==true)throw new Error('A standing work policy needs actual user authorization');
     for(const [n,v] of Object.entries({source_message_id,verbatim_text,evidence_ref}))required(v,n);
     if(enabled&&(!Array.isArray(allowed_kinds)||!allowed_kinds.length||allowed_kinds.some(k=>!['work','project','exploration'].includes(k))))throw new Error('Declare allowed ordinary task kinds');
@@ -352,22 +354,29 @@ export class WorkCatalog {
       source:'child_task',subject:`child:${taskId}`,type:event.type,observed_at:this.now(),
       payload:{task_id:taskId,...event.payload},evidence_ref:event.evidence_ref,debounce_ms:0});
   }
-  recordReport({task_id,owner_thread_id,report_key,outcome,summary,evidence_refs,proposals=[]}){
+  recordReport({task_id,owner_thread_id,report_key,outcome,summary,evidence_refs,proposals=[],followups=[],review_key,native_proof}){
     required(report_key,'report identity');required(summary,'report summary');
     if(!['findings','no_actionable_findings','inconclusive'].includes(outcome)||!Array.isArray(evidence_refs)||!evidence_refs.length)throw new Error('An evidenced research outcome is required');
     return this.atomic(()=>{
-      const t=this.get(task_id);if(!t||t.kind!=='exploration'||t.owner_thread_id!==owner_thread_id)throw new Error('The exploration task owner must report its own work');
-      const wake=this.db.prepare("SELECT 1 FROM rt_wakes w JOIN rt_wake_members m ON m.wake_id=w.id WHERE m.task_id=? AND w.state='running'").get(t.id);if(!wake)throw new Error('Research requires actual ordinary task execution');
-      if(outcome!=='findings'&&proposals.length)throw new Error('A no-finding or inconclusive report cannot manufacture follow-up work');
+      const t=this.get(task_id);if(!t||t.state!=='accepted'||t.owner_thread_id!==owner_thread_id)throw new Error('The accepted task owner must report its own work');
+      const wake=this.db.prepare("SELECT w.id FROM rt_wakes w JOIN rt_wake_members m ON m.wake_id=w.id WHERE m.task_id=? AND w.state='running'").get(t.id);
+      if(outcome!=='findings'&&(proposals.length||followups.length))throw new Error('A no-finding or inconclusive report cannot manufacture follow-up work');
       const scheduled=this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='rt_schedule_runs'").get()?
         this.db.prepare("SELECT id FROM rt_schedule_runs WHERE task_id=? AND state='running'").get(t.id):null;
-      const data={outcome,summary,evidence_refs,proposals,...(scheduled?{run_id:scheduled.id}:{})},digest=keyHash(json(data));
+      const content={outcome,summary,evidence_refs,proposals,...(followups.length?{followups}:{}),...(scheduled?{run_id:scheduled.id}:{})};
+      const digest=keyHash(json(content));
       const old=this.db.prepare('SELECT * FROM work_reports WHERE report_key=?').get(report_key);
       if(old){if(old.task_id!==t.id||old.digest!==digest)throw new Error('Immutable research report changed');return {recorded:false,duplicate:true};}
+      const review=review_key?this.followthrough.verifyReview({review_key,native_proof},t):null;
+      if(!wake&&!review)throw new Error('Research requires actual ordinary task execution or a verified named result review');
+      const data={...content,...(wake?{wake_id:wake.id}:{}),...(review?{review_key}:{})};
       this.db.prepare('INSERT INTO work_reports VALUES (?,?,?,?,?)').run(report_key,t.id,digest,json(data),this.now());
       const created=proposals.map(p=>this.createInside({...p,state:'candidate',source:{kind:'exploration_result',key:`${report_key}:${p.canonical_key}`,origin_task_id:t.id,evidence_refs}}));
+      const result_followups=this.followthrough.recordInside(t,report_key,followups);
+      if(outcome==='findings'&&!followups.length)this.followthrough.reviewInside(t.id,{key:wake?.id??report_key,turn_id:wake?this.db.prepare('SELECT turn_id FROM rt_wakes WHERE id=?').get(wake.id)?.turn_id:null,evidence_ref:report_key,force:true});
+      if(review)this.db.prepare("UPDATE work_result_reviews SET state='reviewed' WHERE review_key=?").run(review_key);
       this.onReportInside?.(t.id,{key:report_key,type:'research_report',payload:{report_key,outcome,summary,evidence_refs},evidence_ref:report_key});
-      return {recorded:true,report_key,proposals:created.map(x=>x.task.id),task_complete:false,discovery_wake_required:false};
+      return {recorded:true,report_key,proposals:created.map(x=>x.task.id),followups:result_followups,task_complete:false,discovery_wake_required:result_followups.some(r=>r.state==='needs_owner')};
     });
   }
 }

@@ -95,19 +95,23 @@ This is part of delivery, not a separate coordinator or documentation task.
   descriptions, assignee/project/priority changes, or modifying another owner's
   ticket. A status API failure does not stop independent engineering work.
 
-After completion, finish the task wake. The runtime sends one important completion
-to main with an archive_request. Main may archive that finished owner after fresh
-native idle/no-pending-input evidence and the normal archive guard, using its own
-thread UUID as executor and the completed task's runtime_context. Main does not
-perform product delivery. Do not require unfinished legacy bookkeeping stages when
-the authoritative native task has all acceptance and delivery obligations complete.
+After completion, finish the task wake. The runtime records one important completion
+and its archive_request in the durable inbox. In on-request mode this does not send
+a message or start main. The original owner can perform its own archive through the
+existing archive guard after finishing, with fresh idle/no-pending-input evidence.
+If archival cannot yet proceed, preserve the request for authorized maintenance;
+do not wake main or mark the archive request fulfilled without its native receipt.
 
-Routine updates remain in task evidence and bound pages. Use inbox only for actual
-user decisions, requested answers or important completion. Do not send cross-chat
-messages, open URLs to wake owners, or change selected windows/models/permissions.
+Routine updates remain in task evidence and bound pages. Use the guarded inbox for
+actual decisions, requested answers or important completion; INBOX_POLICY.md defines
+on-request reading. Do not send cross-chat messages or open URLs to wake owners.
 
 Repeated generations of the same lifecycle obligation remain separate pending events, but their counter, detection time and snapshot-file location do not invalidate an otherwise unchanged plan. Checkpoint and explicitly decide their disposition as usual. Actual source changes still mark the task dirty; existing human-decision waits are preserved.
 
 ## Repeated reminders during a verified wait
 
 An already-handled lifecycle obligation with unchanged semantic facts stays in the durable input queue while the original owner has a clean, unexpired, source-verified wait. It does not trigger another model turn. The existing runtime loop releases it when that wait, its fact versions or the underlying condition changes or expires. New heads, findings and unhandled obligations are not suppressed. This does not remove the bounded expiry fallback or change CI-progress wake rules.
+
+## Substantive result followthrough
+
+Before completing a substantive assessment, benchmark or research result, use RESULT_FOLLOWTHROUGH.md to record evidence and bounded structured followups (or an explicit no-actionable-finding conclusion). Original owners retain their own delivery; discovery handles only result intake and guarded independent-owner setup under its existing interval. Finite assessments stay complete. Explicit holds and external-action boundaries remain binding.

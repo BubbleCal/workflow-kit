@@ -393,6 +393,8 @@ export class ControlStore {
     this.reactive.consolidationReady = taskId => this.work.archivableConsolidation(taskId);
     this.work.onReportInside = (id,event) => this.work.publishToParentInside(this.reactive,id,event);
     this.reactive.onCompleteInside = (id,wake,evidence_ref) => {
+      const finished=this.db.prepare('SELECT turn_id FROM rt_wakes WHERE id=?').get(wake);
+      this.work.followthrough.reviewInside(id,{key:wake,turn_id:finished?.turn_id,evidence_ref});
       this.work.publishToParentInside(this.reactive,id,{key:wake,type:'child_completed',payload:{status:'complete'},evidence_ref});
       if(bindings.delivery.owner_managed){
         const task=this.reactive.task(id),item=this.work.get(id);
@@ -491,7 +493,7 @@ export class ControlStore {
     const scope = scopeKey(kind, input.payload);
     if (input.scope_key !== undefined && input.scope_key !== scope) throw new Error(`scope_key must be ${scope}`);
     const digest = hash({ kind, task, scope, payload: input.payload });
-    return this.atomic(() => {
+    const preparation=this.atomic(() => {
       const old = this.db.prepare('SELECT state,digest,imported FROM actions WHERE action_key=?').get(key);
       if (old) {
         if (!old.imported && old.digest !== digest) throw new Error(`Action key reused with different content: ${key}`);
@@ -513,6 +515,17 @@ export class ControlStore {
         .run(key, task, canonical(input.payload.placement), input.payload.placement.host_id, this.now());
       return deferred ? { prepared: false, key, ...this.deferReview(key, rule) } : { prepared: true, key, state: 'prepared' };
     });
+    if(kind==='notify'&&preparation.allowed!==false&&input.payload.category==='important_completion'){
+      const item=this.work.get(task),owner=input.evidence.executor_thread_id??input.payload.source_thread_id;
+      if(item?.owner_thread_id===owner){
+        if(input.payload.result_report)this.work.recordReport({...input.payload.result_report,task_id:task,owner_thread_id:owner});
+        else{
+          const wake=this.reactive.openWake(task);
+          this.work.followthrough.reviewInside(task,{key:wake?.id??key,turn_id:wake?.turn_id,evidence_ref:input.payload.result_reference??key});
+        }
+      }
+    }
+    return preparation;
   }
   deferReview(key, rule) {
     const due = reviewWindowAt(this.now(), rule).next_eligible_at;

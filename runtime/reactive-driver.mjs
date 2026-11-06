@@ -1,3 +1,5 @@
+import {eventWakeReason} from './owner-wake.mjs';
+import {renewVerifiedWaits} from './wait-renewal.mjs';
 import {routeOwnerInputs,queueOwnerHealth} from './owner-delivery.mjs';
 import {NativeServices} from './native-services.mjs';
 import {execFile} from 'node:child_process';
@@ -11,6 +13,8 @@ import {Mailbox,renderPrompt} from './mailbox.mjs';
 import {shellQuote} from './instance.mjs';
 import {mailTaskIds} from './reactive-ownership.mjs';
 import {SourceRate,sourceInterval} from './source-rate.mjs';
+import {DesktopLoader} from './desktop-loader.mjs';
+import {readMacActivity,idleNavigationAllowed,validateIdleNavigationPolicy} from './mac-activity.mjs';
 import {scopeActionReasons} from './scope-exclusions.mjs';
 
 const exec=promisify(execFile);
@@ -34,41 +38,27 @@ export async function collectPullRequest(root,{repository,pr_number},{run=exec}=
 }
 
 export function wakePrompt(root,task,wake,checkpoint) {
-  // Keep the native message small enough for a complete App readback. Contract,
-  // plan and event bodies are fetched from checkpoint after actual consumption.
-  const packet={task_id:task.task_id,owner_thread_id:task.owner_id,wake_id:wake.id,
-    task_ids:wake.member_ids,context_rev:task.context_rev,pending_event_count:checkpoint.events.length};
-  if(task.contract.service_lane) {
-    const maintenance=task.contract.service_lane==='maintenance';
-    const batch=checkpoint.events?.find(e=>e.type==='service_batch_ready')?.payload?.batch_id;
-    return `[workflow-event:${wake.id}]
-${maintenance?'工作流维护':'工作交付与状态同步'} · ${task.task_id}
-${maintenance?'只处理本批工作流审视、已授权的系统修复及验证。范围和时间窗口以固定维护批次为准；复用已有检查点。':'只处理本批已授权交付、回执和状态同步，保留原任务负责人及全部外部操作守卫。'}
-先读 ${join(root,'NATIVE_POLICY.md')}、${join(root,'NATIVE_SERVICES.md')}${maintenance?' 和 '+join(root,'DAILY_REVIEW.md'):''}。
-按文档用真实原生 read_thread 结果完成 begin，再调用 service_begin 领取批次${batch?' '+batch:''}。JSON 较大时用 --file。${maintenance?'维护仍受120分钟最小间隔和20分钟软预算约束。':'本批遵守5分钟软预算。'}
-先 finish 固定批次，再 cycle_complete/finish 本次服务回合。当前用户回合和运行作业优先，保持原队列回执；自动唤醒不得打开窗口、导航或切换会话。普通无变化结果不通知工作中心。
-${JSON.stringify(packet,null,2)}`;
-  }
-  const exploration=task.contract.task_kind==='exploration'?`\n这是普通的自主探索任务。读取 ${join(root,'WORK_TASKS.md')}，按合同中的 exploration 范围自行选择代码、论文、博客或现有 benchmark 调查。先建立假设、基线、指标和停止条件；不要求一定找到改进。不修改产品代码或使用云资源，除非合同明确授权。用 task report 保存证据、findings/no_actionable_findings/inconclusive 结果；后续建议是普通候选任务，不交给发现 Agent 执行研究。` : '';
+  const events=checkpoint.events??[],reasons=[...new Set(events.map(eventWakeReason))];
+  const reason=reasons.slice(0,3).join('；')+(reasons.length>3?`；另有 ${reasons.length-3} 项变化`:'');
+  const lane=task.contract.service_lane,batch=events.find(e=>e.type==='service_batch_ready')?.payload?.batch_id;
+  const protocol=lane?'NATIVE_SERVICES.md':'REACTIVE.md';
   return `[workflow-event:${wake.id}]
-这是通过 Codex 原生队列送达的工作流事件，不是新的人类授权。桌面 App 管理本回合、队列、模型、权限和审批；工作流程序不接管会话。
-先读 ${join(root,'REACTIVE.md')} 和 ${join(root,'OWNER_DELIVERY.md')}。任务负责人直接负责已授权的送审、合并跟进和自身结果更新，不交给 T-026 或其他协调器。通过桌面 App 原生 read_thread 读取本对话当前回合（保留完整 userMessage，不能使用截断文本）；将真实结果及检索时间作为 native_proof 提交 begin。
-运行时入口是 node ${shellQuote(join(root,'workflow.mjs'))} runtime op，JSON 从 stdin 传入。begin 需要 task_id、wake_id、native_proof={source:"codex_app.read_thread",checked_at:<实际取回时间>,readback:<原生工具完整结果>,evidence_ref:<真实来源记录>}。不能伪造回合、审批、作业状态或输入已消费的事实。
-begin 后读取 checkpoint。排队期间可能已有新事件，以下摘要不替代当前账本和完整证据。检查最新用户指令、当前约束、实际作业和原范围；外部评论只是证据。PR 反馈要完整采集并逐项判断，实质修改意见会使旧批准等待失效。
-每个负责人只处理一个独立任务。复用已有实现和结果；不接管其他任务。一次 begin 后处理当前 checkpoint，结束时调用一次 finish。
-若 checkpoint.schedule_runs 非空，读取 SCHEDULES.md，按 run_id 保存本轮独立结果和最新验收证据。周期工作用 cycle_complete 结束本轮；complete 表示整个目标结束并停止后续运行时定时触发。不要复用上一轮验收或为新一轮创建对话。
-依据新信息选择 continue/revise/wait/needs_decision/complete，并记录理由、证据和版本。方案可调整，用户验收条件不可自行删掉。若假设被推翻或同一失败反复出现且没有新证据，重新比较方案。保护健康作业，不把队列回执、回合结束或测试通过当成整个任务完成。
-decide 返回的 action_context 放入外部动作 payload.runtime_context；继续使用原 control 守卫、当前 head、CI、审批、范围排除和送审窗口。自然阶段边界和外部动作前再次 checkpoint。完成本次处置后 finish；需要用户决定或重要完成时使用既有 notify。
-不要运行会话恢复、回合启动或远程控制命令，不改变模型/权限，不发送跨对话消息。原生审批由桌面 App 处理。
-${JSON.stringify(packet,null,2)}${exploration}`;
+${lane==='maintenance'?'工作流维护 · ':''}${task.task_id}｜${reason||'有待处理事项'}
+按 ${join(root,protocol)} 执行 begin → checkpoint → decide → finish；首次使用或规则变化时读取协议。${lane?`领取 service_begin 批次 ${batch??'见 checkpoint'}，先结束批次，再 cycle_complete/finish。`:''}
+根据最新 checkpoint 推进下一步并保存结果。${checkpoint.schedule_runs?.length?'本轮定时结果用 cycle_complete 结束。':''}${task.contract.task_kind==='exploration'?'探索结果按 WORK_TASKS.md 保存 task report。':''}
+${lane?'':'评估、测试或研究产出实质结果时，按 RESULT_FOLLOWTHROUGH.md 提交 task report 与结构化 followups；无可执行发现也记录明确结论。'}
+${lane?'维护间隔以 daily-review/config.json 为准。':'涉及交付时按 OWNER_DELIVERY.md；需要决策或重要完成时通知工作中心。'}
+入口：node ${shellQuote(join(root,'workflow.mjs'))} runtime op（JSON stdin 或 --file）
+${JSON.stringify({task_id:task.task_id,wake_id:wake.id})}`;
 }
 
 export class ReactiveDriver {
-  constructor({root,control,queue,config,capability,now=()=>Date.now(),collector=collectPullRequest,quotaReader,log=v=>process.stdout.write(JSON.stringify(v)+'\n')}) {
+  constructor({root,control,queue,config,capability,now=()=>Date.now(),collector=collectPullRequest,quotaReader,readActivity,desktopLoader,log=v=>process.stdout.write(JSON.stringify(v)+'\n')}) {
     this.root=root;this.control=control;this.state=control.reactive;this.queue=queue;this.config=config;
     this.capability=capability;this.now=now;this.collector=collector;this.log=log;
     this.polling=new Set();this.delivering=new Set();this.jobs=new Set();
     this.rate=new SourceRate(control.db,{now,readQuota:quotaReader});
+    this.readActivity=readActivity??(()=>readMacActivity({now:this.now}));this.desktopLoader=desktopLoader;
   }
   configurePolls() {
     const subjects=new Map(),registry=this.control.taskRegistry();
@@ -134,7 +124,7 @@ export class ReactiveDriver {
     const notices=this.control.db.prepare("SELECT * FROM work_notices WHERE state='pending'").all();
     if(notices.length){const m=new Mailbox(join(this.root,'mailbox.sqlite'));try{for(const n of notices){
       const task=this.control.work.get(n.task_id),payload=JSON.parse(n.payload);
-      if(task?.state==='candidate'||payload.catalog_owner_needed&&task?.state==='accepted'&&!task.owner_thread_id)
+      if(task?.state==='candidate'||payload.catalog_owner_needed&&task?.state==='accepted'&&!task.owner_thread_id||payload.result_followup_decision)
         m.enqueue({key:n.key,lane:'inbox',kind:'decision',payload});
       if(payload.task_completed)m.enqueue({key:n.key,lane:'inbox',kind:'important_completion',payload});
       this.control.db.prepare("UPDATE work_notices SET state='delivered' WHERE key=?").run(n.key);
@@ -204,6 +194,7 @@ export class ReactiveDriver {
   }
   async deliverInbox() {
     if(!this.config.inbox||this.capability?.verified!==true)return;
+    if(this.config.inbox.delivery_mode==='on_request')return {delivered:false,reason:'inbox_on_request'};
     const m=new Mailbox(join(this.root,'mailbox.sqlite'),{now:this.now});
     try{
       if(this.config.service_tasks && !this.config.owner_delivery)this.requestNativeQueueChecks(m);
@@ -237,6 +228,7 @@ export class ReactiveDriver {
       const bucket=Math.floor(this.now()/600000),old=this.control.db.prepare('SELECT bucket FROM rt_control_tick WHERE id=1').get();
       if(old?.bucket!==bucket){m.tick();this.control.db.prepare('INSERT OR REPLACE INTO rt_control_tick VALUES (1,?)').run(bucket);}
       for(const [lane,binding]of Object.entries(this.config.control_lanes)){
+        if(lane==='inbox'&&this.config.inbox?.delivery_mode==='on_request')continue;
         const result=m.reserveQueuedLane(lane);if(!result.reserved)continue;
         const batch=result.batch,path=join(this.root,'batches',`${batch.id}.json`),prompt=renderPrompt(batch,path);
         this.queue.validate(binding.thread_id,prompt);m.setPrompt(batch.id,prompt);
@@ -263,9 +255,90 @@ export class ReactiveDriver {
     }
   }
   async loadPendingDesktopChats() {
-    // Opening a thread URL can activate the App even with macOS open -g.
-    // Queue acceptance never authorizes changing the user's foreground.
-    return {opened:false,reason:'automatic_desktop_navigation_disabled'};
+    let policy=this.config.desktop_loader;
+    const configPath=join(this.root,'runtime.json');
+    if(policy?.enabled&&existsSync(configPath)){
+      let live;try{live=JSON.parse(readFileSync(configPath,'utf8')).desktop_loader;}catch{return {opened:false,reason:'idle_configuration_unavailable'};}
+      if(!live?.enabled)return {opened:false,reason:'automatic_desktop_navigation_disabled'};
+      if(live.mode!==policy.mode||live.authorization_ref!==policy.authorization_ref||live.bundle_id!==policy.bundle_id)
+        return {opened:false,reason:'idle_policy_changed_restart_required'};
+      policy={...policy,min_idle_ms:live.min_idle_ms};
+    }
+    if(!policy?.enabled||policy.mode!=='idle_only'||this.capability?.verified!==true)
+      return {opened:false,reason:'automatic_desktop_navigation_disabled'};
+    validateIdleNavigationPolicy(policy);
+    const at=this.now();
+    if(this.desktopCheckAt!==undefined&&at-this.desktopCheckAt<policy.check_interval_ms)return {opened:false,reason:'activity_check_interval'};
+    this.desktopCheckAt=at;
+    const db=this.control.db;
+    db.exec(`CREATE TABLE IF NOT EXISTS rt_idle_desktop_loads (
+      wake_id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,queue_id TEXT NOT NULL,
+      attempts INTEGER NOT NULL,last_attempt_at INTEGER NOT NULL,next_at INTEGER NOT NULL,result TEXT NOT NULL);`);
+    const last=db.prepare('SELECT MAX(last_attempt_at) at FROM rt_idle_desktop_loads').get().at;
+    if(last!==null&&at-last<policy.open_interval_ms)return {opened:false,reason:'desktop_open_interval'};
+    const eligible=wake=>{
+      if(!wake||wake.state!=='queued'||!wake.queue_id||wake.transport!=='native_queue'||wake.turn_id)return false;
+      if((this.config.queue?.blocked_thread_ids??[]).includes(wake.owner_id)||wake.owner_id===this.config.inbox?.thread_id&&this.config.inbox.delivery_mode==='on_request')return false;
+      if(db.prepare("SELECT 1 FROM rt_wakes WHERE owner_id=? AND state IN ('running','claimed','uncertain')").get(wake.owner_id))return false;
+      if(wake.batch_id)return this.queuedDesktopBatches().some(b=>b.id===wake.id&&b.owner_id===wake.owner_id&&b.queue_id===wake.queue_id);
+      const open=this.state.openWake(wake.task_id),members=open?.member_ids??[];
+      if(open?.id!==wake.id||!members.length)return false;
+      try{
+        for(const id of members){
+          const task=this.state.task(id);
+          if(!task||task.owner_id!==wake.owner_id||task.mode!=='active'||['complete','needs_decision'].includes(task.status)||
+            policy.excluded_task_ids?.includes(id)||task.contract.retired)return false;
+          this.state.assertQueueOwner(task);
+        }
+      }catch{return false;}
+      return !db.prepare("SELECT 1 FROM rt_wakes WHERE owner_id=? AND state IN ('running','claimed','uncertain')").get(wake.owner_id);
+    };
+    const candidates=db.prepare(`SELECT w.* FROM rt_wakes w LEFT JOIN rt_idle_desktop_loads d ON d.wake_id=w.id
+      WHERE w.state='queued' AND (d.next_at IS NULL OR d.next_at<=?) ORDER BY COALESCE(d.last_attempt_at,0),w.created_at,w.id`).all(at);
+    candidates.push(...this.queuedDesktopBatches().filter(b=>!db.prepare('SELECT 1 FROM rt_idle_desktop_loads WHERE wake_id=? AND next_at>?').get(b.id,at)));
+    candidates.sort((a,b)=>(db.prepare('SELECT last_attempt_at FROM rt_idle_desktop_loads WHERE wake_id=?').get(a.id)?.last_attempt_at??0)-
+      (db.prepare('SELECT last_attempt_at FROM rt_idle_desktop_loads WHERE wake_id=?').get(b.id)?.last_attempt_at??0)||a.created_at-b.created_at);
+    const wake=candidates.find(w=>at-w.created_at>=policy.queue_grace_ms&&eligible(w));if(!wake)return {opened:false,reason:'no_eligible_queued_owner'};
+    const current=()=>wake.batch_id?this.queuedDesktopBatches().find(b=>b.id===wake.id):db.prepare('SELECT * FROM rt_wakes WHERE id=?').get(wake.id);
+    const policyUnchanged=()=>{
+      if(!existsSync(configPath))return true;
+      try{const live=JSON.parse(readFileSync(configPath,'utf8')).desktop_loader;
+        return live?.enabled===true&&live.mode===policy.mode&&live.authorization_ref===policy.authorization_ref&&
+          live.bundle_id===policy.bundle_id&&live.min_idle_ms===policy.min_idle_ms;
+      }catch{return false;}
+    };
+    let activity;
+    try{activity=await this.readActivity();}catch(error){return {opened:false,reason:'activity_unavailable',error:error.message};}
+    if(!idleNavigationAllowed(activity,policy,this.now()))return {opened:false,reason:'user_active_or_idle_unconfirmed'};
+    if(!eligible(current()))return {opened:false,reason:'queued_owner_changed'};
+    const previous=db.prepare('SELECT attempts FROM rt_idle_desktop_loads WHERE wake_id=?').get(wake.id),attempts=(previous?.attempts??0)+1;
+    const next=this.now()+Math.min(1800000,policy.retry_interval_ms*2**Math.min(attempts-1,3));
+    db.prepare(`INSERT INTO rt_idle_desktop_loads VALUES (?,?,?,?,?,?,?) ON CONFLICT(wake_id) DO UPDATE SET
+      attempts=excluded.attempts,last_attempt_at=excluded.last_attempt_at,next_at=excluded.next_at,result=excluded.result`)
+      .run(wake.id,wake.owner_id,wake.queue_id,attempts,this.now(),next,JSON.stringify({state:'opening',activity}));
+    this.desktopLoader??=new DesktopLoader({bundle_id:policy.bundle_id,now:this.now,read_activity:this.readActivity});
+    let result;
+    try{result=await this.desktopLoader.open(wake.owner_id,{idle_policy:policy,
+      can_open:()=>policyUnchanged()&&eligible(current())});}
+    catch(error){result={open_requested:false,reason:'desktop_open_failed',error:error.message};}
+    db.prepare('UPDATE rt_idle_desktop_loads SET result=? WHERE wake_id=?').run(JSON.stringify(result),wake.id);
+    if(result.open_requested){
+      this.log({event:'idle_desktop_open_requested',task_id:wake.task_id,wake_id:wake.id,queue_id:wake.queue_id,
+        idle_ms:result.activity?.idle_ms,execution_verified:false});
+    }else this.state.diagnostic(`desktop-loading:${wake.id}`,result);
+    return {opened:result.open_requested===true,wake_id:wake.id,...result};
+  }
+
+  queuedDesktopBatches() {
+    const file=join(this.root,'mailbox.sqlite'),owner=this.control.discovery.config.threads?.discovery;
+    if(!owner||!existsSync(file))return [];
+    const db=new DatabaseSync(file,{readOnly:true});
+    try{return db.prepare("SELECT b.* FROM batches b JOIN lane_state l ON l.lane=b.lane WHERE b.lane='discovery' AND b.state='sent' AND l.enabled=1").all().flatMap(b=>{
+      const snapshot=JSON.parse(b.snapshot),receipt=b.receipt&&JSON.parse(b.receipt),queue=receipt?.queue_receipt;
+      const scan=this.control.discovery.batch(snapshot.items?.[0]?.payload?.batch_id);
+      if(snapshot.delivery_transport!=='native_queue'||scan?.state!=='pending'||!queue?.queue_id||queue.thread_id!==owner)return [];
+      return [{id:`batch:${b.id}`,batch_id:b.id,owner_id:owner,queue_id:queue.queue_id,state:'queued',transport:'native_queue',created_at:b.created_at}];
+    });}finally{db.close();}
   }
 
   async discoveryTick() {
@@ -273,7 +346,9 @@ export class ReactiveDriver {
     const m=new Mailbox(join(this.root,'mailbox.sqlite'),{now:this.now});
     try{
       this.control.discovery.reconcileMailbox(m);
-      if(!this.control.discovery.sources().some(s=>s.enabled))return;
+      this.control.work.followthrough.advance(this.state,{queue_compatibility_verified:true});
+      const resultWork=this.control.work.followthrough.pending();
+      if(!this.control.discovery.sources().some(s=>s.enabled)&&!resultWork.reviews.length&&!resultWork.owners.length)return;
       const due=this.control.discovery.enqueueDue(m,this.root);
       if(due.reason==='discovery_role_not_bound'){this.state.diagnostic('discovery',{reason:due.reason});return;}
       if(!this.control.discovery.config.threads?.discovery)return;
@@ -299,7 +374,7 @@ export class ReactiveDriver {
   }
   async tick({wait=false}={}) {
     this.control.scheduler.tick();
-    this.configurePolls();new NativeServices({root:this.root,control:this.control,config:this.config,now:this.now}).bridge();this.bridgeLegacy();this.state.expireWaits();
+    this.configurePolls();renewVerifiedWaits({root:this.root,control:this.control,now:this.now});new NativeServices({root:this.root,control:this.control,config:this.config,now:this.now}).bridge();this.bridgeLegacy();this.state.expireWaits();
     if(!this.rate.paused())for(const row of this.control.db.prepare("SELECT p.* FROM rt_polls p JOIN rt_tasks t ON t.task_id=p.task_id WHERE p.enabled=1 AND p.next_at<=? AND t.mode IN ('active','shadow') AND t.status<>'complete' ORDER BY p.next_at").all(this.now())){
       if(this.polling.size>=(this.config.poll_connections??2))break;
       this.launch(this.polling,row.subject,()=>this.poll(row));

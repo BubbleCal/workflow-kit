@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Mailbox, COORDINATOR, INBOX, isIdle, renderPrompt } from './mailbox.mjs';
@@ -257,4 +257,24 @@ test('result admission does not displace human commands or change version-one ba
     assert.equal(b.snapshot.items.some(i=>i.key==='new-result'),false);
     assert.deepEqual(b.snapshot.items.map(i=>i.key),Array.from({length:20},(_,i)=>(version===2?'human-':'old-')+i));m.close();
   }
+});
+
+
+test('on-request inbox preserves pending and previously reserved receipts with read-only pagination',()=>{
+  const root=mkdtempSync(join(tmpdir(),'human-only-inbox-')),m=new Mailbox(join(root,'mailbox.sqlite'),{now:()=>NOW});
+  try{
+    for(let i=0;i<3;i++)m.enqueue({key:`answer:${i}`,lane:'inbox',kind:'answer',payload:{task_id:'T-1',text:`Answer ${i}`}});
+    const batch=m.reserveQueuedInbox(new Set(['T-1'])).batch;m.setPrompt(batch.id,'Existing unsent prompt');
+    writeFileSync(join(root,'runtime.json'),JSON.stringify({inbox:{delivery_mode:'on_request'}}));
+    assert.equal(m.authorizeQueueSend(batch.id).reason,'inbox_on_request');
+    assert.equal(m.authorizeSend(batch.id,idle(INBOX)).reason,'inbox_on_request');
+    assert.equal(m.reserveQueuedInbox(new Set(['T-1'])).reason,'inbox_on_request');
+    assert.equal(m.reserve('inbox',idle(INBOX)).reason,'inbox_on_request');
+    const before=m.db.prepare("SELECT * FROM mail WHERE lane='inbox'").all(),receipt=m.get(batch.id);
+    const first=m.readInbox({limit:2}),second=m.readInbox({limit:2,after_seq:first.next_after_seq});
+    assert.equal(first.read_only,true);assert.equal(first.has_more,true);assert.equal(second.has_more,false);
+    assert.deepEqual([...first.items,...second.items].map(x=>x.item_key),['answer:0','answer:1','answer:2']);
+    assert.deepEqual(m.db.prepare("SELECT * FROM mail WHERE lane='inbox'").all(),before);assert.deepEqual(m.get(batch.id),receipt);
+    m.enqueue(command('other-lane'));assert.equal(m.reserveQueuedLane('coordinator').reserved,true);
+  }finally{m.close();rmSync(root,{recursive:true,force:true});}
 });

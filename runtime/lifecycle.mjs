@@ -1,3 +1,4 @@
+import {isSetupNotice} from './owner-wake.mjs';
 import {reviewSurfaceDigest} from './review-feedback.mjs';
 import { scopeActionReasons } from './scope-exclusions.mjs';
 import { createHash } from 'node:crypto';
@@ -95,9 +96,9 @@ export class LifecycleLedger {
   feedback(repository, number, head) {
     const s = this.db.prepare('SELECT * FROM feedback_snapshots WHERE repository=? AND pr_number=?').get(repository, number);
     if (!s || s.head !== head || !fresh(s.checked_at, this.now())) return { state: 'unknown', items: [] };
-    const items = this.db.prepare(`SELECT i.item_key,i.digest,a.disposition FROM feedback_items i
+    const items = this.db.prepare(`SELECT i.item_key,i.digest,i.data,a.disposition FROM feedback_items i
       LEFT JOIN feedback_assessments a ON a.item_key=i.item_key AND a.digest=i.digest AND a.head=?
-      WHERE i.repository=? AND i.pr_number=? ORDER BY i.item_key`).all(head, repository, number);
+      WHERE i.repository=? AND i.pr_number=? ORDER BY i.item_key`).all(head, repository, number).filter(i=>!isSetupNotice(JSON.parse(i.data))).map(({data,...item})=>item);
     return { state: items.some(i => !i.disposition) ? 'unassessed' :
       items.some(i => i.disposition === 'needs_scope_decision') ? 'decision' :
       items.some(i => i.disposition === 'actionable') ? 'repair' : 'clear', items };

@@ -1,3 +1,4 @@
+import {isSetupNotice} from './owner-wake.mjs';
 import { createHash } from 'node:crypto';
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -46,6 +47,8 @@ export class ReviewFeedback {
       const key=`${repository}#${pr_number}:${kind}:${id}`;
       this.db.prepare('INSERT INTO feedback_items VALUES (?,?,?,?,?) ON CONFLICT(item_key) DO UPDATE SET data=excluded.data,digest=excluded.digest')
         .run(key,repository,pr_number,JSON.stringify(data),digest);items.push(key);
+      if(kind==='review'&&isSetupNotice(data))this.db.prepare('INSERT OR IGNORE INTO feedback_assessments VALUES (?,?,?,?,?,?,?)')
+        .run(key,head_sha,digest,'informational','Exact known Claude manual-review setup notice; no code finding',evidence_ref,null);
     }
     this.db.prepare('INSERT INTO feedback_snapshots VALUES (?,?,?,?,?) ON CONFLICT(repository,pr_number) DO UPDATE SET head=excluded.head,checked_at=excluded.checked_at,evidence_ref=excluded.evidence_ref')
       .run(repository,pr_number,head_sha,checked_at,evidence_ref);

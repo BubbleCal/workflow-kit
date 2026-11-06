@@ -1,12 +1,23 @@
+> Authorized idle-only loading: follow IDLE_DESKTOP_WAKE.md and the actual instance policy. Only the runtime may open an already-queued chat after the configurable input-idle threshold (currently ten minutes); active/unknown activity remains queue-only. This narrows older blanket no-navigation wording; recovery agents must not issue their own UI navigation or duplicate messages.
+
+> Owner recovery runs before source reads. `discovery begin/plan` returns a fixed
+> `owner_health` target set when due; observe it even if chat-history pagination or
+> another provider is blocked. The batch cannot finish/checkpoint without these
+> observations. Queued and uncertain owners take priority over healthy running
+> owners; the configured 30-minute per-owner cadence is unchanged. For an idle or
+> notLoaded terminal owner with a known unconsumed queue, use the standing-policy
+> guarded native recovery hint once, then confirm the real turn and work. Failed or
+> uncertain hints remain blockers and are not retried. Main is never a recovery relay.
+
 # Verify actual owner progress
 
-Use the existing ten-minute Codex discovery scan and regular maintenance audit;
+Use the configured Codex discovery scan and regular maintenance audit;
 do not create another scheduler or engineering owner. The actual standing request
 is saved in the instance's OWNER_RECOVERY_POLICY.json. External observations never
 expand the original product scope or authorize publication/deployment.
 
 At each Codex source scan, run `runtime op` with `{"op":"health_targets","limit":8}`.
-Read the returned owners using native `wait_threads` with `timeoutMs:0`. Persist
+Read the returned owners using native `wait_threads` with `timeoutMs:0`. If that tool returns an App error, use native `read_thread` with `turnLimit:1`; owner health does not depend on history pagination. Persist
 the actual tool result and call `health_observe` with task_id and
 `native_proof={source:"codex_app.wait_threads",checked_at,readback,evidence_ref}`.
 The persisted cursor is the last observation time: owners rotate across bounded
@@ -39,7 +50,7 @@ human source. Preserve the tool result immediately. Never retry uncertain sends.
 An old message arriving after recovery skips begin once its wake has a different
 actual turn or is terminal; this prevents a second product execution.
 
-For verified cold owners, prefer a distinct recovery hint with intent
+For verified idle or notLoaded terminal owners, prefer a distinct recovery hint with intent
 `resume_queued_owner` and key `resume-input:<task_id>:<queue_id>`. It references
 the existing wake and the real standing authorization; it does not copy or requeue
 the work. Tell the owner to process its existing queued message normally and
@@ -66,3 +77,12 @@ follow-up to that owner under OWNER_DELIVERY.md. Do not treat Backlog as proof o
 no work, or Done as proof of whole-task completion. Preserve valid waits and
 completed-owner archival; do not add another polling service or make discovery
 the ticket-state writer.
+
+
+For a tool-based recovery turn, read native `read_thread` with `includeOutputs:true`
+so the exact `codex_app.send_message_to_thread` delegation output is retained. Use
+normal runtime `begin` for the original task and wake. It accepts that exact hint
+only when the matching guarded recovery action has a successful native receipt.
+This records execution through recovery without claiming the original queue item
+was consumed; the original message and queue ID are retained. Later delivery of
+that old wake skips execution when another turn already owns or finished it.

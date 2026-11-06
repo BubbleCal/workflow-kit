@@ -59,16 +59,18 @@ export function scheduleCalendarPreparation(control,taskId) {
 
 // Derive task ownership facts from the catalog instead of asking the discovery
 // model to guess legacy guard field names. Native project evidence stays explicit.
-export async function prepareMeetingOwner(control,{task_id,projects,project_catalog_ref,checked_at}) {
+export async function prepareTaskOwner(control,{task_id,projects,project_catalog_ref,checked_at}) {
   const task=control.work.get(task_id),rule=control.work.calendarRule(),p=task?.data.meeting_preparation;
-  if(task?.state!=='accepted'||task.owner_thread_id||!p||!rule?.enabled||p.calendar_id!==rule.calendar_id||
-    task.authorization?.policy!=='accept_calendar_preparation'||control.reactive.task(task_id))
-    throw new Error('An accepted unstarted meeting occurrence with scoped creation authority is required');
+  const resultRule=control.work.followthrough.policy(),result=task?.authorization?.policy==='accept_result_followups'&&resultRule?.enabled&&
+    control.db.prepare('SELECT 1 FROM work_result_followups WHERE task_id=?').get(task_id);
+  const meeting=p&&rule?.enabled&&p.calendar_id===rule.calendar_id&&task.authorization?.policy==='accept_calendar_preparation';
+  if(task?.state!=='accepted'||task.owner_thread_id||!meeting&&!result||control.reactive.task(task_id))
+    throw new Error('An accepted unstarted meeting occurrence or result followup with scoped creation authority is required');
   const at=Date.parse(checked_at);if(!Number.isFinite(at)||at>control.now()+5000||control.now()-at>60000||!project_catalog_ref)
     throw new Error('Fresh native project catalog and its evidence reference are required');
   const {resolvePlacement}=await import('./control.mjs');
   const resolved=resolvePlacement({projects,project_id:control.work.config.scope.project_id,host_id:'local',source_ref:project_catalog_ref});
-  const request=control.work.requestOwner({task_id}),r=request.request;
+  const request=control.work.requestOwner({task_id,...(result?{source_message_id:resultRule.source_message_id,verbatim_text:resultRule.verbatim_text,actual_human_verified:true,explicit_new_thread_request_verified:true}:{})}),r=request.request;
   const previous=control.db.prepare('SELECT state FROM actions WHERE action_key=?').get(r.control_action_key);
   if(previous&&['sent','claimed','uncertain','cancelled'].includes(previous.state))return {key:r.control_action_key,state:previous.state,next:'Reconcile this exact creation receipt; never create another owner.'};
   const busy=control.db.prepare("SELECT 1 FROM actions WHERE task_id=? AND action_key<>? AND state IN ('prepared','deferred','claimed','uncertain')").get(task_id,r.control_action_key);
@@ -87,3 +89,4 @@ export async function prepareMeetingOwner(control,{task_id,projects,project_cata
   const preparation=control.prepare({key:r.control_action_key,kind:'create_thread',task_id,payload,evidence});
   return {key:r.control_action_key,preparation,evidence,next:'Claim this exact key with the returned evidence; invoke only claim.payload.native once, settle its real receipt, confirm project placement, bind_owner and start. Refresh prepare_owner if the project proof expires.'};
 }
+export {prepareTaskOwner as prepareMeetingOwner};

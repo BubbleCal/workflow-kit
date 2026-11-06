@@ -2,25 +2,35 @@
 
 > Completed review reports have a separately authorized owner-to-main exception when review-report-policy.json enables it. Follow REVIEW_RESULT_DELIVERY.md; findings and private review conclusions do not use external PR review-delivery gates. Unrelated notifications remain on-request.
 
-# Human-facing notifications only
+# Main conversation: on-request inbox
 
-Main receives only real human decisions, answers to an actual user question, and
-important verified completion. It is not an execution coordinator or a destination
-for owner provisioning, source scans, CI progress, delivery retries or routine
-workflow health. Do not relabel such inputs as action_required or answer.
+Main only interacts with the user. With `runtime.json.inbox.delivery_mode` set to
+`on_request`, workflow events never start a main conversation turn, including real
+decisions, requested answers and important completions. The runtime does not reserve
+or send inbox batches; its queue transport also blocks the main thread UUID.
+New inbox bindings default to this mode. Existing explicitly configured `automatic`
+bindings retain their delivery behavior until changed.
 
-Use control `prepare(kind="notify")` with the existing evidence guards:
-- decision/action_required needs material change and an actual human action;
-- answer needs the original question_message_id and verified source/owner answer;
-- important_completion needs actual completion evidence.
+When the user asks for decisions, progress or results, main can read the durable
+inbox through the mailbox CLI with JSON stdin:
 
-The mailbox validates the corresponding durable notify action even for direct
-mailbox writes. A raw kind label or user_notification_required flag is insufficient.
-Rejected inputs are recorded as suppressed without waking main. Native whole-task
-completion and actual unaccepted catalog candidates have their own exact ledger
-bindings. Already-authorized meeting preparation and owner creation are handled
-by discovery under their scoped standing policy and never become human decisions.
+```json
+{"op":"read_inbox","limit":20,"after_seq":0}
+```
 
-Main remains free to discuss, investigate and answer the user. Automatic inputs do
-not instruct it to dispatch, perform delivery, repair the workflow or chase owners.
-Completed-owner archival remains the existing bounded completion follow-up.
+Use `next_after_seq` while `has_more` is true. `include_history:true` also returns
+previously acknowledged entries. Reading never acknowledges, reserves, dispatches,
+or claims that a result has been presented to the user. Main needs no machine batch
+`begin` or `finish` to answer a human question.
+
+Owners continue recording actual decisions, verified answers and important results
+using the existing guarded notify path. In on-request mode this writes the ledger
+only. Keep the original question ID, task ID, evidence and notification key. Do not
+send directly to main or create another conversation to relay notifications.
+
+Admission rules still reject routine scans, progress and internal coordination.
+Discovery handles authorized meeting preparation and owner creation. Product delivery
+belongs to the original task owner. Completed-owner archive requests remain durable;
+main is not automatically awakened to perform them. The original owner may use the
+existing archive guard after task completion, or leave a pending request for an
+existing authorized maintenance turn.

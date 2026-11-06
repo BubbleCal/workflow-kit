@@ -51,9 +51,13 @@ init 自动登记一条实例内稳定的探索草稿。task builtin 可幂等�
 
 ## Standing policies
 
-policy 操作支持 create_owner 和 accept_assigned_linear。参数包括 key、enabled、allowed_kinds、source_message_id、verbatim_text、evidence_ref、actual_human_verified；后者还必须包含核验的 Linear assignee_id。授权只限实际用户给出的类型与本实例来源范围。规则不会从外部内容自动生成。
+policy 操作支持 create_owner、accept_assigned_linear 和有实际用户授权的 accept_result_followups。参数包括 key、enabled、allowed_kinds、source_message_id、verbatim_text、evidence_ref、actual_human_verified；后者还必须包含核验的 Linear assignee_id。授权只限实际用户给出的类型与本实例来源范围。规则不会从外部内容自动生成。
 
 指定 Linear 负责人规则只接收来源确实为 linear、assignee_id 精确匹配、kind 允许且有验收的候选。其他来源仍为候选。接收和创建负责人是两条独立规则；没有创建授权时产生持久通知。
+
+## Result followthrough
+
+Ordinary accepted task results use RESULT_FOLLOWTHROUGH.md. Structured evidenced followups may be admitted and assigned under the explicit accept_result_followups rule; legacy proposals remain candidates. Discovery only performs intake and guarded owner setup. Independent followups retain their provenance without reopening a finite assessment.
 
 ## Exploration contract and reports
 
@@ -61,7 +65,7 @@ policy 操作支持 create_owner 和 accept_assigned_linear。参数包括 key�
 
 report 操作包含 task_id、owner_thread_id、report_key、outcome、summary、evidence_refs，以及可选 proposals。outcome 为 findings、no_actionable_findings 或 inconclusive。只有正在执行该普通任务的原 owner 能提交；同 report_key 内容不可变。proposals 用普通 create 字段，成为 candidate；无发现/不确定报告不能生成实施提案。
 
-报告不自动完成任务。负责人继续以实际验收证据 decide complete 并 finish。若该探索是工作包，报告和子任务完成直接产生父任务事件；不会唤醒发现 Agent。父任务存在已接收未完成子项时不能完成；每个父目标还需自己的集成验收。一个任务可跟踪多个 PR，每个 PR 只归一个任务负责人，堆叠提交和复验要求写入各自合同/计划。
+报告不自动完成任务。负责人继续以实际验收证据 decide complete 并 finish。若该探索是工作包，报告和子任务完成仍直接产生父任务事件；结构化独立后续工作另外按 RESULT_FOLLOWTHROUGH.md 进入现有发现批次。父任务存在已接收未完成子项时不能完成；每个父目标还需自己的集成验收。一个任务可跟踪多个 PR，每个 PR 只归一个任务负责人，堆叠提交和复验要求写入各自合同/计划。
 
 Runtime-owned one-time and fixed-interval timers use SCHEDULES.md. They share the ordinary event/owner protocol; native schedule producers remain supported separately.
 

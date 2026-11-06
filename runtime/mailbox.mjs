@@ -257,7 +257,18 @@ export class Mailbox {
       return this.watchdog.observe(input);
     });
   }
+  inboxOnRequest() {
+    const path=resolve(dirname(this.path),'runtime.json');
+    return this.path!==':memory:'&&existsSync(path)&&JSON.parse(readFileSync(path,'utf8')).inbox?.delivery_mode==='on_request';
+  }
+  readInbox({after_seq=0,limit=20,include_history=false}={}) {
+    if(!Number.isSafeInteger(after_seq)||after_seq<0||!Number.isSafeInteger(limit)||limit<1||limit>100||typeof include_history!=='boolean')throw new Error('Use a nonnegative cursor, a limit from 1 to 100, and a boolean history flag');
+    const rows=this.db.prepare("SELECT seq,item_key,kind,payload,state,created_at,completed_at FROM mail WHERE lane='inbox' AND seq>? AND (?=1 OR state IN ('pending','in_batch')) ORDER BY seq LIMIT ?").all(after_seq,Number(include_history),limit+1);
+    const items=rows.slice(0,limit).map(row=>({...row,payload:JSON.parse(row.payload)}));
+    return {read_only:true,items,next_after_seq:items.at(-1)?.seq??after_seq,has_more:rows.length>limit};
+  }
   reserve(lane, observation, { task_ids = null, native_queue = false, service_task_id = null } = {}) {
+    if(lane==='inbox'&&this.inboxOnRequest())return {reserved:false,reason:'inbox_on_request'};
     if (!laneThread[lane] && !(service_task_id && ['coordinator','maintenance'].includes(lane))) throw new Error(`Unknown lane: ${lane}`);
     if (!native_queue&&(!isIdle(observation, this.now()) || observation.thread.id !== laneThread[lane])) return { reserved: false, reason: 'target_busy_or_unknown' };
     return this.atomic(() => {
@@ -334,6 +345,7 @@ export class Mailbox {
     if (!r.changes && this.get(id)?.prompt !== prompt) throw new Error('A batch prompt cannot change after reservation');
   }
   reserveQueuedInbox(taskIds,lane='inbox') {
+    if(lane==='inbox'&&this.inboxOnRequest())return {reserved:false,reason:'inbox_on_request'};
     return this.atomic(()=>{
       if(!['inbox','discovery'].includes(lane)||!laneThread[lane])throw new Error('Unknown native control queue');
       const s=this.db.prepare('SELECT * FROM lane_state WHERE lane=?').get(lane);
@@ -381,6 +393,7 @@ export class Mailbox {
   authorizeQueueSend(id) {
     return this.atomic(()=>{
       const b=this.get(id);
+      if(b?.lane==='inbox'&&this.inboxOnRequest())return {send:false,reason:'inbox_on_request'};
       if(!b||!laneThread[b.lane]||b.snapshot.delivery_transport!=='native_queue'||b.state!=='reserved'||!b.prompt)
         return {send:false,reason:'native_queue_batch_required'};
       if(!this.db.prepare('SELECT enabled FROM lane_state WHERE lane=?').get(b.lane).enabled)return {send:false,reason:'lane_paused'};
@@ -396,6 +409,7 @@ export class Mailbox {
   authorizeSend(id, observation) {
     return this.atomic(() => {
       const b = this.get(id); if (!b) throw new Error('Unknown batch');
+      if(b.lane==='inbox'&&this.inboxOnRequest())return {send:false,reason:'inbox_on_request'};
       if(['native_queue','native_task'].includes(b.snapshot.delivery_transport))return {send:false,reason:'native_queue_transport_only'};
       if (b.state !== 'reserved') return { send: false, reason: b.state };
       const cadence=b.lane==='maintenance'?this.maintenanceCadence():null;
@@ -656,7 +670,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const mailbox = new Mailbox(resolve(BASE, 'mailbox.sqlite'));
   try {
     let result;
-    if (input.op === 'enqueue') result = mailbox.enqueue(input);
+    if (input.op === 'read_inbox') result = mailbox.readInbox(input);
+    else if (input.op === 'enqueue') result = mailbox.enqueue(input);
     else if (input.op === 'signal') result = mailbox.signal(input.reason);
     else if (input.op === 'tick') result = mailbox.tick();
     else if (input.op === 'human_trigger_status') result = mailbox.immediate.status(input.source_message_id);

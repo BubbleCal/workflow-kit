@@ -1,3 +1,5 @@
+> Authorized idle-only loading: follow IDLE_DESKTOP_WAKE.md and the actual instance policy. Only the runtime may open an already-queued chat after the configurable input-idle threshold (currently ten minutes); active/unknown activity remains queue-only. This narrows older blanket no-navigation wording; recovery agents must not issue their own UI navigation or duplicate messages.
+
 > Native owner-delivery mode: read OWNER_DELIVERY.md. Each original task owner completes its authorized PR delivery and result updates. There is no central delivery chat. Lifecycle progress may use an exact native decision; legacy coordinator-batch progress is not required. Historical coordinator-only instructions do not apply in this mode.
 
 > Native installation: START-HERE.md and WORK_TASKS.md use a verified main conversation with optional source-only discovery. Existing legacy layouts retain their roles and state; this release does not silently convert them.
@@ -136,7 +138,32 @@ node workflow.mjs runtime run
 node workflow.mjs runtime bind-inbox --file observations/inbox-native.json
 ```
 
-inbox 也使用原生队列，保留原有通知批次与回执。已入队不意味着通知已经展示。未迁移任务继续旧流程；0.2.22 的人类输入立即触发器仍服务 legacy 任务，active/paused 任务不会多走一次旧 dispatcher。
+新绑定的 inbox 默认使用 `delivery_mode: "on_request"`：只保存待决事项和成果，用户发问时用 mailbox `read_inbox` 读取，不自动启动主对话。既有 `automatic` 配置继续使用原生队列；切换为 `on_request` 后停止预留和发送，已有回执保持原样。详见 INBOX_POLICY.md。未迁移任务继续旧流程；0.2.22 的人类输入立即触发器仍服务 legacy 任务，active/paused 任务不会多走一次旧 dispatcher。
+
+
+## Owner wake policy
+
+Queue messages contain the actual change reason, task/wake identity and execution
+entry point. Reuse the execution protocol below; read it on first use or after a
+policy change instead of reloading every document each round. Protocol rules and
+action guards remain authoritative. Accepted queue messages are immutable.
+
+GitHub snapshots are always retained. Head/state/approval changes, review or
+comment content (including unknown bots), CI failures, all checks finishing and
+Gatekeeper results trigger owner work. Intermediate successful CI checks, ordering
+and volatile metadata do not invalidate a plan. One exact known Claude setup
+notice is automatically recorded as informational; an edit, a different author
+or any substantive feedback still requires assessment.
+
+Before an execution wait expires, the runtime checks subsequent owning-source
+evidence. Matching fact versions and a still-valid typed condition permit a
+30-minute wait renewal (bounded by the source evidence expiry). Renewal creates
+a durable receipt, not a new owner message. Stale/missing evidence, changed
+conditions, paused work and in-flight effects are never treated as a renewed
+verified wait. Unknown sources retain the existing owner reassessment path.
+
+Source polling, discovery cadence, maintenance cadence and owner wake policy are
+separate. Human instructions and due scheduled work retain their event paths.
 
 ## 执行负责人协议
 
@@ -228,3 +255,7 @@ stdin pipelines. A blocked local metadata process is not evidence that an owner
 operation failed; inspect the durable receipt before any retry.
 
 If maintenance `begin` returns `skipped: true` and `quiet: true`, the user rescheduled that old wake. End immediately without performing maintenance, sending a notification, retrying, or calling `finish`. Queue acceptance is retained as historical evidence; it is not execution.
+
+## Substantive result followthrough
+
+Before completing a substantive assessment, benchmark or research result, use RESULT_FOLLOWTHROUGH.md to record evidence and bounded structured followups (or an explicit no-actionable-finding conclusion). Original owners retain their own delivery; discovery handles only result intake and guarded independent-owner setup under its existing interval. Finite assessments stay complete. Explicit holds and external-action boundaries remain binding.

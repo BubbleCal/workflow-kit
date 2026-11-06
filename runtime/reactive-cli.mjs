@@ -1,4 +1,5 @@
-import {scheduleCalendarPreparation,prepareMeetingOwner} from './calendar-preparation.mjs';
+import {verifyQueuedRecoveryProof} from './queued-resume.mjs';
+import {scheduleCalendarPreparation,prepareTaskOwner} from './calendar-preparation.mjs';
 import {transferPausedOwner} from './owner-transfer.mjs';
 import {NativeServices} from './native-services.mjs';
 import {OwnerHealth} from './owner-health.mjs';
@@ -14,6 +15,7 @@ import {NativeQueue,validateQueueCompatibility,verifyExecutionProof,verifyNative
 import {ReactiveDriver} from './reactive-driver.mjs';
 import {publishScheduledOccurrence} from './schedule-source.mjs';
 import {verifyDesktopLoader} from './desktop-loader.mjs';
+import {validateIdleNavigationPolicy} from './mac-activity.mjs';
 import {bindings,requireBindings} from './instance.mjs';
 import {EXPLORATION_TEMPLATE} from './work-catalog.mjs';
 
@@ -38,12 +40,16 @@ export function runtimeConfig(root=ROOT) {
   if(c.control_lanes)for(const [lane,b]of Object.entries(c.control_lanes))
     if(!['coordinator','inbox','maintenance'].includes(lane)||b.thread_id!==bindings.threads[lane]||!b.workspace)throw new Error('Control lanes must match verified instance roles');
   if(c.desktop_loader?.enabled){
+    validateIdleNavigationPolicy(c.desktop_loader);
     if(process.platform!=='darwin'||!c.desktop_loader.authorization_ref)throw new Error('Authorized macOS App loading is required');
     const bytes=readFileSync(c.desktop_loader.evidence_file);
     if(digest(bytes)!==c.desktop_loader.evidence_digest)throw new Error('Desktop loading evidence changed');
     verifyDesktopLoader(JSON.parse(bytes),c.desktop_loader.bundle_id);
   }
-  return {...c,repositories:bindings.scope.repositories};
+  if(c.inbox?.delivery_mode!==undefined&&!['automatic','on_request'].includes(c.inbox.delivery_mode))throw new Error('Invalid inbox delivery mode');
+  const blocked=[...(c.queue?.blocked_thread_ids??[])];
+  if(c.inbox?.delivery_mode==='on_request')blocked.push(c.inbox.thread_id);
+  return {...c,queue:{...c.queue,blocked_thread_ids:[...new Set(blocked)]},repositories:bindings.scope.repositories};
 }
 export async function queueCapability(config,queue) {
   if(!config.queue_validation)throw new Error('Actual desktop idle/busy queue verification is required; use runtime queue-verify');
@@ -138,7 +144,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         else if(input.op==='accept')result=control.work.accept(input);
         else if(input.op==='policy')result=control.work.setPolicy(input);
         else if(input.op==='dismiss')result=control.work.dismiss(input);
-        else if(input.op==='prepare_owner')result=await prepareMeetingOwner(control,input);
+        else if(input.op==='prepare_owner')result=await prepareTaskOwner(control,input);
         else if(input.op==='reconcile_history')result=control.work.reconcileHistory(input);
         else if(input.op==='assess_difficulty')result=control.work.assessDifficulty(input);
         else if(input.op==='request_owner')result=control.work.requestOwner(input);
@@ -148,14 +154,19 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
           result=control.work.start(state,{...input,queue_compatibility_verified:true});
           const schedule=scheduleCalendarPreparation(control,input.task_id);if(schedule)result={...result,meeting_schedule:schedule};
         }else if(input.op==='report')result=control.work.recordReport(input);
+        else if(input.op==='result_followups')result={pending:control.work.followthrough.pending(),followups:control.work.followthrough.status()};
+        else if(input.op==='review_result')result=control.work.followthrough.queueReview(input);
         else throw new Error('Unknown ordinary task operation');
       }else if(command==='sources'){
         if(input.op==='list'||input.op==='status')result=control.discovery.status();
         else if(input.op==='configure')result=control.discovery.configure(input);
+        else if(input.op==='cadence')result=control.discovery.setCadences(input);
         else throw new Error('Use sources list or configure');
       }else{
         if(input.op==='status')result=control.discovery.status();
-        else if(input.op==='plan')result=control.discovery.checkBatch(input.batch_id);
+        else if(input.op==='plan')result=control.discovery.plan(input.batch_id,{full:input.detail==='full'});
+        else if(input.op==='page')result=control.discovery.page(input);
+        else if(input.op==='pending')result=control.discovery.pending(input);
         else if(input.op==='begin'){
           result=control.discovery.begin(input);mailbox=new Mailbox(join(root,'mailbox.sqlite'));
           const mail=mailbox.db.prepare('SELECT batch_id FROM mail WHERE item_key=?').get(result.mail_key);
@@ -217,7 +228,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
     if(command==='bind-inbox'){
       const proof=read(inputFile()),readback=nativeReadback(proof.readback);
       const binding=verifyNativeBinding(proof,{thread_id:bindings.threads.inbox,workspace:readback?.thread?.cwd});
-      const inbox={thread_id:binding.thread_id,project_id:bindings.scope.project_id,workspace:binding.workspace};
+      const inbox={thread_id:binding.thread_id,project_id:bindings.scope.project_id,workspace:binding.workspace,delivery_mode:config.inbox?.delivery_mode??'on_request'};
       save(join(root,'runtime.json'),{...read(join(root,'runtime.json')),inbox});output({bound:true,inbox});return;
     }
     if(command==='bind-controls'){
@@ -265,7 +276,13 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
       else if(input.op==='feedback_assess')result=control.atomic(()=>control.feedback.assess(input));
       else if(input.op==='recover'){
         const task=state.task(input.task_id),wake=state.openWake(input.task_id);if(!task||!wake)throw new Error('No wake to reconcile');
-        const proof=verifyExecutionProof(input.native_proof,{thread_id:task.owner_id,workspace:task.contract.workspace,prompt:wake.prompt,terminal:true});
+        let proof;
+        try{proof=verifyExecutionProof(input.native_proof,{thread_id:task.owner_id,workspace:task.contract.workspace,prompt:wake.prompt,terminal:true});}
+        catch(error){
+          const action=control.db.prepare('SELECT * FROM actions WHERE action_key=?').get(`resume-input:${input.task_id}:${wake.queue_id}`);
+          if(!action)throw error;
+          proof=verifyQueuedRecoveryProof(input.native_proof,{task,wake,action,terminal:true});
+        }
         if(!input.evidence_ref)throw new Error('Inspect actual results before recovery');
         control.atomic(()=>{
           const other=wake.member_ids.some(id=>control.db.prepare("SELECT 1 FROM actions WHERE task_id=? AND action_key<>? AND state IN ('claimed','uncertain')").get(id,wake.id));

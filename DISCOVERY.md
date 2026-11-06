@@ -1,3 +1,32 @@
+> Owner recovery runs before source reads. `discovery begin/plan` returns a fixed
+> `owner_health` target set when due; observe it even if chat-history pagination or
+> another provider is blocked. The batch cannot finish/checkpoint without these
+> observations. Queued and uncertain owners take priority over healthy running
+> owners; the configured 30-minute per-owner cadence is unchanged. For an idle or
+> notLoaded terminal owner with a known unconsumed queue, use the standing-policy
+> guarded native recovery hint once, then confirm the real turn and work. Failed or
+> uncertain hints remain blockers and are not retried. Main is never a recovery relay.
+
+## Efficient scheduled scans
+
+The instance's discovery source cadences are authoritative. Use `sources op`
+with `op=cadence`, `intervals` keyed by source kind, and verified user instruction
+to change timing without invalidating a running scan or losing its cursors.
+Thread watches inherit the parent Slack interval. `instance.json.discovery`
+may align poll slots and back off repeated unchanged failures for selected source
+kinds. User input, PR events and due task schedules do not use this scan cadence.
+
+`begin` and `plan` return compact stream checkpoints, not historical page bodies.
+Read only the current turn for native proof (`turnLimit:1`, no included outputs),
+save the complete raw envelope to a file and print only needed metadata. Start
+from the returned streams and source health, then use `pending` with a source ID
+for unclassified observations. `page` accepts a batch ID and exact page key for
+needed evidence; `plan` with `detail:full` remains available for an actual gap.
+Do not re-read completed pages, unchanged failed cursors, old transcripts or full
+logs merely to reconstruct state. Keep errors as errors, never empty success.
+Save bounded results and conclude with one local source/change-count or blocker
+sentence. Routine scan summaries never go to main.
+
 > Authorized calendar preparation is accepted and scheduled directly by discovery. Read MEETING_PREPARATION_INTAKE.md; pass full event details as meeting to classify. When service_task_id is configured, reuse that single task/owner and reconcile shared occurrence timers; never create per-meeting owners. Inspect calendar_followups on every scan. Do not send these existing-authority steps to main.
 
 > Optional calendar source: configure exact calendar_id, preparation_authorization_ref, timezone and lookahead_days. Preserve the existing hourly scan and 45-minute preparation lead. Read-only calendar discovery may maintain authorized preparation schedules, never edit meetings, send invitations or write meeting briefs. Follow the supplied tool plan and pagination; calendar_id is its scope_key.
@@ -52,7 +81,7 @@ op=recover，传 batch_id、generation、实际最新终态 native_proof、effec
 
 用 discovery op=watch_thread 登记 source_id（原 Slack 来源）、task_id、channel_id、
 thread_ts（根消息）、relevant_user_id、professional_relevance=true、identity_verified=true
-和实际线程/任务 evidence_ref。它复用已启用来源的授权和原 owner，每十分钟由现有
+和实际线程/任务 evidence_ref。它复用已启用来源的授权和原 owner，按父 Slack 来源的配置间隔由现有
 发现机制读取指定完整线程；不新增 App automation 或执行对话，不被原搜索的历史
 分页阻塞。同线程可关联多个已有任务，逐条按实际主题归队。任务全部完成后停止跟踪；
 父来源权限变化会停用跟踪，重新核实授权前不继续读取。
@@ -67,7 +96,7 @@ with_user_id/professional 同义字段只在不冲突时规范化。真实用户
 仍会拒绝。输入字段错误应根据已保存原始证据修复；不得把可修复的格式问题当成权限
 禁令反复空转，也不得放宽真实权限来消除错误。
 
-任务候选和已接收但无 owner 的任务用持久通知送主对话；普通无变化扫描静默。自主探索报告直接给父任务，发现角色不参与研究结果处理。
+任务候选和已接收但无 owner 的任务用持久通知送主对话；普通无变化扫描静默。自主探索报告仍直接给父任务；按 RESULT_FOLLOWTHROUGH.md，发现角色另外处理固定的结果复核与独立负责人设置，不做研究、实现或交付协调。
 
 ## Preserved migration scopes
 
@@ -83,3 +112,7 @@ running jobs, and ignore control/discovery chats and unrelated projects. Native
 listing or a title is not implementation authority. The preserved standing
 enrollment rule can register an actual authorized existing task without asking
 for a second handoff; it cannot broaden that task or create a replacement owner.
+
+## Fixed result followthrough
+
+Use RESULT_FOLLOWTHROUGH.md for begin.result_followthrough. Handle original-owner terminal evidence, deduplication and guarded setup, then verify actual execution or persist result_followups_reason. Source access failures do not skip these fixed items. Keep the global 15-minute minimum; do not create another timer, coordinator or engineering owner for existing canonical work.
