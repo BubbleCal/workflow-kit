@@ -17,6 +17,7 @@ import {publishScheduledOccurrence} from './schedule-source.mjs';
 import {verifyDesktopLoader} from './desktop-loader.mjs';
 import {validateIdleNavigationPolicy} from './mac-activity.mjs';
 import {publishWaitObservations} from './wait-observation.mjs';
+import {reconcileCatalogResume} from './catalog-resume.mjs';
 import {bindings,requireBindings} from './instance.mjs';
 import {EXPLORATION_TEMPLATE} from './work-catalog.mjs';
 
@@ -146,6 +147,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         else if(input.op==='policy')result=control.work.setPolicy(input);
         else if(input.op==='dismiss')result=control.work.dismiss(input);
         else if(input.op==='prepare_owner')result=await prepareTaskOwner(control,input);
+        else if(input.op==='reconcile_runtime_resume')result=reconcileCatalogResume(control,input);
         else if(input.op==='reconcile_history')result=control.work.reconcileHistory(input);
         else if(input.op==='assess_difficulty')result=control.work.assessDifficulty(input);
         else if(input.op==='request_owner')result=control.work.requestOwner(input);

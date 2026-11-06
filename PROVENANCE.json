@@ -1,11 +1,13 @@
 {
   "version": "0.9.1",
   "source": "workflow-kit repository source",
-  "upstream_base_commit": "1b2c55e117dc481cf8617c352b304a66d8a41a2b",
+  "upstream_base_commit": "c3313bd6812078196ba13ddf1c3ee9416c91f11e",
   "source_files": {
     "package.json": "80ba1b31f033e1d5c6727bbf5381196cf7c644b6b90ecedc9ceedd376df42a8d",
     "runtime/calendar-preparation.mjs": "82a2e06cdbb08a8932b7d71bb17958067a5994e917e8a2f944d0a3e916f694ca",
     "runtime/calendar-preparation.test.mjs": "78682fa22c70e93e50c5a8fce443b51fed2597288ea5927e756ba5b3c4705d51",
+    "runtime/catalog-resume.mjs": "a716367e1022dd93f7777ff1a208a0ba7daa6ef66bd4f68995bc12911c0c73e4",
+    "runtime/catalog-resume.test.mjs": "1b0478a91f1fe0e3a4f7ffe412ff78c84a43e0981c21f41f4ff180ac7e90b43c",
     "runtime/ci-state.mjs": "8f00790daaa150c53f93c36ea0cabbcebd9bc2c0e571c478328a68db7444de58",
     "runtime/control.mjs": "1f3728fc5a70f110e3a4878691bc1c81c3611c6ac73ae714aada8d74a6a2e468",
     "runtime/control.test.mjs": "acfd912ad5b4571ed68cd0769daa3f5bb14696db6b37814e31cd262659743e50",
@@ -72,7 +74,7 @@
     "runtime/queue-routing.test.mjs": "baf2c93cc3d83067d2255f606b453614bf8db1636172ba67ff20727d1de863db",
     "runtime/queued-resume.mjs": "8dbb10e93ae1ab91f03ad01aeb0fa8eab000447de4e6516998895c31332e2578",
     "runtime/queued-resume.test.mjs": "4a22c4f52ad2a0c40b63f15157f2b94d3e92a8eb5c3a8242d76b3a41835c1b77",
-    "runtime/reactive-cli.mjs": "069b2598c3110e7f4523f0d303a6df6cffc9b8c2af4c18f0855c20c8b0e55083",
+    "runtime/reactive-cli.mjs": "bed30604784a79b97c2a3d5a192d18ebba6e802cde5f217141723801e32f6c94",
     "runtime/reactive-cli.test.mjs": "26c4b7bfc5e41cea98ef68453fc5a8ecb60ef024213cede78289d5fd5993a251",
     "runtime/reactive-driver.mjs": "085c2cc8eb69bf371266146c17f0b6398ca66fa4ca787831caeb539761893dae",
     "runtime/reactive-driver.test.mjs": "04171148d5c6e5b735cbd79e14279298eac17fb6ec42613ec4a08dcf71f0b124",

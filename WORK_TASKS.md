@@ -72,3 +72,14 @@ Runtime-owned one-time and fixed-interval timers use SCHEDULES.md. They share th
 ## Historical completion reconciliation
 
 `task reconcile_history` records already-delivered original scope for an imported legacy_reference that remains an unowned, unexecuted candidate. It requires the current revision, original owner identity, explicit completion scope, supporting evidence and verified original acceptance/delivery. Keep adoption or other follow-through in distinct existing task IDs. This operation does not start work, archive a chat, publish a notice or complete the broader source project. It rejects ordinary candidates and any record with native execution.
+
+`task reconcile_runtime_resume` repairs only a stale, completed, unowned imported
+legacy catalog record whose same canonical task was subsequently resumed through
+an actual human-authorized native contract. Supply task_id, expected_revision,
+expected_contract_rev, original source_message_id/evidence_ref,
+actual_human_verified and a fresh native_binding. The original owner must have
+an acknowledged turn under that newer contract. The API preserves prior scope
+and completion history, adopts the exact registered contract into the catalog,
+and leaves runtime status, pauses, decisions, native queues, permissions and
+models unchanged. It cannot resume a completed runtime goal, bind another owner,
+expand the contract, start work or submit a report on the owner's behalf.
