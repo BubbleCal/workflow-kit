@@ -43,3 +43,14 @@ itself a reason to repeat an unchanged question. Yang's response applies only to
 its stated PR/scope; it does not automatically resume all Functions channel sends.
 No decision means no automatic external review delivery. This notification is
 not itself authorization to send a Slack message, merge or deploy.
+
+When Yang authorizes one PR's external review delivery, save that actual human
+decision in PR_REVIEW_CHANNELS.json.pr_authorizations with the exact canonical
+pr_url, existing scope, chosen channel_id, actual_human_verified=true,
+source_message_id and evidence_ref. This overrides only that PR's scope hold and
+destination; all other Functions PRs remain held. Preserve the original product
+classification instead of relabeling the PR to bypass its hold. The original
+owner refreshes all current-head delivery gates and sends the canonical URL once
+through the existing prepare/claim/authorize/readback/settle path. This grants no
+new merge, release or deployment authority. A later human revocation removes the
+matching authorization; never clear the whole Functions hold for one decision.

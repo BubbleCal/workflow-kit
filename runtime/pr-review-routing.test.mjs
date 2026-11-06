@@ -44,3 +44,22 @@ test('a human scope hold blocks delivery without redirecting or holding unrelate
   held.routes[0].delivery_hold.active='false';
   assert.deepEqual(check(payload('CFUNCTIONS'),evidence('lancedb_functions'),held),['invalid_slack_routing_policy']);
 });
+
+test('an explicit PR decision permits its chosen channel while other Functions PRs stay held',()=>{
+  const held=structuredClone(policy);
+  held.routes[0].delivery_hold={active:true,source_message_id:'human-pause',evidence_ref:'saved-pause'};
+  held.pr_authorizations=[{pr_url:url,scope:'lancedb_functions',channel_id:'CDEFAULT',actual_human_verified:true,source_message_id:'human-pr-decision',evidence_ref:'actual-decision'}];
+  assert.deepEqual(check(payload('CDEFAULT'),evidence('lancedb_functions'),held),[]);
+  assert.deepEqual(check(payload('CFUNCTIONS'),evidence('lancedb_functions'),held),['slack_destination_forbidden']);
+  const p={...payload('CDEFAULT'),message:url+'2'},e=evidence('lancedb_functions');
+  e.pr_url=p.message;e.review_routing.pr_url=p.message;
+  assert.deepEqual(check(p,e,held),['review_delivery_paused_by_user']);
+  const stale=evidence('lancedb_functions');stale.review_routing.head_sha='b'.repeat(40);
+  assert.deepEqual(check(payload('CDEFAULT'),stale,held),['current_pr_review_scope_required']);
+  for(const patch of [{actual_human_verified:false},{source_message_id:''},{evidence_ref:''},{scope:'unknown'},{pr_url:url+'?arbitrary=1'},{channel_id:'invalid'}]){
+    const invalid=structuredClone(held);Object.assign(invalid.pr_authorizations[0],patch);
+    assert.deepEqual(check(payload('CDEFAULT'),evidence('lancedb_functions'),invalid),['invalid_slack_routing_policy']);
+  }
+  held.pr_authorizations.push({...held.pr_authorizations[0]});
+  assert.deepEqual(check(payload('CDEFAULT'),evidence('lancedb_functions'),held),['invalid_slack_routing_policy']);
+});
