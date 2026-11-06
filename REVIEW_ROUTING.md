@@ -29,3 +29,13 @@ The payload's `channel_id` must match the selected route. All three gates reread
 the policy, including for previously prepared actions. Existing readiness,
 canonical-URL-only, head, blackout, feedback and already-announced checks remain.
 Do not resend an already delivered URL merely because its route changed.
+# Scoped human delivery holds
+
+An explicit human pause of a product's PR review delivery is recorded on that
+route in PR_REVIEW_CHANNELS.json as delivery_hold with active, source_message_id,
+and evidence_ref. Keep the route's destination. Prepare, claim and final send
+authorization reread this rule and reject delivery while the hold is active.
+Do not redirect to another channel or request a review through another medium.
+Only a subsequent explicit human instruction releases the hold; it has no timeout.
+Coding, testing, technical review and feedback repair can continue. A delivery
+hold is not a task pause or a revocation of already-authorized merge handling.

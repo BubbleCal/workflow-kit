@@ -32,3 +32,15 @@ test('instances without scoped routing retain their configured single channel',(
   assert.deepEqual(check(payload('CDEFAULT'),{},null),[]);
   assert.deepEqual(check(payload('CFUNCTIONS'),{},null),['slack_destination_forbidden']);
 });
+
+test('a human scope hold blocks delivery without redirecting or holding unrelated PRs',()=>{
+  const held=structuredClone(policy);
+  held.routes[0].delivery_hold={active:true,source_message_id:'human-pause',evidence_ref:'saved-human-pause'};
+  for(const destination of ['CFUNCTIONS','CDEFAULT'])
+    assert.deepEqual(check(payload(destination),evidence('lancedb_functions'),held),['review_delivery_paused_by_user']);
+  assert.deepEqual(check(payload('CDEFAULT'),evidence('default'),held),[]);
+  held.routes[0].delivery_hold.active=false;
+  assert.deepEqual(check(payload('CFUNCTIONS'),evidence('lancedb_functions'),held),[]);
+  held.routes[0].delivery_hold.active='false';
+  assert.deepEqual(check(payload('CFUNCTIONS'),evidence('lancedb_functions'),held),['invalid_slack_routing_policy']);
+});

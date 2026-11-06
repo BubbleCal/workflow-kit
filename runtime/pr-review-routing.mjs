@@ -13,7 +13,9 @@ export function reviewDestinationReasons(payload,evidence,policy,defaultChannel=
   const channel=value=>typeof value==='string'&&/^[CG][A-Z0-9]+$/.test(value);
   if(policy?.schema_version!==1||!policy.source_message_id||policy.default_channel_id!==defaultChannel||
     typeof policy.default_channel_id!=='string'||!policy.default_channel_id||!Array.isArray(policy.routes)||policy.routes.some(r=>
-      !r||typeof r.scope!=='string'||!r.scope||r.scope==='default'||!channel(r.channel_id))||
+      !r||typeof r.scope!=='string'||!r.scope||r.scope==='default'||!channel(r.channel_id)||
+      r.delivery_hold!==undefined&&(typeof r.delivery_hold?.active!=='boolean'||
+        !r.delivery_hold.source_message_id||!r.delivery_hold.evidence_ref))||
     new Set(policy.routes.map(r=>r.scope)).size!==policy.routes.length)
     return ['invalid_slack_routing_policy'];
   const route=evidence?.review_routing;
@@ -23,5 +25,7 @@ export function reviewDestinationReasons(payload,evidence,policy,defaultChannel=
     return ['current_pr_review_scope_required'];
   const destination=route.scope==='default'?policy.default_channel_id:policy.routes.find(r=>r.scope===route.scope)?.channel_id;
   if(!destination)return ['unknown_pr_review_scope'];
+  if(policy.routes.find(r=>r.scope===route.scope)?.delivery_hold?.active===true)
+    return ['review_delivery_paused_by_user'];
   return payload.channel_id===destination?[]:['slack_destination_forbidden'];
 }
