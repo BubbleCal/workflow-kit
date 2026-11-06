@@ -38,6 +38,12 @@ and evidence_ref. Keep the route's destination. Prepare, claim and final send
 authorization reread this rule and reject delivery while the hold is active.
 Do not redirect to another channel or request a review through another medium.
 Only a subsequent explicit human instruction releases the hold; it has no timeout.
+An explicit decision for one PR may instead be recorded in `pr_authorizations`:
+the exact canonical `pr_url`, existing `scope`, chosen `channel_id`,
+`actual_human_verified:true`, `source_message_id` and `evidence_ref`. That entry
+overrides only the matching PR's hold and channel. It does not reclassify the PR
+or release other PRs; all current-head and delivery guards still apply. See
+FUNCTIONS_REVIEW_DECISIONS.md for the original-owner follow-through.
 Coding, testing, technical review and feedback repair can continue. A delivery
 hold is not a task pause or a revocation of already-authorized merge handling.
 
