@@ -8,6 +8,17 @@
 
 ## Long-running conversation names
 
+Ordinary tasks use short sequential references such as `T-211`, with chat titles
+`T-211 · readable work`. Never expose a hash as the number Yang must type.
+New catalog records allocate the next numeric ID transactionally; canonical keys
+still deduplicate repeated discovery. Existing running hash-ID tasks can receive
+a short public reference without rewriting their active wakes or historical IDs.
+Use JSON stdin to `runtime/task-reference.mjs`: `op: assign` with `task_id`,
+`source_message_id`, `evidence_ref`, and `actual_human_verified: true`; `op: resolve`
+with `reference` returns the original task. Use the short reference in titles and
+reports and the resolved internal ID for runtime operations. Update the native
+title after assignment. Both short reference and old ID identify the same work.
+
 Use a short, readable name for recurring services and other long-running tasks,
 such as “会议准备”. Do not prefix these conversation titles with a task number.
 Keep stable task IDs in the internal catalog, contracts and evidence. Preserve

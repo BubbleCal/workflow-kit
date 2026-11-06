@@ -3,6 +3,28 @@ import assert from 'node:assert/strict';
 import {OWNER,nativeProof} from './test-fixtures/reactive.mjs';
 import {workFixture,MAIN,DISCOVERY} from './test-fixtures/work.mjs';
 
+test('short references allocate sequentially, preserve active identity and deduplicate discovery',()=>{
+  const f=workFixture();try{
+    const create=(canonical_key,id)=>f.work.create({canonical_key,id,title:'Example',objective:'Example',requirements:[{id:'done',text:'Done'}]});
+    create('existing','T-210');
+    const legacy=create('legacy','T-ABCDEF123456').task;
+    f.accept(legacy.id);f.bind(legacy.id);const wake=f.begin(legacy.id);
+    const before=f.c.reactive.task(legacy.id);
+    const input={task_id:legacy.id,source_message_id:'human:naming',evidence_ref:'actual-user-message',actual_human_verified:true};
+    assert.throws(()=>f.work.assignReference({...input,actual_human_verified:false}),/actual user/);
+    assert.equal(f.work.assignReference(input).reference,'T-211');
+    assert.equal(f.work.assignReference(input).changed,false);
+    assert.equal(f.work.resolveReference('T-211').id,legacy.id);
+    assert.equal(f.work.resolveReference(legacy.id).owner_thread_id,OWNER);
+    assert.deepEqual(f.c.reactive.task(legacy.id),before);
+    assert.equal(f.c.reactive.openWake(legacy.id).id,wake.id);
+    assert.throws(()=>create('collision','T-211'),/already exists/);
+    assert.equal(create('next').task.id,'T-212');
+    assert.equal(create('next').task.id,'T-212');
+    assert.equal(create('after').task.id,'T-213');
+  }finally{f.c.close();}
+});
+
 test('autonomous exploration is an idempotent built-in ordinary task with every external source disabled',()=>{
   const f=workFixture();try{
     const first=f.work.seedBuiltins();assert.equal(first.created,true);assert.equal(f.work.seedBuiltins().task.id,first.task.id);

@@ -42,6 +42,29 @@ export class WorkCatalog {
   }
   atomic(fn){this.db.exec('BEGIN IMMEDIATE');try{const r=fn();this.db.exec('COMMIT');return r;}catch(e){this.db.exec('ROLLBACK');throw e;}}
   get(id){const r=this.db.prepare('SELECT * FROM work_items WHERE id=? OR canonical_key=?').get(id,id);return r?{...r,data:parse(r.data),authorization:parse(r.authorization),binding:parse(r.binding)}:null;}
+  resolveReference(reference){
+    const direct=this.get(reference);if(direct)return direct;
+    const row=this.db.prepare("SELECT id FROM work_items WHERE json_extract(data,'$.public_reference')=?").get(reference);
+    return row?this.get(row.id):null;
+  }
+  nextReferenceInside(){
+    const ids=this.db.prepare('SELECT id,data FROM work_items').all().flatMap(r=>[r.id,parse(r.data)?.public_reference]);
+    if(this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='rt_tasks'").get())ids.push(...this.db.prepare('SELECT task_id FROM rt_tasks').all().map(r=>r.task_id));
+    const highest=Math.max(0,...ids.filter(id=>/^T-\d{3,}$/.test(id??'')).map(id=>Number(id.slice(2))));
+    return `T-${String(highest+1).padStart(3,'0')}`;
+  }
+  assignReference({task_id,source_message_id,evidence_ref,actual_human_verified}){
+    required(source_message_id,'actual naming instruction');required(evidence_ref,'naming evidence');
+    if(actual_human_verified!==true)throw new Error('Task reference changes require actual user authorization');
+    return this.atomic(()=>{
+      const t=this.get(task_id);if(!t)throw new Error('Unknown task');
+      if(t.data.public_reference||/^T-\d{3,}$/.test(t.id))return {task_id:t.id,reference:t.data.public_reference??t.id,changed:false};
+      const reference=this.nextReferenceInside();
+      const data={...t.data,public_reference:reference,reference_authorization:{source_message_id,evidence_ref}};
+      this.db.prepare('UPDATE work_items SET data=?,revision=revision+1,updated_at=? WHERE id=?').run(json(data),this.now(),t.id);
+      return {task_id:t.id,reference,changed:true};
+    });
+  }
   list(){return this.db.prepare('SELECT id FROM work_items ORDER BY created_at,id').all().map(r=>{
     const item=this.get(r.id);return {...item,execution:this.execution(item.id),blockers:this.blockers(item.id)};
   });}
@@ -59,7 +82,8 @@ export class WorkCatalog {
     const state=input.state??'candidate';if(!['draft','candidate'].includes(state))throw new Error('Task creation does not grant execution authority');
     const old=this.get(input.canonical_key);
     if(old)return {created:false,task:old};
-    const id=input.id??`T-${keyHash(input.canonical_key).toUpperCase()}`;
+    const id=input.id??this.nextReferenceInside();
+    if(this.resolveReference(id))throw new Error('Task ID or public reference already exists');
     const data={title:input.title,objective:input.objective,requirements:input.requirements??[],constraints:input.constraints??[],
       workspace:input.workspace??this.config.scope?.project_root,parent_id:input.parent_id??null,depends_on:input.depends_on??[],
       source:input.source??{kind:'user'},pull_requests:input.pull_requests??[],job_sources:input.job_sources??['native'],
