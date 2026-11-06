@@ -52,6 +52,14 @@ shared control guard so page writes serialize. Preserve other tasks, manual note
 IDs and historical measurements. An assessment-only task gains no product-change
 or PR-publication authority. A disabled external integration is not a blocker.
 
+## Reusable knowledge owned by the task owner
+
+When authorized by the instance, the original owner must update important,
+reusable conclusions in the user knowledge base as part of result delivery.
+Read OWNER_KNOWLEDGE.md and knowledge-base.json. Prefer an existing topic, retain
+evidence and applicability, and verify the actual Notion update. This separate
+knowledge-capture authority does not broaden managed outcome-row permissions.
+
 ## Linear issue state owned by the task owner
 
 When the instance's actual user authorization permits Linear state maintenance,

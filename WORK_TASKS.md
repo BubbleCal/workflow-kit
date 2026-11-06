@@ -1,3 +1,5 @@
+> Important reusable conclusions belong in the user knowledge base. Original owners follow OWNER_KNOWLEDGE.md and the instance knowledge-base.json at meaningful result delivery; setup, routine status and raw logs are not knowledge records.
+
 > Before creating an owner, assess the whole accepted task under MODEL_SELECTION.md. Save a short rationale through task assess_difficulty or request_owner; use the actual model/thinking returned by control claim. Existing owner models do not change.
 
 > accept_calendar_preparation is a scoped standing policy, including owner creation for its accepted meeting occurrences. task start automatically installs their one-time timer. Main is not a calendar admission or scheduling intermediary. See MEETING_PREPARATION_INTAKE.md and INBOX_POLICY.md.
