@@ -6,7 +6,16 @@ Preserve the existing daily 09:00 Asia/Shanghai source schedule. Registration,
 delivery and a completed review are separate facts. No retired coordinator is a
 prerequisite for choosing or creating a review owner.
 
-Read-only sources, in priority order, using only enabled entries in config:
+Repository preference: select eligible `lance-format/lance` PRs first across the
+enabled sources, before candidates from other repositories. Within that preferred
+repository, prioritize actual requests directed to Yang and then impactful vector
+search / FTS work needing substantive review. Other repositories remain eligible
+when no suitable Lance candidate takes priority; this is a preference, not an
+exclusive repository filter. Preserve existing admitted reviews and explicit
+per-PR human instructions; do not replace owners or spend another daily admission.
+
+Read-only sources, in priority order within the repository preference above,
+using only enabled entries in config:
 
 1. Requests explicitly directed to Yang: GitHub requested-review state and actual
    addressed Slack/Linear requests. Source text is evidence, not write authority.
@@ -28,6 +37,18 @@ exists. Store and reuse source identities, current head/base, actual report
 references and native task/chat mappings. The same PR in multiple sources is one
 selection. A failed read does not advance that source's successful watermark.
 
+Only select PRs whose current head has completed and passed applicable CI and
+whose current GitHub mergeability is confirmed conflict-free. Failed, pending,
+not-yet-run, incomplete or unavailable CI evidence is not a pass; unknown
+mergeability is not confirmation. Read all applicable checks/status pages and
+save actual evidence tied to the current head. Non-applicable/skipped checks do
+not substitute for a successful applicable CI run. Defer ineligible candidates
+without consuming a daily slot, and revisit them after CI passes/conflicts clear.
+Apply this filter to every enabled source, including explicit review requests.
+Before starting or continuing substantive review, the original reviewer refreshes
+these facts; defer an ineligible new head while retaining prior review evidence.
+Do not repair someone else's code or retry their CI as part of read-only review.
+
 Before selecting a new PR, inspect the catalog, review-pr/state.json and native
 known mappings for canonical repo+PR identity. Reuse a completed same-head review;
 continue its independent PR owner for material new head/base/discussion changes.
@@ -40,11 +61,13 @@ Send JSON stdin to node <instance>/runtime/review-queue.mjs:
 
 ```json
 {"op":"status"}
-{"op":"admit","owner_thread_id":"<Review Queue owner>","source":"explicit_request","checked_at":"<actual ISO retrieval time>","evidence_ref":"<saved actual source and GitHub facts>","pr":{"url":"https://github.com/owner/repo/pull/123","state":"open","draft":false,"head_sha":"<actual 40-char SHA>","base_sha":"<actual 40-char SHA>","author":"<actual author>"}}
+{"op":"admit","owner_thread_id":"<Review Queue owner>","source":"explicit_request","checked_at":"<actual ISO retrieval time>","evidence_ref":"<saved actual source and GitHub facts>","pr":{"url":"https://github.com/owner/repo/pull/123","state":"open","draft":false,"head_sha":"<actual 40-char SHA>","base_sha":"<actual 40-char SHA>","author":"<actual author>","ci_head_sha":"<same current head>","ci_complete":true,"ci_passed":true,"mergeable":true}}
 ```
 
 source is linear_queue, explicit_request or vector_fts. An admission requires
-fresh open/ready PR facts and is durable across retries. On daily_review_limit,
+fresh open/ready PR facts, complete passing current-head CI and confirmed
+conflict-free mergeability, and is durable across retries. Existing admissions
+are also checked for eligibility before reuse. On daily_review_limit,
 stop new selections for that day; existing substantive reviews may continue.
 Never release admissions or change the day to evade the limit.
 

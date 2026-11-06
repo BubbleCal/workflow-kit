@@ -19,6 +19,12 @@ export class ReviewIntake {
   const pr=input.pr,key=reviewKey(pr?.url),at=Date.parse(input.checked_at);
   if(!Number.isFinite(at)||at>this.control.now()+5000||this.control.now()-at>300000||pr.state!=='open'||pr.draft!==false||
     !/^[a-f0-9]{40}$/.test(pr.head_sha??'')||!/^[a-f0-9]{40}$/.test(pr.base_sha??'')||!pr.author||pr.author.toLowerCase()===this.policy.github_login.toLowerCase())throw new Error('Fresh open ready PR head/base and another author are required');
+  // Recheck eligibility even for an existing admission: a new head can regress.
+  if(this.policy.eligibility?.require_ci_passed===true&&
+    (pr.ci_passed!==true||pr.ci_complete!==true||pr.ci_head_sha!==pr.head_sha))
+    return {admitted:false,reason:'current_head_ci_not_passed',key};
+  if(this.policy.eligibility?.require_mergeable===true&&pr.mergeable!==true)
+    return {admitted:false,reason:pr.mergeable===false?'merge_conflict':'mergeability_unverified',key};
   const prior=this.db.prepare('SELECT * FROM review_queue_selections WHERE pr_key=?').get(key);
   if(prior)return {admitted:true,new_selection:false,key,day:prior.day,data:JSON.parse(prior.data)};
   const used=this.status().selections.length;

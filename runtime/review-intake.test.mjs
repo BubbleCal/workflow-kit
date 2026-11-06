@@ -24,6 +24,21 @@ test('review intake rejects stale, draft, closed, own PRs and unbound sources',(
   assert.throws(()=>disabled.admit({...a,source:'linear_queue'}),/authorized source/);
  }finally{f.c.close();}
 });
+test('review selection defers failed, unfinished, stale-head CI and conflicted PRs without consuming capacity',()=>{
+ const f=fixture();try{f.activate();const q=new ReviewIntake(f.c,{...policy,eligibility:{require_ci_passed:true,require_mergeable:true}});
+  const a=candidate(f,1);a.pr={...a.pr,ci_passed:true,ci_complete:true,ci_head_sha:a.pr.head_sha,mergeable:true};
+  for(const patch of [{ci_passed:false},{ci_passed:undefined},{ci_complete:false},{ci_head_sha:'c'.repeat(40)}])
+    assert.equal(q.admit({...a,pr:{...a.pr,...patch}}).reason,'current_head_ci_not_passed');
+  assert.equal(q.admit({...a,pr:{...a.pr,mergeable:false}}).reason,'merge_conflict');
+  assert.equal(q.admit({...a,pr:{...a.pr,mergeable:null}}).reason,'mergeability_unverified');
+  assert.equal(q.status().selections.length,0);
+  assert.equal(q.admit(a).new_selection,true);
+  assert.equal(q.admit({...a,pr:{...a.pr,head_sha:'c'.repeat(40)}}).reason,'current_head_ci_not_passed');
+  assert.equal(q.admit({...a,pr:{...a.pr,mergeable:false}}).reason,'merge_conflict');
+  assert.equal(q.admit(a).new_selection,false);
+  assert.equal(q.status().selections.length,1);
+ }finally{f.c.close();}
+});
 test('creation by the queue requires the exact admitted PR and read-only task identity',()=>{
  const f=fixture(),dir=mkdtempSync(join(tmpdir(),'review-intake-'));try{
   f.activate();f.c.work.config.instance_root=dir;mkdirSync(join(dir,'review-queue'));writeFileSync(join(dir,'review-queue/config.json'),JSON.stringify(policy));
