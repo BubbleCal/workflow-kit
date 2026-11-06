@@ -1,10 +1,20 @@
 import {bindings} from './instance.mjs';
+import {personalReviewState} from './pr-personal-review.mjs';
 
 // An explicitly authorized, product-scoped exception to an on-request main inbox.
 // This is a private decision card, never permission to send to Slack or merge.
 export const deliveryGuardKind=kind=>kind==='review_decision'?'slack_pr':kind;
 
-export function reviewDecisionReasons(payload,e,policy) {
+export function reviewDecisionReasons(payload,e,policy,now=Date.now()) {
+  if(payload.decision_reason==='personal_review') {
+    const state=personalReviewState(payload,e,policy,now),reasons=[...state.reasons];
+    const rule=state.rule;
+    if(!state.enabled||!state.required||state.authorized||!rule||
+      payload.thread_id!==rule.thread_id||payload.source_message_id!==rule.source_message_id)
+      reasons.push('explicit_personal_review_decision_required');
+    if(payload.message!==payload.pr_url)reasons.push('review_decision_PR_identity_mismatch');
+    return [...reasons,...decisionCardReasons(payload,e)];
+  }
   const route=policy?.routes?.find(r=>r.scope==='lancedb_functions');
   const decision=route?.decision_delivery,scope=e.review_routing;
   const reasons=[];
@@ -16,6 +26,11 @@ export function reviewDecisionReasons(payload,e,policy) {
     scope.pr_url!==payload.pr_url||scope.pr_url!==e.pr_url||scope.head_sha!==payload.expected_head_sha||
     scope.head_sha!==e.current_head_sha||payload.message!==payload.pr_url)
     reasons.push('current_functions_PR_scope_required');
+  return [...reasons,...decisionCardReasons(payload,e)];
+}
+
+function decisionCardReasons(payload,e) {
+  const reasons=[];
   const repo=payload.pr_url?.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/[1-9]\d*$/)?.[1];
   if(!repo||!bindings.scope.repositories.includes(repo))reasons.push('repository_outside_instance_scope');
   if(typeof payload.prompt!=='string'||!payload.prompt.includes(payload.pr_url)||

@@ -1,3 +1,5 @@
+> Personal PR review: breaking changes, format changes, and owner-assessed broad-impact or high-risk PRs require a proactive decision card to Yang and explicit personally-reviewed clearance before external review delivery. Read PERSONAL_PR_REVIEW.md and PR_REVIEW_CHANNELS.json.personal_review. This narrowly permits owner-to-main decision notifications; preserve Functions/task holds, technical gates and existing receipts.
+
 > Completed review reports have a separately authorized owner-to-main exception when review-report-policy.json enables it. Follow REVIEW_RESULT_DELIVERY.md; findings and private review conclusions do not use external PR review-delivery gates. Unrelated notifications remain on-request.
 
 # Human-facing notifications only

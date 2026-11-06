@@ -57,6 +57,12 @@ are corrected; this rule alone does not instruct closing or deleting old PRs.
 
 ## Ready and review delivery
 
+Read PERSONAL_PR_REVIEW.md. Breaking changes, format changes and owner-assessed
+broad-impact or high-risk PRs must first reach Yang in the main chat for personal
+inspection and explicit clearance before external review delivery. Every PR has
+a short current-head impact assessment. Keep existing Functions/task holds and
+all technical gates; a private decision card is not permission to send externally.
+
 New PRs start draft. Current applicable CI must pass before pr_ready. Ready then
 triggers the repository's automatic Gatekeeper. Read its complete review/inline
 feedback, technically assess it, and repair valid issues in the original owner.
