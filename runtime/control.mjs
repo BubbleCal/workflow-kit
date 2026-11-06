@@ -1,3 +1,4 @@
+import {readReviewReportPolicy,reviewReportTaskReasons} from './review-report.mjs';
 import {deliveryGuardKind,reviewDecisionReasons,reviewDecisionTaskReasons} from './review-decision.mjs';
 import {reviewCreationReasons} from './review-intake.mjs';
 import {verifyNativeBinding,nativeReadback} from './native-queue.mjs';
@@ -38,14 +39,14 @@ export function resolveCapacity(value = {}) {
   return { ...value, max_new_heavy_concurrency: value.automatic_limit,
     max_dispatches_per_run: value.automatic_limit };
 }
-const KINDS = new Set(['task_queue', 'task_wake', 'dispatch', 'create_thread', 'assign_project', 'human_input', 'notify', 'slack_pr', 'review_decision', 'pr_ready', 'merge', 'archive', 'unarchive', 'auth', 'notion_sync', 'automation_update']);
+const KINDS = new Set(['task_queue', 'task_wake', 'dispatch', 'create_thread', 'assign_project', 'human_input', 'notify', 'review_report', 'slack_pr', 'review_decision', 'pr_ready', 'merge', 'archive', 'unarchive', 'auth', 'notion_sync', 'automation_update']);
 const PROTECTED_THREADS = new Set(Object.values(bindings.threads));
 const prUrl = value => typeof value === 'string' && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*$/.test(value);
 function scopeKey(kind, payload) {
   if (kind === 'create_thread') return `new-thread:${required(payload?.canonical_task_key, 'payload.canonical_task_key')}`;
   if (kind === 'assign_project') return `project-membership:${required(payload?.host_id, 'host_id')}:${required(payload?.thread_id, 'thread_id')}`;
   if (['task_queue', 'task_wake', 'dispatch', 'human_input', 'archive', 'unarchive'].includes(kind)) return `thread:${required(payload?.thread_id, 'payload.thread_id')}`;
-  if (kind === 'notify') return `inbox:${INBOX}`;
+  if (kind === 'notify' || kind === 'review_report') return `inbox:${INBOX}`;
   if (kind === 'notion_sync') return `notion:${payload?.data_source_id ?? required(payload?.page_id, 'payload.page_id')}`;
   if (kind === 'auth') return `browser:${required(payload?.host_id, 'payload.host_id')}`;
   if (kind === 'automation_update') return `automation:${required(payload?.automation_id, 'payload.automation_id')}`;
@@ -442,8 +443,11 @@ export class ControlStore {
       return { imported };
     });
   }
+  reviewReportPolicy() { return readReviewReportPolicy(); }
   prepare(input) {
     const key = required(input.key, 'action key');
+    const reportReasons=reviewReportTaskReasons(this,input.kind,input.task_id,input.payload,input.evidence,null,key);
+    if(reportReasons.length)return {prepared:false,allowed:false,reasons:reportReasons};
     const decisionReasons=reviewDecisionTaskReasons(this,input.kind,input.task_id,input.payload,input.evidence,null,key);
     if(decisionReasons.length)return {prepared:false,allowed:false,reasons:decisionReasons};
     const reviewReasons=reviewCreationReasons(this,input);
@@ -545,6 +549,8 @@ export class ControlStore {
       const blocked = this.db.prepare("SELECT action_key FROM actions WHERE scope_key=? AND state IN ('claimed','uncertain') AND action_key<>? LIMIT 1").get(row.scope_key, key);
       if (blocked) return { claimed: false, reason: 'scope_in_use', blocking_key: blocked.action_key };
       const payload = JSON.parse(row.payload);
+      const reportReasons=reviewReportTaskReasons(this,row.kind,row.task_id,payload,evidence,owner,key);
+      if(reportReasons.length)return {claimed:false,reasons:reportReasons};
       const decisionReasons=reviewDecisionTaskReasons(this,row.kind,row.task_id,payload,evidence,owner,key);
       if(decisionReasons.length)return {claimed:false,reasons:decisionReasons};
       if(isQueuedResume(row.kind,payload)){
@@ -607,6 +613,7 @@ export class ControlStore {
       this.db.prepare("UPDATE actions SET state='claimed',attempt_id=?,owner=?,attempts=attempts+1,last_error=NULL,updated_at=? WHERE action_key=?").run(attempt, owner, this.now(), key);
       if (row.kind === 'task_queue') this.db.prepare("UPDATE rt_wakes SET state='claimed' WHERE id=? AND state='reserved'").run(payload.wake_id);
       return { claimed: true, key, attempt_id: attempt, payload: JSON.parse(row.payload),
+        ...(row.kind==='review_report'?{native_arguments:{threadId:payload.thread_id,prompt:payload.prompt}}:{}),
         ...(isReviewDelivery(row.kind) ? { send_tool_forbidden: true, requires_review_send_authorization: true } : {}) };
     });
   }

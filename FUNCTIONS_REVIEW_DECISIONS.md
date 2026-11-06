@@ -2,7 +2,8 @@
 
 When the instance's lancedb_functions route enables decision_delivery, a ready
 Functions PR is delivered privately to its configured main thread for Yang's
-decision. This is the only scoped exception to an on-request main inbox. Keep
+decision. This is a scoped exception to an on-request main inbox. Completed independent
+review reports follow the separate REVIEW_RESULT_DELIVERY.md exception. Keep
 automatic Slack delivery held. Do not enable unrelated automatic notifications.
 
 The original implementation owner performs this delivery. Continue coding,

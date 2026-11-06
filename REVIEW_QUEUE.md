@@ -1,3 +1,5 @@
+> Completed reviews must reach Yang in main, not just an artifact or the original chat. Follow REVIEW_RESULT_DELIVERY.md. Review Queue checks actual notification receipts, while each original reviewer sends its result; reuse main messages already presented and do not repeat unchanged conclusions.
+
 # Review Queue: discovery and independent read-only reviews
 
 Use review-queue/config.json as the current authorized service policy. The existing

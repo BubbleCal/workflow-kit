@@ -1,3 +1,5 @@
+> Completed review reports have a separately authorized owner-to-main exception when review-report-policy.json enables it. Follow REVIEW_RESULT_DELIVERY.md; findings and private review conclusions do not use external PR review-delivery gates. Unrelated notifications remain on-request.
+
 # Human-facing notifications only
 
 Main receives only real human decisions, answers to an actual user question, and

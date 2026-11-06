@@ -1,3 +1,5 @@
+> Independent review owners proactively deliver substantive completed conclusions to main under REVIEW_RESULT_DELIVERY.md and review-report-policy.json. Save the complete report first and verify the actual notification receipt. Private review-result delivery grants no external review or implementation authority.
+
 > Main notifications must pass INBOX_POLICY.md. Do not write raw answer/decision/important_completion messages to bypass control evidence, and do not escalate routine technical progress or already-authorized setup as a human decision.
 
 # Complete delivery by the original task owner
