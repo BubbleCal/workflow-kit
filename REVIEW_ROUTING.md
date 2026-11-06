@@ -29,6 +29,7 @@ The payload's `channel_id` must match the selected route. All three gates reread
 the policy, including for previously prepared actions. Existing readiness,
 canonical-URL-only, head, blackout, feedback and already-announced checks remain.
 Do not resend an already delivered URL merely because its route changed.
+
 # Scoped human delivery holds
 
 An explicit human pause of a product's PR review delivery is recorded on that
@@ -39,3 +40,8 @@ Do not redirect to another channel or request a review through another medium.
 Only a subsequent explicit human instruction releases the hold; it has no timeout.
 Coding, testing, technical review and feedback repair can continue. A delivery
 hold is not a task pause or a revocation of already-authorized merge handling.
+
+When a route also has decision_delivery enabled, follow
+FUNCTIONS_REVIEW_DECISIONS.md for the explicitly authorized private decision card
+to main. The Slack hold stays active. This uses control kind=review_decision and
+does not enable the ordinary automatic inbox or reuse a Slack-send permit.

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 
 export const REVIEW_WINDOW = Object.freeze({ timezone: 'Asia/Shanghai', blocked_start_inclusive: '03:00:00', blocked_end_exclusive: '10:00:00' });
-export const isReviewDelivery = kind => ['slack_pr', 'pr_ready'].includes(kind);
+export const isReviewDelivery = kind => ['slack_pr', 'pr_ready', 'review_decision'].includes(kind);
 export function withReviewWindowGuidance(kind, payload, prior) {
   if (!['dispatch','create_thread'].includes(kind)) return payload;
   const version = prior?.review_window_guidance_version ?? 2;

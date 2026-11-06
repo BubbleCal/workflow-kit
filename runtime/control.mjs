@@ -1,3 +1,4 @@
+import {deliveryGuardKind,reviewDecisionReasons,reviewDecisionTaskReasons} from './review-decision.mjs';
 import {reviewCreationReasons} from './review-intake.mjs';
 import {verifyNativeBinding,nativeReadback} from './native-queue.mjs';
 import {nativeLifecycleProgress,ownerActionReasons} from './owner-delivery.mjs';
@@ -37,7 +38,7 @@ export function resolveCapacity(value = {}) {
   return { ...value, max_new_heavy_concurrency: value.automatic_limit,
     max_dispatches_per_run: value.automatic_limit };
 }
-const KINDS = new Set(['task_queue', 'task_wake', 'dispatch', 'create_thread', 'assign_project', 'human_input', 'notify', 'slack_pr', 'pr_ready', 'merge', 'archive', 'unarchive', 'auth', 'notion_sync', 'automation_update']);
+const KINDS = new Set(['task_queue', 'task_wake', 'dispatch', 'create_thread', 'assign_project', 'human_input', 'notify', 'slack_pr', 'review_decision', 'pr_ready', 'merge', 'archive', 'unarchive', 'auth', 'notion_sync', 'automation_update']);
 const PROTECTED_THREADS = new Set(Object.values(bindings.threads));
 const prUrl = value => typeof value === 'string' && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*$/.test(value);
 function scopeKey(kind, payload) {
@@ -102,9 +103,9 @@ export function resolvePlacement({ projects, project_id, project_label, host_id,
 
 // These checks validate supplied evidence. The coordinator must obtain that
 // evidence from the owning tools; this is not a replacement for tool permissions.
-export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPACITY_LIMITS, reviewRule = REVIEW_WINDOW, outcomeBindings = kind === 'notion_sync' && payload?.page_id !== PAGE ? readOutcomeBindings() : null, dependencyPolicy = ['pr_ready','slack_pr','merge'].includes(kind) ? readDependencyPolicy() : null, reviewChannels = kind === 'slack_pr' ? readReviewChannels() : null) {
+export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPACITY_LIMITS, reviewRule = REVIEW_WINDOW, outcomeBindings = kind === 'notion_sync' && payload?.page_id !== PAGE ? readOutcomeBindings() : null, dependencyPolicy = ['pr_ready','slack_pr','review_decision','merge'].includes(kind) ? readDependencyPolicy() : null, reviewChannels = ['slack_pr','review_decision'].includes(kind) ? readReviewChannels() : null) {
   const reasons = instancePolicyReasons(kind, payload, e);
-  reasons.push(...dependencyReasons(kind,payload,e,dependencyPolicy,now));
+  reasons.push(...dependencyReasons(deliveryGuardKind(kind),payload,e,dependencyPolicy,now));
   const need = (condition, reason) => { if (!condition) reasons.push(reason); };
   // A current human instruction can start engineering directly. This only
   // removes our workflow's probe phase; native app/tool permissions still apply.
@@ -259,12 +260,13 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
   if (isReviewDelivery(kind) || kind === 'merge') {
     need(e.pr_owner === bindings.identity.github_login, 'pr_not_owned_by_configured_user');
     need(e.pr_open === true && e.pr_draft === (kind === 'pr_ready'), 'pr_not_ready');
-    need(e.ordinary_change === true && e.material_findings_open === false, 'important_or_unresolved_change');
+    need((kind === 'review_decision' || e.ordinary_change === true) && e.material_findings_open === false, 'important_or_unresolved_change');
     need(e.validation_current === true && e.technical_review_current === true, 'current_head_validation_or_review_missing');
     need(typeof payload?.expected_head_sha === 'string' && /^[a-f0-9]{40,64}$/.test(payload.expected_head_sha) && payload.expected_head_sha === e.current_head_sha, 'head_changed_or_unknown');
   }
   if (kind === 'pr_ready') need(payload?.operation === 'mark_ready' && prUrl(payload.pr_url) && payload.pr_url === e.pr_url, 'verified_draft_transition_required');
   if (isReviewDelivery(kind)) reasons.push(...reviewStageReasons(kind, payload, e, now));
+  if (kind === 'review_decision') reasons.push(...reviewDecisionReasons(payload,e,reviewChannels));
   if (kind === 'slack_pr') {
     reasons.push(...reviewDestinationReasons(payload,e,reviewChannels));
     need(prUrl(payload?.message) && payload.message === e.pr_url, 'slack_message_must_match_verified_PR_URL');
@@ -442,6 +444,8 @@ export class ControlStore {
   }
   prepare(input) {
     const key = required(input.key, 'action key');
+    const decisionReasons=reviewDecisionTaskReasons(this,input.kind,input.task_id,input.payload,input.evidence,null,key);
+    if(decisionReasons.length)return {prepared:false,allowed:false,reasons:decisionReasons};
     const reviewReasons=reviewCreationReasons(this,input);
     if(reviewReasons.length)return {prepared:false,allowed:false,reasons:reviewReasons};
     if(isQueuedResume(input.kind,input.payload)){
@@ -453,7 +457,7 @@ export class ControlStore {
       input={...input,evidence:{...input.evidence,queued_resume_verified:true}};
     }
     if(bindings.delivery.owner_managed){const reasons=ownerActionReasons(this,input.kind,input.task_id,input.payload,input.evidence);if(reasons.length)return {prepared:false,allowed:false,reasons};}
-    const scopeReasons=scopeActionReasons(this.taskRegistry(),input.kind,input.task_id,input.payload,input.evidence);
+    const scopeReasons=scopeActionReasons(this.taskRegistry(),deliveryGuardKind(input.kind),input.task_id,input.payload,input.evidence);
     if(scopeReasons.length)return {prepared:false,allowed:false,reasons:scopeReasons};
     const ownership = ownershipReasons(input.kind,input.task_id,input.payload,input.evidence,this.taskRegistry(),this.db,input.key);
     const handoff = input.kind==='create_thread' ? scopedHandoffReasons(input.task_id,input.payload,input.evidence) : [];
@@ -487,9 +491,9 @@ export class ControlStore {
         return { prepared: false, key, state: old.state, reason: 'already_recorded' };
       }
       const rule = isReviewDelivery(kind) ? this.reviewRule() : REVIEW_WINDOW;
-      const reactiveReasons = this.reactive.actionReasons(kind, task, input.payload);
+      const reactiveReasons = this.reactive.actionReasons(deliveryGuardKind(kind), task, input.payload);
       if (reactiveReasons.length) return { prepared:false, allowed:false, reasons:reactiveReasons };
-      const result = assess(kind, input.payload, input.evidence, this.now(), this.capacity, rule, kind === 'notion_sync' && input.payload?.page_id !== PAGE ? this.outcomeBindings() : null, ['pr_ready','slack_pr','merge'].includes(kind)?this.dependencyPolicy():null,kind==='slack_pr'?this.reviewChannels():null);
+      const result = assess(kind, input.payload, input.evidence, this.now(), this.capacity, rule, kind === 'notion_sync' && input.payload?.page_id !== PAGE ? this.outcomeBindings() : null, ['pr_ready','slack_pr','review_decision','merge'].includes(kind)?this.dependencyPolicy():null,['slack_pr','review_decision'].includes(kind)?this.reviewChannels():null);
       const deferred = result.reasons.length === 1 && result.reasons[0] === 'review_delivery_blackout';
       if (!result.allowed && !deferred) return { prepared: false, key, ...result };
       const feedback = this.feedbackGate(kind,input.payload);
@@ -520,7 +524,7 @@ export class ControlStore {
     return {valid,reason:valid?'verified_native_review_request':'review_request_changed_or_unverified'};
   }
   feedbackGate(kind,payload) {
-    if (!['slack_pr','pr_ready','merge'].includes(kind)) return {allowed:true};
+    if (!['slack_pr','pr_ready','review_decision','merge'].includes(kind)) return {allowed:true};
     const pr=pullRequestIdentity(payload);
     return pr?this.feedback.gate(pr.repository,pr.pr_number,payload.expected_head_sha):{allowed:false,reasons:['valid_PR_feedback_identity_required']};
   }
@@ -541,15 +545,17 @@ export class ControlStore {
       const blocked = this.db.prepare("SELECT action_key FROM actions WHERE scope_key=? AND state IN ('claimed','uncertain') AND action_key<>? LIMIT 1").get(row.scope_key, key);
       if (blocked) return { claimed: false, reason: 'scope_in_use', blocking_key: blocked.action_key };
       const payload = JSON.parse(row.payload);
+      const decisionReasons=reviewDecisionTaskReasons(this,row.kind,row.task_id,payload,evidence,owner,key);
+      if(decisionReasons.length)return {claimed:false,reasons:decisionReasons};
       if(isQueuedResume(row.kind,payload)){
         const reasons=queuedResumeReasons(this.reactive.task(row.task_id),this.reactive.openWake(row.task_id),payload,evidence,this.now());
         if(reasons.length)return {claimed:false,reasons};
         evidence={...evidence,queued_resume_verified:true};
       }
       if(bindings.delivery.owner_managed){const reasons=ownerActionReasons(this,row.kind,row.task_id,payload,evidence,owner);if(reasons.length)return {claimed:false,reasons};}
-      const reactiveReasons = this.reactive.actionReasons(row.kind,row.task_id,payload);
+      const reactiveReasons = this.reactive.actionReasons(deliveryGuardKind(row.kind),row.task_id,payload);
       if (reactiveReasons.length) return { claimed:false, reasons:reactiveReasons };
-      const scopeReasons=scopeActionReasons(this.taskRegistry(),row.kind,row.task_id,payload,evidence);
+      const scopeReasons=scopeActionReasons(this.taskRegistry(),deliveryGuardKind(row.kind),row.task_id,payload,evidence);
       if(scopeReasons.length)return {claimed:false,allowed:false,reasons:scopeReasons};
       const ownership = ownershipReasons(row.kind,row.task_id,payload,evidence,this.taskRegistry(),this.db,key);
       const handoff = row.kind==='create_thread' ? scopedHandoffReasons(row.task_id,payload,evidence) : [];
@@ -593,7 +599,7 @@ export class ControlStore {
         checkedEvidence = { ...checkedEvidence, dispatches_this_run: Number.isSafeInteger(evidence?.dispatches_this_run) && evidence.dispatches_this_run >= 0
           ? Math.max(evidence.dispatches_this_run, claimedInRun) : evidence?.dispatches_this_run };
       }
-      const result = assess(row.kind, payload, checkedEvidence, this.now(), this.capacity, isReviewDelivery(row.kind) ? this.reviewRule() : REVIEW_WINDOW, row.kind === 'notion_sync' && payload.page_id !== PAGE ? this.outcomeBindings() : null, ['pr_ready','slack_pr','merge'].includes(row.kind)?this.dependencyPolicy():null,row.kind==='slack_pr'?this.reviewChannels():null);
+      const result = assess(row.kind, payload, checkedEvidence, this.now(), this.capacity, isReviewDelivery(row.kind) ? this.reviewRule() : REVIEW_WINDOW, row.kind === 'notion_sync' && payload.page_id !== PAGE ? this.outcomeBindings() : null, ['pr_ready','slack_pr','review_decision','merge'].includes(row.kind)?this.dependencyPolicy():null,['slack_pr','review_decision'].includes(row.kind)?this.reviewChannels():null);
       if (!result.allowed) return { claimed: false, ...result };
       const feedback = this.feedbackGate(row.kind,payload);
       if (!feedback.allowed) return {claimed:false,...feedback};
@@ -612,21 +618,24 @@ export class ControlStore {
       if (this.db.prepare('SELECT 1 FROM review_send_permits WHERE attempt_id=?').get(attempt_id))
         return { send: false, reason: 'send_already_authorized_reconcile_outcome' };
       if (operation_not_started !== true) return { send: false, reason: 'unstarted_operation_evidence_required' };
+      const decisionReasons=reviewDecisionTaskReasons(this,row.kind,row.task_id,JSON.parse(row.payload),evidence,row.owner,key);
+      if(decisionReasons.length)return {send:false,reasons:decisionReasons};
       if(bindings.delivery.owner_managed){const reasons=ownerActionReasons(this,row.kind,row.task_id,JSON.parse(row.payload),evidence,row.owner);if(reasons.length)return {send:false,reasons};}
-      const reactiveReasons = this.reactive.actionReasons(row.kind,row.task_id,JSON.parse(row.payload));
+      const reactiveReasons = this.reactive.actionReasons(deliveryGuardKind(row.kind),row.task_id,JSON.parse(row.payload));
       if (reactiveReasons.length) return { send:false, reasons:reactiveReasons };
-      const scopeReasons=scopeActionReasons(this.taskRegistry(),row.kind,row.task_id,JSON.parse(row.payload),evidence);
+      const scopeReasons=scopeActionReasons(this.taskRegistry(),deliveryGuardKind(row.kind),row.task_id,JSON.parse(row.payload),evidence);
       if(scopeReasons.length)return {send:false,allowed:false,reasons:scopeReasons};
       const rule = this.reviewRule(), window = reviewWindowAt(this.now(),rule);
       if (window.blocked) return { send: false, ...this.deferReview(key,rule) };
       if (this.db.prepare("SELECT value FROM settings WHERE key='processing'").get().value !== 'on') return { send: false, reason: 'processing_paused' };
-      const result = assess(row.kind,JSON.parse(row.payload),evidence,this.now(),this.capacity,rule,null,this.dependencyPolicy(),row.kind==='slack_pr'?this.reviewChannels():null);
+      const result = assess(row.kind,JSON.parse(row.payload),evidence,this.now(),this.capacity,rule,null,this.dependencyPolicy(),['slack_pr','review_decision'].includes(row.kind)?this.reviewChannels():null);
       if (!result.allowed) return { send: false, ...result };
       const feedback = this.feedbackGate(row.kind,JSON.parse(row.payload));
       if (!feedback.allowed) return {send:false,...feedback};
       const validUntil = Math.min(this.now()+60000,window.next_block_at);
       this.db.prepare('INSERT INTO review_send_permits VALUES (?,?,?,?)').run(attempt_id,key,this.now(),validUntil);
       return { send: true, key, attempt_id, payload: JSON.parse(row.payload), valid_until: validUntil,
+        ...(row.kind==='review_decision'?{native_arguments:{threadId:JSON.parse(row.payload).thread_id,prompt:JSON.parse(row.payload).prompt}}:{}),
         next: 'Invoke the authorized external operation immediately and strictly before valid_until; otherwise reconcile proven non-delivery. Never reuse this permit.' };
     });
   }

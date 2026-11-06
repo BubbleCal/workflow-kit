@@ -20,7 +20,7 @@ function verifiedNoHostedCI(ci, url, head, now, age) {
 // CI applicability is an explicit source-backed selection. The gate never
 // turns a missing/skipped check or a generic green summary into CI success.
 export function reviewStageReasons(kind, payload, evidence, now, age = 60000) {
-  if (!['pr_ready', 'slack_pr'].includes(kind)) return [];
+  if (!['pr_ready', 'slack_pr', 'review_decision'].includes(kind)) return [];
   const url = payload.pr_url ?? payload.message, head = payload.expected_head_sha;
   const ci = evidence.applicable_ci, reasons = [];
   const phase = kind === 'pr_ready' ? 'pre_ready' : 'pre_delivery';
