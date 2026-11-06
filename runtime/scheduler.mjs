@@ -75,6 +75,7 @@ export class Scheduler {
   }
   blocked(s){
     const t=this.state.task(s.task_id);if(!t||t.owner_id!==s.owner_id||!t.contract.schedule_sources?.includes(s.id))return 'task_binding_changed';
+    if(this.state.waitPolicy.blocked(s.task_id))return 'owner_next_action_not_due';
     if(t.contract.schedule_sources.some(id=>!id.startsWith('runtime:')))return 'native_schedule_source_conflict';
     if(t.mode!=='active')return `task_mode:${t.mode}`;
     try{this.state.assertQueueOwner(t);this.state.assertOwnerCoverage(t.owner_id);}catch(e){return e.message;}

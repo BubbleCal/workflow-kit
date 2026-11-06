@@ -16,6 +16,7 @@ import {ReactiveDriver} from './reactive-driver.mjs';
 import {publishScheduledOccurrence} from './schedule-source.mjs';
 import {verifyDesktopLoader} from './desktop-loader.mjs';
 import {validateIdleNavigationPolicy} from './mac-activity.mjs';
+import {publishWaitObservations} from './wait-observation.mjs';
 import {bindings,requireBindings} from './instance.mjs';
 import {EXPLORATION_TEMPLATE} from './work-catalog.mjs';
 
@@ -257,6 +258,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
       else if(input.op==='health_targets')result=new OwnerHealth(control).targets(input);
       else if(input.op==='health_observe')result=new OwnerHealth(control).observe(input);
       else if(input.op==='checkpoint')result=state.checkpoint(input.task_id);
+      else if(input.op==='clear_next_action')result=state.waitPolicy.clear(input);
       else if(input.op==='publish')result=state.ingest(input);
       else if(input.op==='schedule_event')result=publishScheduledOccurrence(root,state,input);
       else if(input.op==='begin')result=state.begin(input);
@@ -266,12 +268,9 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         result=state.decide(input);
       }else if(input.op==='finish'){const w=state.openWake(input.task_id);result=state.finish({...input,turn_id:input.turn_id??w?.turn_id});}
       else if(input.op==='wait_observe'){
-        mailbox=new Mailbox(join(root,'mailbox.sqlite'));result=mailbox.atomic(()=>mailbox.waits.observe(input));
-        for(const w of control.db.prepare("SELECT * FROM rt_waits WHERE state='waiting'").all()){
-          if(JSON.parse(w.condition).condition?.fact_key!==input.fact_key)continue;
-          state.ingest({event_id:`wait-fact:${w.task_id}:${input.fact_key}:${input.observed_at}`,task_id:w.task_id,source:'typed_wait_source',subject:`wait-fact:${input.fact_key}`,
-            type:'wait_fact_changed',observed_at:input.observed_at,payload:input.data,evidence_ref:input.evidence_ref,debounce_ms:0});
-        }
+        mailbox=new Mailbox(join(root,'mailbox.sqlite'));
+        result=mailbox.atomic(()=>mailbox.waits.observe(input));
+        publishWaitObservations({mailbox,state});
       }else if(input.op==='feedback_status')result=control.feedback.status(input.repository,input.pr_number);
       else if(input.op==='feedback_assess')result=control.atomic(()=>control.feedback.assess(input));
       else if(input.op==='recover'){

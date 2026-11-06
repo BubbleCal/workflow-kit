@@ -160,7 +160,7 @@ evidence. Matching fact versions and a still-valid typed condition permit a
 30-minute wait renewal (bounded by the source evidence expiry). Renewal creates
 a durable receipt, not a new owner message. Stale/missing evidence, changed
 conditions, paused work and in-flight effects are never treated as a renewed
-verified wait. Unknown sources retain the existing owner reassessment path.
+verified wait. Unknown sources remain visible as stale diagnostics; evidence expiry alone does not wake a change-driven owner.
 
 Source polling, discovery cadence, maintenance cadence and owner wake policy are
 separate. Human instructions and due scheduled work retain their event paths.
@@ -183,7 +183,7 @@ PR 用 feedback_status/feedback_assess 完整判读当前 head 的所有反馈�
 
 当前 App 权限、用户停止意图及实际作业状态仍由原执行者在原生环境核验。队列投递不是工程启动许可。保护正在运行的作业，不因机器通知重启工作。原生审批留在桌面 App 中处理。
 
-需要等待时，wait 包含当前 facts 的 subject/version、expires_at（Unix 毫秒，最多一小时）、resume_condition 和已有 typed condition。可用 pr、review_request、dependency/job/access/human。GitHub review_request 需要当前 requested_reviewers、完整反馈和 CI 事实，不依赖 Slack 回执，也不绕合并规则。执行者/采集器用 publish、wait_observe 报告作业或来源变化；后台不再读取原生终端列表。
+需要等待时，wait 包含当前 facts 的 subject/version、expires_at（Unix 毫秒，最多一小时）、resume_condition 和已有 typed condition。可用 pr、pr_state、review_request、dependency/job/access/human；明确的下次行动时间用 OWNER_WAITS.md 的 next_action_at。GitHub review_request 需要当前 requested_reviewers、完整反馈和 CI 事实，不依赖 Slack 回执，也不绕合并规则。执行者/采集器用 publish、wait_observe 报告作业或来源变化；后台不再读取原生终端列表。
 
 本次处置结束时再次 decide，然后 finish。ready 状态还有可执行工作时不能直接 finish；complete 必须逐项保存真实验收证据。收到原生消息、begin、回合结束和目标验收是不同事实。
 
@@ -259,3 +259,12 @@ If maintenance `begin` returns `skipped: true` and `quiet: true`, the user resch
 ## Substantive result followthrough
 
 Before completing a substantive assessment, benchmark or research result, use RESULT_FOLLOWTHROUGH.md to record evidence and bounded structured followups (or an explicit no-actionable-finding conclusion). Original owners retain their own delivery; discovery handles only result intake and guarded independent-owner setup under its existing interval. Finite assessments stay complete. Explicit holds and external-action boundaries remain binding.
+
+## Quiet owner waits
+
+`OWNER_WAITS.md` defines change-driven PR/event waits and owner-reported
+`next_action_at`. Source freshness and owner action times are independent:
+unchanged observations or expired evidence do not wake change-driven owners.
+Future owner windows block native queue submission, automatic recovery and idle
+UI loading while retaining source events. One deadline wake coalesces eligible
+same-owner tasks, with existing pause/decision/uncertain-delivery guards intact.

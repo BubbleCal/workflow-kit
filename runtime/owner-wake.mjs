@@ -50,6 +50,6 @@ export function eventWakeReason(event) {
   const action=event.payload?.original?.action;
   if(action)return `${subject}：${action}`;
   const labels={human_command:'用户有新指令',schedule_due:'定时工作到期',wait_expired:'等待到期，需要重新判断',
-    pr_changed:'PR 有新状态或反馈',source_changed:'关联来源有新变化',task_registered:'已接受任务',service_batch_ready:'维护批次到期'};
+    next_action_due:'下次行动时间已到',pr_changed:'PR 有新状态或反馈',source_changed:'关联来源有新变化',task_registered:'已接受任务',service_batch_ready:'维护批次到期'};
   return `${labels[event.type]??'任务有新事件'}${subject?'：'+subject:''}`;
 }

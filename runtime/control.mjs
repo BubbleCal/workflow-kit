@@ -462,6 +462,7 @@ export class ControlStore {
       if(key!==`${prefix}:${input.task_id}:${input.payload.existing_queue_id}`)
         return {prepared:false,allowed:false,reasons:['stable_single_recovery_key_required']};
       const reasons=queuedResumeReasons(this.reactive.task(input.task_id),this.reactive.openWake(input.task_id),input.payload,input.evidence,this.now());
+      if(this.reactive.waitPolicy.blocked(input.task_id))reasons.push('owner_next_action_not_due');
       if(reasons.length)return {prepared:false,allowed:false,reasons};
       input={...input,evidence:{...input.evidence,queued_resume_verified:true}};
     }
@@ -571,6 +572,7 @@ export class ControlStore {
       if(decisionReasons.length)return {claimed:false,reasons:decisionReasons};
       if(isQueuedResume(row.kind,payload)){
         const reasons=queuedResumeReasons(this.reactive.task(row.task_id),this.reactive.openWake(row.task_id),payload,evidence,this.now());
+        if(this.reactive.waitPolicy.blocked(row.task_id))reasons.push('owner_next_action_not_due');
         if(reasons.length)return {claimed:false,reasons};
         evidence={...evidence,queued_resume_verified:true};
       }

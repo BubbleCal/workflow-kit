@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import {waitDataMeaning} from './owner-wait-policy.mjs';
 const required = (v, name) => { if (typeof v !== 'string' || !v.trim()) throw new Error(`${name} is required`); };
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0,24);
 
@@ -8,7 +9,9 @@ export class WaitLedger {
     db.exec(`CREATE TABLE IF NOT EXISTS wait_facts (
       fact_key TEXT PRIMARY KEY, kind TEXT NOT NULL, subject TEXT NOT NULL, data TEXT NOT NULL,
       observed_at INTEGER NOT NULL, expires_at INTEGER, evidence_ref TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS wait_resolutions(event_key TEXT PRIMARY KEY, evidence_ref TEXT NOT NULL, resolved_at INTEGER NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS wait_resolutions(event_key TEXT PRIMARY KEY, evidence_ref TEXT NOT NULL, resolved_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS wait_observation_outbox (
+        event_key TEXT PRIMARY KEY,fact_key TEXT NOT NULL,input TEXT NOT NULL,state TEXT NOT NULL);`);
   }
   observe({ fact_key, kind, subject, data, observed_at, expires_at, evidence_ref }) {
     for (const [k,v] of Object.entries({ fact_key, subject, evidence_ref })) required(v, k);
@@ -30,6 +33,13 @@ export class WaitLedger {
     this.db.prepare(`INSERT INTO wait_facts VALUES (?,?,?,?,?,?,?) ON CONFLICT(fact_key) DO UPDATE SET
       data=excluded.data,observed_at=excluded.observed_at,expires_at=excluded.expires_at,evidence_ref=excluded.evidence_ref`)
       .run(fact_key,kind,subject,JSON.stringify(data),at,kind==='human'?null:end,evidence_ref);
+    const changed=prior?JSON.stringify(waitDataMeaning(kind,JSON.parse(prior.data)))!==JSON.stringify(waitDataMeaning(kind,data)):
+      data?.available===true||['complete','failed'].includes(data?.state);
+    if(changed){
+      const input={fact_key,kind,subject,data,observed_at,expires_at,evidence_ref};
+      const key=createHash('sha256').update(JSON.stringify(input)).digest('hex');
+      this.db.prepare("INSERT OR IGNORE INTO wait_observation_outbox VALUES (?,?,?,'pending')").run(key,fact_key,JSON.stringify(input));
+    }
     return { recorded: true, fact_key };
   }
   check(condition) {

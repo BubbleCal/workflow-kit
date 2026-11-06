@@ -378,3 +378,43 @@ test('disabling idle navigation during the activity read cancels the already sel
   assert.equal((await f.driver.loadPendingDesktopChats()).opened,false);assert.equal(calls(),0);assert.equal(f.queue.calls.length,1);
  }finally{await f.close();}
 });
+
+test('an owner-reported next action time blocks native queue submission, recovery and idle UI loading',async()=>{
+ const f=setup();try{
+  f.activate();f.event();await f.driver.deliver(f.state.task('T-1'));const w=f.state.openWake('T-1');
+  f.state.begin({task_id:'T-1',wake_id:w.id,native_proof:nativeProof({workspace:f.root,message:w.prompt,now:f.now()})});
+  f.decide({wake_id:w.id,disposition:'wait',plan:undefined,next_action_at:new Date(f.now()+172800000).toISOString()});
+  f.state.finish({task_id:'T-1',wake_id:w.id,turn_id:'native-turn',evidence_ref:'long-test'});
+  const calls=enableIdleLoader(f);f.event('during-long-test',{report:'retained'});f.advance(86400000);
+  f.state.expireWaits();await f.driver.deliver(f.state.task('T-1'));assert.equal(f.queue.calls.length,1);assert.equal((await f.driver.loadPendingDesktopChats()).opened,false);assert.equal(calls(),0);
+  f.advance(86400000);f.state.expireWaits();await f.driver.deliver(f.state.task('T-1'));assert.equal(f.queue.calls.length,2);assert.ok(f.state.openWake('T-1').event_ids.includes('during-long-test'));
+ }finally{await f.close();}
+});
+
+test('a blocking dependency PR is polled once without stealing its implementation ownership',async()=>{
+ const f=setup();try{
+  const task=f.state.task('T-1');f.control.db.prepare('UPDATE rt_tasks SET contract=? WHERE task_id=?').run(JSON.stringify({...task.contract,pull_requests:[]}),'T-1');
+  f.state.ingest({task_id:'T-1',event_id:'dependency-before',source:'github',subject:'example/service#1',type:'pr_changed',observed_at:f.now(),payload:{pr:{head_sha:head,state:'open'}},evidence_ref:'dependency-proof',debounce_ms:0});
+  f.decide();f.decide({disposition:'wait',plan:undefined,wait:{condition:{kind:'pr_state',pr_key:'example/service#1',fields:['state']},facts:f.state.checkpoint('T-1').facts.map(({subject,version})=>({subject,version})),expires_at:f.now()+1000,resume_condition:'Producer PR merge or close'}});f.activate();
+  f.driver.configurePolls();const poll=f.control.db.prepare('SELECT * FROM rt_polls WHERE enabled=1').get();assert.ok(poll);assert.deepEqual(JSON.parse(poll.config).observer_task_ids,['T-1']);
+  f.driver.collector=async()=>({pr:{head_sha:head,state:'open'},data:{pr:{head_sha:head,state:'open'}},observed_at:f.now(),evidence_ref:'actual-still-open'});
+  await f.driver.poll(poll);f.advance(7200000);f.state.expireWaits();await f.driver.deliver(f.state.task('T-1'));
+  assert.equal(f.queue.calls.length,0);assert.equal(f.control.db.prepare('SELECT COUNT(*) n FROM lifecycle_prs').get().n,0);
+  f.driver.collector=async()=>({pr:{head_sha:head,state:'merged'},data:{pr:{head_sha:head,state:'merged',merge_sha:'b'.repeat(40)}},observed_at:f.now(),evidence_ref:'actual-merge'});
+  await f.driver.poll(f.control.db.prepare('SELECT * FROM rt_polls WHERE enabled=1').get());f.advance(1001);await f.driver.deliver(f.state.task('T-1'));assert.equal(f.queue.calls.length,1);
+ }finally{await f.close();}
+});
+
+test('legacy typed-source producers publish real completion through the same durable runtime outbox',async()=>{
+ const f=setup();let m;try{
+  f.driver.config.owner_delivery=true;m=new Mailbox(join(f.root,'mailbox.sqlite'),{now:f.now});
+  const observe=state=>m.atomic(()=>m.waits.observe({fact_key:'build',kind:'job',subject:'build-job',data:{job_id:'owned-build',state},
+    observed_at:new Date(f.now()).toISOString(),expires_at:new Date(f.now()+60000).toISOString(),evidence_ref:`native-build:${state}`}));
+  observe('running');f.event();f.decide();f.state.checkWait=c=>m.waits.check(c);
+  f.decide({disposition:'wait',plan:undefined,wait:{condition:{kind:'job',fact_key:'build',subject:'build-job',job_id:'owned-build'},
+    facts:f.state.checkpoint('T-1').facts.map(({subject,version})=>({subject,version})),expires_at:f.now()+60000,resume_condition:'Build completed'}});f.activate();
+  f.driver.bridgeLegacy();await f.driver.deliver(f.state.task('T-1'));assert.equal(f.queue.calls.length,0);
+  f.advance(1000);observe('complete');f.driver.bridgeLegacy();f.driver.bridgeLegacy();await f.driver.deliver(f.state.task('T-1'));assert.equal(f.queue.calls.length,1);
+  assert.equal(f.state.checkpoint('T-1').events.filter(e=>e.type==='wait_fact_changed').length,1);
+ }finally{m?.close();await f.close();}
+});

@@ -1,5 +1,6 @@
 import {verifyQueuedRecoveryProof} from './queued-resume.mjs';
 import {prWakeProjection,prChangeReasons} from './owner-wake.mjs';
+import {OwnerWaitPolicy,changeDrivenWait} from './owner-wait-policy.mjs';
 import {pausedMigrationSetup} from './task-ownership.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { activeScopeExclusions } from './scope-exclusions.mjs';
@@ -85,6 +86,7 @@ export class ReactiveState {
       db.exec("CREATE UNIQUE INDEX IF NOT EXISTS rt_one_pending_delivery ON rt_wakes(task_id) WHERE state IN ('reserved','claimed','sent','queued','uncertain','running')");
       if(!db.prepare('PRAGMA table_info(rt_polls)').all().some(c=>c.name==='enabled'))db.exec('ALTER TABLE rt_polls ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1');
     });
+    this.waitPolicy=new OwnerWaitPolicy(this);
   }
   atomic(fn) {
     this.db.exec('BEGIN IMMEDIATE');
@@ -239,6 +241,15 @@ export class ReactiveState {
     this.db.prepare(`INSERT INTO rt_facts VALUES (?,?,?,?,?,?,?) ON CONFLICT(task_id,subject) DO UPDATE SET
       version=excluded.version,observed_at=excluded.observed_at,checked_at=excluded.checked_at,data=excluded.data,evidence_ref=excluded.evidence_ref`)
       .run(task_id,subject,version,at,this.now(),canonical(payload),evidence_ref);
+    if(this.waitPolicy.quietObservation(task,event_id,revision,subject,payload,fact,version))
+      return {recorded:true,changed:false,wait_observation:true,context_rev:revision};
+    if(!unchanged||lifecycle){
+      const deferred=this.waitPolicy.deferObservation(task,revision);
+      if(deferred){
+        this.db.prepare('UPDATE rt_events SET disposition=NULL WHERE event_id=?').run(event_id);
+        return {recorded:true,changed:!unchanged,deferred_until:deferred.not_before,context_rev:revision};
+      }
+    }
     if (unchanged && lifecycle && task.status!=='complete') {
       // A new generation requests follow-through on the same facts. Keep the
       // exact event for acknowledgement without invalidating a valid plan.
@@ -277,6 +288,7 @@ export class ReactiveState {
         const previous=e.source==='github'&&payload?.pr?.head_sha?this.db.prepare("SELECT payload FROM rt_events WHERE task_id=? AND subject=? AND source='github' AND rowid<(SELECT rowid FROM rt_events WHERE event_id=?) ORDER BY rowid DESC LIMIT 1").get(task_id,e.subject,e.event_id):null;
         return {...e,payload,...(payload?.pr?.head_sha?{wake_reasons:prChangeReasons(parse(previous?.payload),payload)}:{})};}),
       wait: this.db.prepare('SELECT * FROM rt_waits WHERE task_id=?').get(task_id) ?? null,
+      owner_next_action:this.waitPolicy.window(task_id),
       wake: this.openWake(task_id),schedule_runs:this.scheduleRuns?.(task_id)??[],
       owner_tasks:this.tasks().filter(t=>t.owner_id===task.owner_id).map(t=>({task_id:t.task_id,mode:t.mode,status:t.status,dirty:t.dirty,objective:t.contract.objective})) };
   }
@@ -304,7 +316,7 @@ export class ReactiveState {
     }
   }
   decide({ task_id, expected_context_rev, expected_plan_rev, disposition, reason, evidence_refs, plan, wait,
-    acceptance, wake_id, owner_thread_id, alternatives_considered = [] }) {
+    acceptance, wake_id, owner_thread_id, alternatives_considered = [],next_action_at }) {
     if (!['continue','revise','wait','needs_decision','complete','cycle_complete'].includes(disposition)) throw new Error('Unknown decision disposition');
     required(reason,'decision reason');
     if (!Array.isArray(evidence_refs) || !evidence_refs.length || evidence_refs.some(r=>typeof r!=='string'||!r.trim())) throw new Error('Decision needs evidence');
@@ -326,6 +338,9 @@ export class ReactiveState {
         this.db.prepare("INSERT INTO rt_plans VALUES (?,?,?,?,'current',?,?,?,?)")
           .run(task_id,revision,task.contract_rev,task.context_rev,canonical(plan),reason,canonical(evidence_refs),this.now());
       } else if (disposition === 'revise' || !this.plan(task_id) && disposition === 'continue') throw new Error('A concrete plan is required');
+      const reportedTime=next_action_at??wait?.next_action_at;
+      if(reportedTime!==undefined&&disposition!=='wait')throw new Error('next_action_at is an owner wait decision');
+      wait=this.waitPolicy.normalize(wait,reportedTime,reason);
       if (disposition === 'wait') this.validateWait(task_id,wait);
       if(disposition==='cycle_complete'&&!task.contract.schedule_sources?.length)throw new Error('Cycle completion requires a bound recurring schedule');
       if (['complete','cycle_complete'].includes(disposition)) {
@@ -344,25 +359,37 @@ export class ReactiveState {
       if (wait && disposition==='wait') this.db.prepare(`INSERT INTO rt_waits VALUES (?,?,'waiting',?,?) ON CONFLICT(task_id) DO UPDATE SET
         condition=excluded.condition,state='waiting',reason=excluded.reason,updated_at=excluded.updated_at`).run(task_id,canonical(wait),reason,this.now());
       else this.db.prepare("UPDATE rt_waits SET state='resolved',reason=?,updated_at=? WHERE task_id=?").run(reason,this.now(),task_id);
+      this.waitPolicy.record(task,wake,wait,disposition,reason,evidence_refs);
       return { decision_id:id, task:this.task(task_id), action_context:{contract_rev:task.contract_rev,context_rev:task.context_rev,plan_rev:revision} };
     });
   }
   validateWait(task_id, wait) {
-    if (!wait || !Array.isArray(wait.facts) || !wait.facts.length || !Number.isFinite(wait.expires_at) ||
-        wait.expires_at <= this.now() || wait.expires_at > this.now()+3600000)
+    const timed=wait?.condition?.kind==='time',long=!!wait?.next_action_at;
+    if (!wait || !Array.isArray(wait.facts) || !timed&&!wait.facts.length || !Number.isFinite(wait.expires_at) ||
+        wait.expires_at <= this.now() || wait.expires_at > this.now()+(timed&&long?31536000000:3600000))
       throw new Error('A wait needs current fact versions and a recheck within one hour');
+    if(wait.wake_on!==undefined&&!['change','deadline'].includes(wait.wake_on))throw new Error('Use change or deadline as the wait wake policy');
     for (const expected of wait.facts) {
       const actual=this.db.prepare('SELECT version,checked_at FROM rt_facts WHERE task_id=? AND subject=?').get(task_id,expected.subject);
       if (!actual || actual.version!==expected.version || this.now()-actual.checked_at>60000)
         throw new Error('A wait cannot rely on stale or superseded facts');
     }
     required(wait.resume_condition,'wait resume condition');
+    if(timed){if(!long)throw new Error('A time wait requires next_action_at');return;}
+    if(wait.condition?.kind==='pr_state'){this.waitPolicy.validatePrWait(task_id,wait);return;}
     const proof=this.checkWait(wait.condition);
     if(!proof?.valid)throw new Error(`Typed wait is not currently valid: ${proof?.reason??'unknown'}`);
   }
   expireWaits() {
+    this.waitPolicy.releaseDue();
     for (const row of this.db.prepare("SELECT * FROM rt_waits WHERE state='waiting'").all()) {
-      const wait=parse(row.condition); if (wait.expires_at>this.now()) continue;
+      const wait=parse(row.condition); if (wait.expires_at>this.now()||wait.condition?.kind==='time'&&wait.next_action_at) continue;
+      if(changeDrivenWait(wait)){
+        const key=`wait-source-stale:${row.task_id}:${row.updated_at}`;
+        if(!this.db.prepare('SELECT 1 FROM rt_diagnostics WHERE key=?').get(key))this.diagnostic(key,
+          {task_id:row.task_id,reason:'Source evidence needs refresh; expiry is not a condition change',condition:wait.condition});
+        continue;
+      }
       this.ingest({event_id:`wait-expired:${row.task_id}:${row.updated_at}`,task_id:row.task_id,source:'runtime',subject:`wait:${row.task_id}`,
         type:'wait_expired',observed_at:wait.expires_at,payload:{expired_at:wait.expires_at,resume_condition:wait.resume_condition},evidence_ref:`wait:${row.updated_at}`,debounce_ms:0});
     }
@@ -375,6 +402,7 @@ export class ReactiveState {
     return this.atomic(()=>{
       const task=this.task(task_id);
       if (!task || task.mode!=='active' || task.wake_at===null || task.wake_at>this.now()) return {reserved:false,reason:'not_due'};
+      if(this.waitPolicy.blocked(task_id))return {reserved:false,reason:'owner_next_action_not_due',not_before:this.waitPolicy.blocked(task_id).not_before};
       const old=this.openWake(task_id); if(old)return {reserved:false,reason:'wake_in_flight',wake:old};
       if(this.db.prepare(`SELECT 1 FROM rt_wakes WHERE owner_id=? AND ${pendingWake}`).get(task.owner_id))return {reserved:false,reason:'owner_wake_in_flight'};
       this.assertOwnerCoverage(task.owner_id);
@@ -447,6 +475,7 @@ export class ReactiveState {
     if(kind==='task_queue' && !task)return ['reactive_task_not_registered'];
     if(!task || !['active','paused'].includes(task.mode))return kind==='task_queue'?['reactive_task_not_active']:[];
     if(kind==='task_queue') {
+      if(this.waitPolicy.blocked(task_id))return ['owner_next_action_not_due'];
       try{this.assertQueueOwner(task);}catch{return ['registered_owner_or_hold_changed'];}
       const wake=this.openWake(task_id);
       const members=wake?.member_ids.map(id=>this.task(id))??[];

@@ -68,9 +68,9 @@ function dependencyReminderFixture() {
  f.decide({disposition:'wait',plan:plan('wait for release'),wait:{facts:[{subject:fact.subject,version:fact.version}],expires_at:f.now()+3600000,resume_condition:'Required release becomes available',condition:{kind:'dependency',fact_key:'dependency',subject:'required-release',requirement:'published release'}}});
  f.mode('active');enqueue(2);return {...f,intent,payload,enqueue};
 }
-test('same reminder stays pending during a verified dependency wait and is released at expiry',()=>{
+test('same reminder stays pending after dependency evidence expires without a state change',()=>{
  const f=dependencyReminderFixture();try{const rev=f.s.task('T-1').context_rev;f.route();f.route();assert.equal(f.s.task('T-1').wake_at,null);assert.equal(f.s.task('T-1').context_rev,rev);assert.equal(f.m.db.prepare('SELECT state FROM mail WHERE item_key=?').get(f.intent+':2').state,'pending');
- f.advance(3600001);f.route();assert.notEqual(f.s.task('T-1').wake_at,null);assert.equal(f.s.checkpoint('T-1').events.length,1);assert.equal(f.m.db.prepare('SELECT state FROM mail WHERE item_key=?').get(f.intent+':2').state,'owner_routed');
+ f.advance(3600001);f.route();assert.equal(f.s.task('T-1').wake_at,null);assert.equal(f.s.checkpoint('T-1').events.length,0);assert.equal(f.m.db.prepare('SELECT state FROM mail WHERE item_key=?').get(f.intent+':2').state,'pending');
  }finally{f.close();}
 });
 test('dependency availability and genuinely changed obligations immediately release work',()=>{
@@ -92,6 +92,14 @@ test('a freshly reverified dependency wait also holds the existing lifecycle rem
   f.route();f.s.expireWaits();assert.equal(f.s.task('T-1').wake_at,null);
   assert.equal(f.m.db.prepare('SELECT state FROM mail WHERE item_key=?').get(f.intent+':2').state,'pending');
   f.advance(15001);assert.deepEqual(renewVerifiedWaits({root:f.root,control:f.c,now:f.now}),[]);
-  f.route();assert.notEqual(f.s.task('T-1').wake_at,null);
+  f.route();assert.equal(f.s.task('T-1').wake_at,null);
+ }finally{f.close();}
+});
+
+test('a legacy evidence-expiry reconciliation stays inside runtime while the unchanged dependency is blocked',()=>{
+ const f=dependencyReminderFixture();try{
+  f.advance(3600001);f.m.enqueue({key:'old-source-expired',lane:'coordinator',kind:'event',payload:{event:'wait_reconciliation',task_id:'T-1',wait_reason:'evidence_expired'}});
+  f.route();f.route();assert.equal(f.s.task('T-1').wake_at,null);assert.equal(f.s.checkpoint('T-1').events.length,0);
+  assert.equal(f.c.db.prepare("SELECT COUNT(*) n FROM rt_diagnostics WHERE key='wait-source-stale:old-source-expired'").get().n,1);
  }finally{f.close();}
 });

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import {DatabaseSync} from 'node:sqlite';
 import {queueHostFingerprint} from '../runtime/native-queue.mjs';
-import {OWNER,compatibilityFixture,nativeProof} from '../runtime/test-fixtures/reactive.mjs';
+import {fixture,NOW,OWNER,compatibilityFixture,nativeProof} from '../runtime/test-fixtures/reactive.mjs';
 
 const source=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 function setup() {
@@ -231,5 +231,29 @@ test('native CLI runs a scheduled exploration through the ordinary owner queue a
   assert.equal(run(dir,'workflow.mjs',['schedule','list']).json[0].status,'cancelled');
   const calls=readFileSync(join(dir,'native-queue-calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse).filter(a=>a.includes('--thread'));
   assert.equal(calls.length,1);assert.ok(calls[0].includes(OWNER));assert.equal(run(dir,'workflow.mjs',['discovery','status']).json.batches.length,0);
+ }finally{rmSync(root,{recursive:true,force:true});}
+});
+
+test('runtime wait_observe refreshes a running job quietly and publishes its terminal result exactly once',()=>{
+ const root=setup();try{
+  const dir=init(root,'one');bind(dir,'one');
+  assert.equal(run(dir,'workflow.mjs',['runtime','init']).status,0);
+  const input=(state)=>({op:'wait_observe',fact_key:'build',kind:'job',subject:'build-job',data:{job_id:'native-build',state},
+    observed_at:new Date().toISOString(),expires_at:new Date(Date.now()+60000).toISOString(),evidence_ref:`actual-build:${state}`});
+  const initial=run(dir,'workflow.mjs',['runtime','op'],input('pending'));assert.equal(initial.status,0,JSON.stringify(initial));
+  const f=fixture(join(dir,'control.sqlite'),dir);try{
+    f.advance(Date.now()-NOW);f.event();f.decide();f.s.checkWait=()=>({valid:true});
+    f.decide({disposition:'wait',plan:undefined,wait:{condition:{kind:'job',fact_key:'build',subject:'build-job',job_id:'native-build'},
+      facts:f.s.checkpoint('T-1').facts.map(({subject,version})=>({subject,version})),expires_at:f.now()+60000,resume_condition:'Build has an actual result'}});
+  }finally{f.c.close();}
+  for(let i=0;i<3;i++)assert.equal(run(dir,'workflow.mjs',['runtime','op'],input('running')).status,0);
+  const db=new DatabaseSync(join(dir,'control.sqlite'));try{
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM rt_events WHERE disposition IS NULL").get().n,0);
+    assert.equal(db.prepare("SELECT wake_at FROM rt_tasks WHERE task_id='T-1'").get().wake_at,null);
+    const done=input('complete');assert.equal(run(dir,'workflow.mjs',['runtime','op'],done).status,0);
+    assert.equal(run(dir,'workflow.mjs',['runtime','op'],done).status,0);
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM rt_events WHERE disposition IS NULL AND type='wait_fact_changed'").get().n,1);
+    assert.notEqual(db.prepare("SELECT wake_at FROM rt_tasks WHERE task_id='T-1'").get().wake_at,null);
+  }finally{db.close();}
  }finally{rmSync(root,{recursive:true,force:true});}
 });

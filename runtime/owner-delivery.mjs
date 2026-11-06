@@ -1,5 +1,6 @@
 import {join} from 'node:path';
 import {canonical} from './reactive-state.mjs';
+import {changeDrivenWait} from './owner-wait-policy.mjs';
 
 const taskIds=p=>[...new Set([p?.task_id,...(Array.isArray(p?.task_ids)?p.task_ids:[]),...(Array.isArray(p?.affected_task_ids)?p.affected_task_ids:[])].filter(x=>typeof x==='string'&&x))];
 
@@ -11,15 +12,16 @@ export function waitingOnSameObligation({control,mailbox,task,payload,now=Date.n
   const row=control.db.prepare("SELECT * FROM rt_waits WHERE task_id=? AND state='waiting'").get(task.task_id);
   if(!row)return null;
   const wait=JSON.parse(row.condition);
-  if(wait.expires_at<=now()||!Array.isArray(wait.facts)||!wait.facts.length)return null;
+  const onChange=changeDrivenWait(wait);
+  if(!onChange&&wait.expires_at<=now()||!Array.isArray(wait.facts)||!wait.facts.length)return null;
   for(const expected of wait.facts){const fact=control.db.prepare('SELECT version FROM rt_facts WHERE task_id=? AND subject=?').get(task.task_id,expected.subject);if(!fact||fact.version!==expected.version)return null;}
   const proof=['pr','review_request'].includes(wait.condition?.kind)?control.checkReactiveWait(wait.condition):mailbox.waits.check(wait.condition);
-  if(!proof.valid)return null;
+  if(!proof.valid&&!(onChange&&proof.reason!=='condition_changed'))return null;
   const previous=control.db.prepare("SELECT e.payload,d.plan_rev,d.disposition,d.data FROM rt_events e JOIN rt_decisions d ON d.id=e.decision_id WHERE e.task_id=? AND e.disposition='handled' AND json_extract(e.payload,'$.original.lifecycle_key')=? ORDER BY e.received_at DESC LIMIT 1").get(task.task_id,payload.lifecycle_key);
   if(!previous||previous.plan_rev!==task.plan_rev||previous.disposition!=='wait'||
     canonical(waitPredicate(JSON.parse(previous.data).wait?.condition))!==canonical(waitPredicate(wait.condition))||
     lifecycleMeaning(JSON.parse(previous.payload).original)!==lifecycleMeaning(payload))return null;
-  return {reason:'same_obligation_has_verified_wait',wait_updated_at:row.updated_at,expires_at:wait.expires_at,evidence_ref:proof.evidence_ref??proof.proof??null};
+  return {reason:proof.valid?'same_obligation_has_verified_wait':'same_obligation_source_unknown',wait_updated_at:row.updated_at,expires_at:wait.expires_at,evidence_ref:proof.evidence_ref??proof.proof??null};
 }
 
 // Historical coordinator addresses remain an input format, never an execution role.
@@ -48,12 +50,20 @@ export function routeOwnerInputs({root,control,mailbox,now=Date.now}) {
       db.prepare("UPDATE discovery_sources SET next_at=MIN(next_at,?) WHERE source_id='calendar' AND enabled=1").run(now());
       targets.push('discovery:calendar');
     } else {
+      if(p.event==='wait_reconciliation'&&p.wait_reason==='evidence_expired'){
+        const task=p.task_id&&state.task(p.task_id),waiting=task&&db.prepare("SELECT condition FROM rt_waits WHERE task_id=? AND state='waiting'").get(task.task_id);
+        if(task?.status==='waiting'&&!task.dirty&&changeDrivenWait(waiting&&JSON.parse(waiting.condition))){
+          const key=`wait-source-stale:${row.item_key}`;
+          if(!db.prepare('SELECT 1 FROM rt_diagnostics WHERE key=?').get(key))state.diagnostic(key,{task_id:task.task_id,source_event_key:row.item_key,reason:'Evidence expiry is not a condition change'});
+          continue;
+        }
+      }
       const held=waitingOnSameObligation({control,mailbox,task:p.task_id?state.task(p.task_id):null,payload:p,now});
       if(held){
         const key=`held-obligation:${row.item_key}`;
         if(!db.prepare('SELECT 1 FROM rt_diagnostics WHERE key=?').get(key))state.diagnostic(key,{...held,task_id:p.task_id,source_event_key:row.item_key});
         // Keep the immutable input pending. The same loop releases it when its
-        // wait expires or changes; no acknowledgement or second timer is needed.
+        // relevant predicate or plan changes; no acknowledgement or second timer is needed.
         continue;
       }
       const ids=taskIds(p);
@@ -117,7 +127,7 @@ export function queueOwnerHealth({control,mailbox,now=Date.now}) {
   if(!control.reactive.tasks().some(t=>t.mode==='active'&&t.contract.service_lane==='maintenance'))return;
   for(const wake of control.db.prepare("SELECT * FROM rt_wakes WHERE state IN ('queued','uncertain','running') AND created_at<?").all(now()-900000)) {
     const task=control.reactive.task(wake.task_id);
-    if(!task||task.mode!=='active'||['complete','needs_decision'].includes(task.status)||task.contract.service_lane||task.contract.retired)continue;
+    if(!task||task.mode!=='active'||['complete','needs_decision'].includes(task.status)||task.contract.service_lane||task.contract.retired||control.reactive.waitPolicy?.blocked(task.task_id))continue;
     if(wake.state==='running'&&now()-(wake.started_at??wake.created_at)<3600000)continue;
     const prefix=`owner-health:${wake.id}`;
     const prior=mailbox.db.prepare("SELECT state,created_at,payload FROM mail WHERE item_key=? OR item_key LIKE ? ORDER BY seq DESC LIMIT 1").get(prefix,prefix+':recheck:%');

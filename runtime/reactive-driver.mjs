@@ -1,3 +1,4 @@
+import {publishWaitObservations} from './wait-observation.mjs';
 import {eventWakeReason} from './owner-wake.mjs';
 import {renewVerifiedWaits} from './wait-renewal.mjs';
 import {routeOwnerInputs,queueOwnerHealth} from './owner-delivery.mjs';
@@ -47,6 +48,7 @@ ${lane==='maintenance'?'工作流维护 · ':''}${task.task_id}｜${reason||'有
 按 ${join(root,protocol)} 执行 begin → checkpoint → decide → finish；首次使用或规则变化时读取协议。${lane?`领取 service_begin 批次 ${batch??'见 checkpoint'}，先结束批次，再 cycle_complete/finish。`:''}
 根据最新 checkpoint 推进下一步并保存结果。${checkpoint.schedule_runs?.length?'本轮定时结果用 cycle_complete 结束。':''}${task.contract.task_kind==='exploration'?'探索结果按 WORK_TASKS.md 保存 task report。':''}
 ${lane?'':'评估、测试或研究产出实质结果时，按 RESULT_FOLLOWTHROUGH.md 提交 task report 与结构化 followups；无可执行发现也记录明确结论。'}
+${lane?'':'等待 PR/事件时按 OWNER_WAITS.md 报告结构化阻塞；知道下次行动时间时，在 decide(wait) 中提交带时区的 next_action_at，之前不接收自动唤醒。'}
 ${lane?'维护间隔以 daily-review/config.json 为准。':'涉及交付时按 OWNER_DELIVERY.md；需要决策或重要完成时通知工作中心。'}
 入口：node ${shellQuote(join(root,'workflow.mjs'))} runtime op（JSON stdin 或 --file）
 ${JSON.stringify({task_id:task.task_id,wake_id:wake.id})}`;
@@ -80,6 +82,15 @@ export class ReactiveDriver {
         subjects.get(subject).task_ids.push(task.task_id);
       }
     }
+    for(const row of this.control.db.prepare("SELECT w.task_id,w.condition FROM rt_waits w JOIN rt_tasks t ON t.task_id=w.task_id WHERE w.state='waiting' AND t.mode IN ('active','shadow') AND json_extract(w.condition,'$.condition.kind')='pr_state'").all()){
+      const key=JSON.parse(row.condition).condition.pr_key,match=key.match(/^([\w.-]+\/[\w.-]+)#([1-9]\d*)$/);
+      if(!match||!this.config.repositories.includes(match[1]))continue;
+      let source=subjects.get(key);
+      if(!source){source={repository:match[1],pr_number:Number(match[2]),task_ids:[]};subjects.set(key,source);}
+      if(!source.task_ids.includes(row.task_id)){
+        source.task_ids.push(row.task_id);source.observer_task_ids=[...(source.observer_task_ids??[]),row.task_id];
+      }
+    }
     this.control.atomic(()=>{
     for(const row of this.control.db.prepare('SELECT subject FROM rt_polls WHERE enabled=1').all())if(!subjects.has(row.subject))this.control.db.prepare('UPDATE rt_polls SET enabled=0 WHERE subject=?').run(row.subject);
     for(const [subject,config]of subjects){
@@ -96,9 +107,11 @@ export class ReactiveDriver {
       const event=this.state.atomic(()=>{
         const config=JSON.parse(row.config),tasks=(config.task_ids??[task.task_id]).map(id=>this.state.task(id)).filter(t=>t&&['active','shadow'].includes(t.mode)&&t.status!=='complete');
         if(!tasks.length)return {changed:false};
-        if(tasks.some(t=>t.mode==='active')){
+        const owners=tasks.filter(t=>!config.observer_task_ids?.includes(t.task_id));
+        if(owners.some(t=>t.mode==='active')){
           this.control.feedback.ingest(result.feedback);
-          if(!this.control.db.prepare('SELECT 1 FROM lifecycle_prs WHERE pr_key=?').get(row.subject))this.control.lifecycle.track({...config,task_id:task.task_id,owner_thread_id:task.owner_id,authorization_ref:task.authorization_ref});
+          const owner=owners.find(t=>t.mode==='active');
+          if(!this.control.db.prepare('SELECT 1 FROM lifecycle_prs WHERE pr_key=?').get(row.subject))this.control.lifecycle.track({...config,task_id:owner.task_id,owner_thread_id:owner.owner_id,authorization_ref:owner.authorization_ref});
           this.control.lifecycle.observe(result.pr,{feedbackCollected:true});
         }
         const events=tasks.map(t=>this.state.ingestInside({event_id:`github:${row.subject}:${result.observed_at}:${fingerprint(result.data)}:${t.task_id}`,task_id:t.task_id,source:'github',subject:row.subject,
@@ -136,7 +149,7 @@ export class ReactiveDriver {
     }}finally{m.close();}}
     if(this.config.owner_delivery){
       const m=new Mailbox(join(this.root,'mailbox.sqlite'),{now:this.now});
-      try{routeOwnerInputs({root:this.root,control:this.control,mailbox:m,now:this.now});queueOwnerHealth({control:this.control,mailbox:m,now:this.now});}finally{m.close();}
+      try{publishWaitObservations({mailbox:m,state:this.state});routeOwnerInputs({root:this.root,control:this.control,mailbox:m,now:this.now});queueOwnerHealth({control:this.control,mailbox:m,now:this.now});}finally{m.close();}
       return;
     }
     const path=join(this.root,'mailbox.sqlite');if(!existsSync(path))return;
@@ -163,6 +176,7 @@ export class ReactiveDriver {
   async deliver(task) {
     if(this.capability?.verified!==true){this.state.diagnostic('native-queue',{reason:'Desktop consumption must be verified before activation'});return;}
     try{
+      if(this.state.waitPolicy.blocked(task.task_id))return {delivered:false,reason:'owner_next_action_not_due'};
       const existing=this.state.openWake(task.task_id);
       if(existing&&existing.task_id!==task.task_id)return;
       if(existing&&existing.state!=='reserved'){
@@ -287,7 +301,7 @@ export class ReactiveDriver {
         for(const id of members){
           const task=this.state.task(id);
           if(!task||task.owner_id!==wake.owner_id||task.mode!=='active'||['complete','needs_decision'].includes(task.status)||
-            policy.excluded_task_ids?.includes(id)||task.contract.retired)return false;
+            policy.excluded_task_ids?.includes(id)||task.contract.retired||this.state.waitPolicy.blocked(id))return false;
           this.state.assertQueueOwner(task);
         }
       }catch{return false;}

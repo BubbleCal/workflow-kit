@@ -28,6 +28,7 @@ export class OwnerHealth {
     if(!Number.isInteger(limit)||limit<1||limit>8)throw new Error('Health sweep limit must be 1..8');
     const tasks=this.control.reactive.tasks().filter(t=>t.mode==='active'&&t.status!=='complete'&&
       t.status!=='needs_decision'&&!t.contract.service_lane&&!t.contract.retired&&
+      !this.control.reactive.waitPolicy.blocked(t.task_id)&&
       (this.control.reactive.openWake(t.task_id)||t.status==='ready'));
     return tasks.map(t=>({task:t,health:this.db.prepare('SELECT * FROM rt_owner_health WHERE task_id=?').get(t.task_id),wake:this.control.reactive.openWake(t.task_id)}))
       .filter(x=>!x.health||x.health.next_check_at<=this.now())

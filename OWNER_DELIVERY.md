@@ -110,8 +110,13 @@ Repeated generations of the same lifecycle obligation remain separate pending ev
 
 ## Repeated reminders during a verified wait
 
-An already-handled lifecycle obligation with unchanged semantic facts stays in the durable input queue while the original owner has a clean, unexpired, source-verified wait. It does not trigger another model turn. The existing runtime loop releases it when that wait, its fact versions or the underlying condition changes or expires. New heads, findings and unhandled obligations are not suppressed. This does not remove the bounded expiry fallback or change CI-progress wake rules.
+An already-handled lifecycle obligation with unchanged semantic facts stays in the durable input queue while the original owner has a clean change-driven wait on the same facts. It does not trigger another model turn. The existing runtime loop releases it when relevant facts, the underlying condition or the plan change. Source expiry remains a diagnostic, without an owner turn. New heads, findings and unhandled obligations are not suppressed. Real timed review windows retain their deadline behavior. Known next-action times use OWNER_WAITS.md.
 
 ## Substantive result followthrough
 
 Before completing a substantive assessment, benchmark or research result, use RESULT_FOLLOWTHROUGH.md to record evidence and bounded structured followups (or an explicit no-actionable-finding conclusion). Original owners retain their own delivery; discovery handles only result intake and guarded independent-owner setup under its existing interval. Finite assessments stay complete. Explicit holds and external-action boundaries remain binding.
+
+When no useful next step is possible, follow `OWNER_WAITS.md`: report the exact
+PR/event condition, and include a timezone-qualified `next_action_at` when the
+next useful time is known or reasonably estimated. Runtime retains inputs and
+coalesces them at that time rather than messaging the owner early.

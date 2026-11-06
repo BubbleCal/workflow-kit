@@ -26,10 +26,10 @@ test('fresh unchanged source observations renew an elapsed wait without an owner
  assert.deepEqual(renewVerifiedWaits({root:'/unused',control:f.c,now:f.now}),[]);
  }finally{f.c.close();}
 });
-test('unrefreshed evidence still wakes the owner once instead of silently renewing a stale wait',()=>{
+test('unrefreshed evidence stays an explicit source diagnostic without waking an unchanged blocker',()=>{
  const f=waiting();try{f.advance(61000);assert.deepEqual(renewVerifiedWaits({root:'/unused',control:f.c,now:f.now}),[]);
- f.s.expireWaits();f.s.expireWaits();assert.equal(f.s.checkpoint('T-1').events.length,1);
- assert.equal(f.s.checkpoint('T-1').events[0].type,'wait_expired');
+ f.s.expireWaits();f.s.expireWaits();assert.equal(f.s.checkpoint('T-1').events.length,0);
+ assert.equal(f.c.db.prepare("SELECT COUNT(*) n FROM rt_diagnostics WHERE key LIKE 'wait-source-stale:%'").get().n,1);
  }finally{f.c.close();}
 });
 test('material changes and paused work cannot be hidden by automatic renewal',()=>{
