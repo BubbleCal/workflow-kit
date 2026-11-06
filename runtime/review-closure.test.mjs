@@ -50,3 +50,12 @@ test('Review Queue archive authority is limited to saved terminal reviews and ex
   const t=f.s.task('T-1');assert.deepEqual(f.s.actionReasons('archive','T-1',{...p,runtime_context:{contract_rev:t.contract_rev,context_rev:t.context_rev,plan_rev:t.plan_rev}}),[]);
  }finally{f.cleanup();}
 });
+test('already archived chats reconcile only from actual archived-list membership',()=>{
+ const f=setup();try{
+  f.q.complete(f.input);const proof={source:'codex_app.list_threads',request:{mode:'history',archived:true},checked_at:new Date(f.now()).toISOString(),evidence_ref:'actual-list',readback:{threads:[{id:OWNER,kind:'codex',hostId:'local'}]}};
+  assert.throws(()=>f.q.confirmArchive({task_id:'T-1',executor_thread_id:OWNER,native_proof:{...proof,request:{mode:'history',archived:false}}}));
+  assert.throws(()=>f.q.confirmArchive({task_id:'T-1',executor_thread_id:OWNER,native_proof:{...proof,readback:{threads:[]}}}));
+  assert.equal(f.q.confirmArchive({task_id:'T-1',executor_thread_id:OWNER,native_proof:proof}).archived_verified,true);
+  assert.equal(f.q.targets().length,0);
+ }finally{f.cleanup();}
+});

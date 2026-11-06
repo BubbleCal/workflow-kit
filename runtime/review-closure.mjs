@@ -19,7 +19,7 @@ export class ReviewClosure {
   targets() {
     return this.c.reactive.tasks().map(t=>this.identity(t.task_id)).filter(Boolean).filter(({w,t})=>
       !this.c.db.prepare("SELECT 1 FROM actions WHERE task_id=? AND kind='archive' AND state='sent'").get(t.task_id)&&
-      (!t.contract.retired||w.data.review_closure)).map(({w,t,url})=>({task_id:t.task_id,owner_thread_id:t.owner_id,pr_url:url,
+      !w.data.review_closure?.native_archive&&(!t.contract.retired||w.data.review_closure)).map(({w,t,url})=>({task_id:t.task_id,owner_thread_id:t.owner_id,pr_url:url,
         review_status:t.status,terminal_pr:w.data.review_closure?.pr??null}));
   }
   complete(input) {return this.c.atomic(()=>{
@@ -53,6 +53,19 @@ export class ReviewClosure {
     this.c.db.prepare("UPDATE rt_waits SET state='resolved',reason='review_pr_terminal',updated_at=? WHERE task_id=?").run(this.c.now(),t.task_id);
     this.c.db.prepare("UPDATE work_items SET state='completed',data=?,revision=revision+1,updated_at=? WHERE id=?").run(json({...w.data,review_closure:closure}),this.c.now(),t.task_id);
     return {completed:true,task_id:t.task_id,closure,archive_required:true};
+  });}
+  confirmArchive(input) {return this.c.atomic(()=>{
+    const x=this.identity(input.task_id),rule=this.policy?.terminal_pr_completion,proof=input.native_proof;
+    if(!rule?.enabled||!x?.w.data.review_closure||x.t.status!=='complete'||
+      ![this.c.work.config.threads?.main,this.policy.owner_thread_id,x.t.owner_id].filter(Boolean).includes(input.executor_thread_id))throw new Error('Saved terminal review completion and authorized actor are required');
+    let read=proof?.readback;
+    if(!read?.threads)for(const item of read?.content??[])if(item.type==='text'){try{read=JSON.parse(item.text);}catch{}}
+    if(proof?.source!=='codex_app.list_threads'||proof.request?.mode!=='history'||proof.request.archived!==true||
+      !fresh(proof.checked_at,this.c.now())||!proof.evidence_ref||
+      !read?.threads?.some(t=>t.id===x.t.owner_id&&t.kind==='codex'&&t.hostId==='local'))throw new Error('Actual fresh archived-list membership is required');
+    const closure={...x.w.data.review_closure,native_archive:proof};
+    this.c.db.prepare('UPDATE work_items SET data=?,revision=revision+1,updated_at=? WHERE id=?').run(json({...x.w.data,review_closure:closure}),this.c.now(),x.t.task_id);
+    return {archived_verified:true,task_id:x.t.task_id,thread_id:x.t.owner_id};
   });}
 }
 

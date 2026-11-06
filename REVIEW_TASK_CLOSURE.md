@@ -47,6 +47,11 @@ Review Queue has this narrow authorization to archive these terminal review
 owners only. Verify native archived membership and retain the receipt. If a
 receipt is uncertain, read the target before retrying. Do not archive the service.
 An unsent saved closure stays in closure_targets so the next cycle can finish it.
+After native readback, use `op=confirm_archive` with task_id, executor_thread_id,
+and native_proof (`source:codex_app.list_threads`, request with
+`mode:history,archived:true`, checked_at, actual readback and evidence_ref).
+This also reconciles an already user-archived chat without sending another archive
+operation; actual archived-list membership is required.
 
 Already-delivered conclusions do not need another notification. If a new review
 conclusion exists, deliver it under REVIEW_RESULT_DELIVERY.md before closure.
