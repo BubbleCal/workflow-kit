@@ -73,6 +73,27 @@ existing reviews, without another request to main for routine provisioning.
 
 ## Every review owner's contract
 
+The native creation prompt must explicitly invoke
+`[$review-delegate](/Users/yang/.codex/skills/review-delegate/SKILL.md)` for the
+selected PR. This skill is the authoritative review workflow; merely listing its
+path in setup checks does not satisfy it. The reviewer announces its use once,
+reads it, and applies its substantive review and reporting requirements.
+
+The final assistant message in the PR's own chat must contain the review itself:
+substantive PR orientation; API/format analysis with realistic examples when
+applicable; performance impact; an optional useful visual; verdict; findings;
+validation and residual risks. Keep that order. A short verdict or findings
+summary linking to a complete report file is not the required delivery. Generic
+brevity preferences do not remove these applicable sections. Saved artifacts
+supplement the chat report. Do not add empty API sections or unnecessary visuals.
+
+Before accepting review completion, Review Queue reads the actual final assistant
+message as well as the reviewed head/base. If only presentation is missing, ask
+the same original reviewer to present its existing evidence in the required
+format; do not repeat the whole code review or tests, create another owner, or
+consume another daily selection. Correct substantive gaps only when identified.
+Do not substitute another built-in review workflow or require a subagent.
+
 Review only. No product changes, conflict fixes, commits/pushes, merge, release,
 deployment, external comments/replies/edits/resolution, persisted review drafts,
 GitHub or Linear approve/request-changes/review submission, reviewer requests,
