@@ -131,11 +131,13 @@ export class ResultFollowthrough {
         if(execution.status!=='complete')this.route(reactive,row,task);
         state=execution.status==='complete'?'complete':'routed';
       }else if(!task.owner_thread_id){
+        if(this.work.creation.enabled())continue;
         const request=this.work.requestOwner({task_id:task.id,source_message_id:rule.source_message_id,verbatim_text:rule.verbatim_text,actual_human_verified:true,explicit_new_thread_request_verified:true});
         const action=this.db.prepare('SELECT state FROM actions WHERE action_key=?').get(request.action_key);
         state=['uncertain','claimed'].includes(action?.state)?'creation_uncertain':action?.state==='failed'?'creation_failed':'owner_requested';
         reason=state.startsWith('creation_')?'Reconcile the exact creation action; never create a replacement task or blindly retry':row.reason;
       }else if(!execution&&queue_compatibility_verified){
+        if(this.work.creation.enabled())continue;
         const blockers=this.work.blockers(task.id);
         if(blockers.length){state='waiting_dependency';reason=blockers.join(', ');}
         else{

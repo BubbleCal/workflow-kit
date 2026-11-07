@@ -3,6 +3,7 @@ import {calendarPreparation} from './calendar-preparation.mjs';
 import {createHash} from 'node:crypto';
 import {verifyNativeBinding,nativeReadback} from './native-queue.mjs';
 import {ResultFollowthrough} from './result-followthrough.mjs';
+import {OwnerProvisioning} from './owner-provisioning.mjs';
 
 const json=value=>JSON.stringify(value);
 const parse=value=>value?JSON.parse(value):null;
@@ -41,6 +42,7 @@ export class WorkCatalog {
       CREATE TABLE IF NOT EXISTS work_notices (key TEXT PRIMARY KEY,task_id TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL);
     `);
     this.followthrough=new ResultFollowthrough(this);
+    this.creation=new OwnerProvisioning(this);
   }
   atomic(fn){this.db.exec('BEGIN IMMEDIATE');try{const r=fn();this.db.exec('COMMIT');return r;}catch(e){this.db.exec('ROLLBACK');throw e;}}
   get(id){const r=this.db.prepare('SELECT * FROM work_items WHERE id=? OR canonical_key=?').get(id,id);return r?{...r,data:parse(r.data),authorization:parse(r.authorization),binding:parse(r.binding)}:null;}
@@ -111,7 +113,7 @@ export class WorkCatalog {
   }
   taskForSource(key){const r=this.db.prepare('SELECT task_id FROM work_sources WHERE source_key=?').get(key);return r?this.get(r.task_id):null;}
   setPolicy({key,enabled,allowed_kinds,assignee_id,calendar_id,self_email,lead_minutes=45,service_task_id,timezone,profiles,exclusions,source_message_id,verbatim_text,evidence_ref,actual_human_verified}){
-    if(!['create_owner','accept_assigned_linear','accept_calendar_preparation','accept_result_followups'].includes(key))throw new Error('Unknown work policy');
+    if(!['create_owner','discovery_owns_creation','accept_assigned_linear','accept_calendar_preparation','accept_result_followups'].includes(key))throw new Error('Unknown work policy');
     if(actual_human_verified!==true)throw new Error('A standing work policy needs actual user authorization');
     for(const [n,v] of Object.entries({source_message_id,verbatim_text,evidence_ref}))required(v,n);
     if(enabled&&(!Array.isArray(allowed_kinds)||!allowed_kinds.length||allowed_kinds.some(k=>!['work','project','exploration'].includes(k))))throw new Error('Declare allowed ordinary task kinds');
@@ -217,18 +219,19 @@ export class WorkCatalog {
       this.db.prepare('UPDATE work_items SET data=?,updated_at=?,revision=revision+1 WHERE id=?').run(json(data),this.now(),t.id);return this.get(t.id);
     });
   }
-  accept({task_id,source_message_id,actual_human_verified,evidence_ref}){
+  accept({task_id,source_message_id,actual_human_verified,evidence_ref,start_requested=false}){
     required(source_message_id,'actual task acceptance');required(evidence_ref,'acceptance evidence');
     if(actual_human_verified!==true)throw new Error('Discovery or a research finding is not user authorization');
     return this.atomic(()=>{
       const t=this.get(task_id);if(!t)throw new Error('Unknown task');
-      if(t.state==='accepted')return t;
+      if(t.state==='accepted'){if(start_requested)this.creation.requestStartInside(t,{source_message_id,actual_human_verified,evidence_ref});return t;}
       if(!['draft','candidate'].includes(t.state))throw new Error('Task is not available for acceptance');
       if(t.data.parent_id&&this.execution(t.data.parent_id)?.status==='complete')throw new Error('Reopen the parent goal before accepting additional required work');
       if(!t.data.requirements.length||!t.data.workspace)throw new Error('Define the task scope and acceptance before accepting');
       required(this.config.scope?.project_id,'verified instance project');
       this.db.prepare("UPDATE work_items SET state='accepted',authorization=?,updated_at=?,revision=revision+1 WHERE id=?")
-        .run(json({source_message_id,evidence_ref,actual_human_verified:true}),this.now(),t.id);return this.get(t.id);
+        .run(json({source_message_id,evidence_ref,actual_human_verified:true}),this.now(),t.id);
+      const accepted=this.get(t.id);if(start_requested)this.creation.requestStartInside(accepted,{source_message_id,actual_human_verified,evidence_ref});return accepted;
     });
   }
   dismiss({task_id,reason,source_message_id,actual_human_verified}){
@@ -268,10 +271,12 @@ export class WorkCatalog {
       return this.get(task_id);
     });
   }
-  requestOwner({task_id,source_message_id,verbatim_text,actual_human_verified,explicit_new_thread_request_verified,difficulty_assessment,expected_revision}){
+  requestOwner({task_id,source_message_id,verbatim_text,actual_human_verified,explicit_new_thread_request_verified,difficulty_assessment,expected_revision,creation_actor}){
+    this.creation.actor(task_id,creation_actor);
     if(difficulty_assessment)this.assessDifficulty({task_id,expected_revision:expected_revision??this.get(task_id)?.revision,difficulty_assessment});
 
-    const task=this.get(task_id),calendar=this.calendarRule(),rule=task?.data.meeting_preparation?.policy_key==='accept_calendar_preparation' && task.data.meeting_preparation.calendar_id===calendar?.calendar_id?calendar:parse(this.db.prepare("SELECT data FROM work_rules WHERE key='create_owner'").get()?.data);
+    const task=this.get(task_id),calendar=this.calendarRule(),general=parse(this.db.prepare("SELECT data FROM work_rules WHERE key='create_owner'").get()?.data);
+    const rule=task?.data.meeting_preparation?.policy_key==='accept_calendar_preparation'&&task.data.meeting_preparation.calendar_id===calendar?.calendar_id?calendar:general?.enabled?general:this.creation.policy();
     if(rule?.enabled&&task&&rule.allowed_kinds.includes(task.kind)&&!source_message_id){
       source_message_id=rule.source_message_id;verbatim_text=rule.verbatim_text;actual_human_verified=true;explicit_new_thread_request_verified=true;
     }
@@ -290,10 +295,11 @@ export class WorkCatalog {
       this.db.prepare("INSERT INTO work_owner_requests VALUES (?,?,?,'requested')").run(t.id,key,json(request));return {action_key:key,state:'requested',request,...(t.data.meeting_preparation?{next_operation:'task prepare_owner with fresh projects/project_catalog_ref/checked_at; do not hand-build legacy evidence fields'}:{})};
     });
   }
-  bindOwner({task_id,owner_thread_id,native_binding,evidence_ref,existing_owner_authorized,actual_human_verified,source_message_id,creation_action_key}){
+  bindOwner({task_id,owner_thread_id,native_binding,evidence_ref,existing_owner_authorized,actual_human_verified,source_message_id,creation_action_key,creation_actor}){
     required(owner_thread_id,'execution owner');required(evidence_ref,'native owner evidence');
     return this.atomic(()=>{
       const t=this.get(task_id);if(!t||t.state!=='accepted')throw new Error('Accept the task before binding its owner');
+      const actor=!t.owner_thread_id||t.binding?.creation_action_key&&!this.creation.executed(t)?this.creation.actor(task_id,creation_actor):null;
       const protectedOwners=this.config.layout==='native'?[this.config.threads?.main,this.config.threads?.discovery]:Object.values(this.config.threads??{});
       if(protectedOwners.includes(owner_thread_id))throw new Error('Control/discovery conversations cannot own ordinary execution or exploration tasks');
       if(t.owner_thread_id&&t.owner_thread_id!==owner_thread_id)throw new Error('Do not replace a live canonical owner');
@@ -306,7 +312,7 @@ export class WorkCatalog {
       }else if(existing_owner_authorized!==true||actual_human_verified!==true||!source_message_id)
         throw new Error('Binding an existing owner needs actual user authority');
       this.db.prepare('UPDATE work_items SET owner_thread_id=?,binding=?,updated_at=? WHERE id=?')
-        .run(owner_thread_id,json({evidence_ref,native_binding,source_message_id,creation_action_key}),this.now(),t.id);
+        .run(owner_thread_id,json({evidence_ref,native_binding,source_message_id,creation_action_key,...(actor?{creation_actor:actor}:{})}),this.now(),t.id);
       this.db.prepare("UPDATE work_owner_requests SET state='bound' WHERE task_id=?").run(t.id);return this.get(t.id);
     });
   }
@@ -326,9 +332,10 @@ export class WorkCatalog {
       ...(t.data.schedule_sources?{schedule_sources:t.data.schedule_sources,trigger_only:t.data.trigger_only===true}:{}),
       ...(t.kind==='exploration'?{exploration:t.data.exploration}:{})};
   }
-  start(reactive,{task_id,queue_compatibility_verified}){
+  start(reactive,{task_id,queue_compatibility_verified,creation_actor}){
     if(queue_compatibility_verified!==true)throw new Error('Native desktop queue verification is required');
     const t=this.get(task_id);if(t?.state==='completed')return {started:false,reason:'already_complete',task:t};
+    if(t&&(!this.execution(t.id)||t.binding?.creation_action_key&&!this.creation.executed(t)))this.creation.actor(task_id,creation_actor);
     const reasons=this.blockers(task_id);if(reasons.length)throw new Error(reasons.join(', '));
     if(this.execution(t.id)?.mode==='active')return reactive.checkpoint(t.id);
     const contract=this.contract(t.id),a=t.authorization;

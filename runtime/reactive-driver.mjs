@@ -362,7 +362,7 @@ export class ReactiveDriver {
       this.control.discovery.reconcileMailbox(m);
       this.control.work.followthrough.advance(this.state,{queue_compatibility_verified:true});
       const resultWork=this.control.work.followthrough.pending();
-      if(!this.control.discovery.sources().some(s=>s.enabled)&&!resultWork.reviews.length&&!resultWork.owners.length)return;
+      if(!this.control.discovery.sources().some(s=>s.enabled)&&!resultWork.reviews.length&&!resultWork.owners.length&&!this.control.work.creation.pending().length)return;
       const due=this.control.discovery.enqueueDue(m,this.root);
       if(due.reason==='discovery_role_not_bound'){this.state.diagnostic('discovery',{reason:due.reason});return;}
       if(!this.control.discovery.config.threads?.discovery)return;

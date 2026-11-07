@@ -173,3 +173,5 @@ version. Resume actual discussion cursors within that stream. An unavailable
 comments response (including only `suggested_edits_status=upgrade_required`)
 does not prove zero comments or complete followups: retain the coverage gap and
 checkpoint the provider limitation after recording/classifying available rows.
+
+Under the enabled discovery_owns_creation policy, process fixed owner_creation entries before external reads using OWNER_CREATION.md. All accepted authorized ownerless tasks enter this flow, including direct human tasks, even when sources are disabled. Main only registers them. Checkpoint actual setup/execution blockers with owner_creation_reason; never finish from a candidate or queue acknowledgment.

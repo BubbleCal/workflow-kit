@@ -451,6 +451,8 @@ export class ControlStore {
   reviewReportPolicy() { return readReviewReportPolicy(); }
   prepare(input) {
     const key = required(input.key, 'action key');
+    const creationActorReasons=this.work.creation.reasons(input.kind,input.task_id,input.payload,input.evidence);
+    if(creationActorReasons.length)return {prepared:false,allowed:false,reasons:creationActorReasons};
     const reportReasons=reviewReportTaskReasons(this,input.kind,input.task_id,input.payload,input.evidence,null,key);
     if(reportReasons.length)return {prepared:false,allowed:false,reasons:reportReasons};
     const decisionReasons=reviewDecisionTaskReasons(this,input.kind,input.task_id,input.payload,input.evidence,null,key);
@@ -600,6 +602,8 @@ export class ControlStore {
       const blocked = this.db.prepare("SELECT action_key FROM actions WHERE scope_key=? AND state IN ('claimed','uncertain') AND action_key<>? LIMIT 1").get(row.scope_key, key);
       if (blocked) return { claimed: false, reason: 'scope_in_use', blocking_key: blocked.action_key };
       const payload = JSON.parse(row.payload);
+      const creationActorReasons=this.work.creation.reasons(row.kind,row.task_id,payload,evidence,owner);
+      if(creationActorReasons.length)return {claimed:false,reasons:creationActorReasons};
       const reportReasons=reviewReportTaskReasons(this,row.kind,row.task_id,payload,evidence,owner,key);
       if(reportReasons.length)return {claimed:false,reasons:reportReasons};
       const decisionReasons=reviewDecisionTaskReasons(this,row.kind,row.task_id,payload,evidence,owner,key);

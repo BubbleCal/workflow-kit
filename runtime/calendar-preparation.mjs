@@ -59,27 +59,29 @@ export function scheduleCalendarPreparation(control,taskId) {
 
 // Derive task ownership facts from the catalog instead of asking the discovery
 // model to guess legacy guard field names. Native project evidence stays explicit.
-export async function prepareTaskOwner(control,{task_id,projects,project_catalog_ref,checked_at}) {
+export async function prepareTaskOwner(control,{task_id,projects,project_catalog_ref,checked_at,creation_actor}) {
+  control.work.creation.actor(task_id,creation_actor);
   const task=control.work.get(task_id),rule=control.work.calendarRule(),p=task?.data.meeting_preparation;
   const resultRule=control.work.followthrough.policy(),result=task?.authorization?.policy==='accept_result_followups'&&resultRule?.enabled&&
     control.db.prepare('SELECT 1 FROM work_result_followups WHERE task_id=?').get(task_id);
   const meeting=p&&rule?.enabled&&p.calendar_id===rule.calendar_id&&task.authorization?.policy==='accept_calendar_preparation';
-  if(task?.state!=='accepted'||task.owner_thread_id||!meeting&&!result||control.reactive.task(task_id))
+  if(task?.state!=='accepted'||task.owner_thread_id||!meeting&&!result&&!control.work.creation.enabled()||control.reactive.task(task_id))
     throw new Error('An accepted unstarted meeting occurrence or result followup with scoped creation authority is required');
   const at=Date.parse(checked_at);if(!Number.isFinite(at)||at>control.now()+5000||control.now()-at>60000||!project_catalog_ref)
     throw new Error('Fresh native project catalog and its evidence reference are required');
   const {resolvePlacement}=await import('./control.mjs');
   const resolved=resolvePlacement({projects,project_id:control.work.config.scope.project_id,host_id:'local',source_ref:project_catalog_ref});
-  const request=control.work.requestOwner({task_id,...(result?{source_message_id:resultRule.source_message_id,verbatim_text:resultRule.verbatim_text,actual_human_verified:true,explicit_new_thread_request_verified:true}:{})}),r=request.request;
+  const request=control.work.requestOwner({task_id,creation_actor,...(result?{source_message_id:resultRule.source_message_id,verbatim_text:resultRule.verbatim_text,actual_human_verified:true,explicit_new_thread_request_verified:true}:{})}),r=request.request;
   const previous=control.db.prepare('SELECT state FROM actions WHERE action_key=?').get(r.control_action_key);
   if(previous&&['sent','claimed','uncertain','cancelled'].includes(previous.state))return {key:r.control_action_key,state:previous.state,next:'Reconcile this exact creation receipt; never create another owner.'};
   const busy=control.db.prepare("SELECT 1 FROM actions WHERE task_id=? AND action_key<>? AND state IN ('prepared','deferred','claimed','uncertain')").get(task_id,r.control_action_key);
   if(busy)throw new Error('Another task action must be reconciled before owner creation');
   const policy=control.taskRegistry()?.policy_version??'native-owner';
   const payload={canonical_task_key:task.canonical_key,source_message_id:r.source_message_id,verbatim_text:r.verbatim_text,
+    ...(task.data.source?.kind==='user'&&task.data.source.model_override?{model_override:task.data.source.model_override}:{}),
     permission_probe_only:true,starts_heavy_work:false,run_id:r.control_action_key,placement:resolved.placement,
     prompt:r.initial_prompt,native:{target:resolved.native_target,prompt:r.initial_prompt,title:`${task.id} · ${task.data.title}`}};
-  const evidence={verified_at:new Date(control.now()).toISOString(),scope_authorized:true,authorization_ref:task.authorization.evidence_ref,
+  const evidence={...(creation_actor?{creation_actor}:{}),verified_at:new Date(control.now()).toISOString(),scope_authorized:true,authorization_ref:task.authorization.evidence_ref,
     policy_version:policy,current_policy_version:policy,stopped:false,actual_human_message_verified:true,source_actor_verified:true,
     explicit_new_thread_request_verified:true,source_message_id:r.source_message_id,source_text:r.verbatim_text,canonical_task_key:task.canonical_key,
     ownership_handoff_verified:true,overlapping_owner:false,duplicate_task_exists:false,underlying_job_for_scope_running:false,

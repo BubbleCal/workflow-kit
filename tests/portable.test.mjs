@@ -136,6 +136,22 @@ function nativeSetup(root,{discovery=false}={}){
 function op(dir,group,input){const r=run(dir,'workflow.mjs',[group,'op'],input);assert.equal(r.status,0,r.stderr);return r.json;}
 function once(dir){const r=spawnSync(process.execPath,[join(dir,'workflow.mjs'),'runtime','run','--once'],{cwd:dir,encoding:'utf8'});assert.equal(r.status,0,r.stderr);}
 
+test('native CLI delegates accepted ownerless work to discovery with sources disabled and refuses main setup',()=>{
+ const root=setup();try{
+  const {dir,workspace}=nativeSetup(root,{discovery:true});
+  op(dir,'task',{op:'policy',key:'discovery_owns_creation',enabled:true,allowed_kinds:['work'],actual_human_verified:true,source_message_id:'human:roles',verbatim_text:'Main registers; discovery creates task owners',evidence_ref:'actual-roles'});
+  const task=op(dir,'task',{op:'create',canonical_key:'human-work',title:'New accepted work',objective:'Deliver human scope',workspace,requirements:[{id:'done',text:'Verified result'}]}).task;
+  op(dir,'task',{op:'accept',task_id:task.id,actual_human_verified:true,source_message_id:'human:start',evidence_ref:'actual-human-start',start_requested:true});
+  const main={thread_id:MAIN,native_proof:nativeProof({thread:MAIN,workspace,now:Date.now()})};
+  const denied=run(dir,'workflow.mjs',['task','op'],{op:'prepare_owner',task_id:task.id,creation_actor:main});assert.notEqual(denied.status,0);assert.match(JSON.stringify(denied.json),/discovery_actor_required/);
+  assert.equal(op(dir,'task',{op:'creation_pending'}).owners.length,1);
+  once(dir);once(dir);
+  const db=new DatabaseSync(join(dir,'control.sqlite'));
+  try{const batches=db.prepare("SELECT * FROM discovery_batches WHERE state='pending'").all();assert.equal(batches.length,1);assert(JSON.parse(batches[0].snapshot).creation_work.task_ids.includes(task.id));assert.equal(db.prepare('SELECT owner_thread_id FROM work_items WHERE id=?').get(task.id).owner_thread_id,null);assert.equal(db.prepare("SELECT COUNT(*) n FROM actions WHERE kind='create_thread'").get().n,0);}finally{db.close();}
+  const calls=readFileSync(join(dir,'native-queue-calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse).filter(args=>args[0]==='queue'&&args[1]==='--thread');assert.equal(calls.length,1);assert.equal(calls[0][2],DISCOVERY);
+ }finally{rmSync(root,{recursive:true,force:true});}
+});
+
 test('fresh native install runs built-in exploration through the ordinary queue without old roles or external sources',()=>{
  const root=setup();try{const {dir,workspace,task}=nativeSetup(root);
   assert.equal(existsSync(join(dir,'registry.json')),false);assert.equal(existsSync(join(dir,'decisions.json')),false);

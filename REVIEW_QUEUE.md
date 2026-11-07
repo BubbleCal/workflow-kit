@@ -144,3 +144,5 @@ and later actual reports. Keep routine progress in its own conversation. Only
 important completion or a genuine human decision goes to main. Finish a daily
 discovery occurrence with cycle_complete, never complete/archive the recurring
 service. Main archives fully completed child review chats under existing guards.
+
+Under discovery_owns_creation, this separately authorized service retains only selected read-only PR creation. Supply creation_actor with this service thread and fresh native proof of its actual running wake for request/prepare/claim/bind/start. OWNER_CREATION.md documents the actor guard. Main cannot invoke this exception.

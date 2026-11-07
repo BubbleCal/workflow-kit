@@ -222,6 +222,7 @@ export class DiscoveryStore {
     }
   }
   batch(id){const b=this.db.prepare('SELECT * FROM discovery_batches WHERE id=?').get(id),snapshot=b&&JSON.parse(b.snapshot),pending=this.work?.followthrough.pending();return b?{...b,snapshot,owner_health:this.healthBatch(b),calendar_followups:this.calendarFollowups(),
+    owner_creation:this.work.creation.pending().filter(t=>snapshot.creation_work?.task_ids.includes(t.task_id)),
     result_followthrough:{reviews:(pending?.reviews??[]).filter(r=>snapshot.result_work?.review_keys.includes(r.review_key)),owners:(pending?.owners??[]).filter(r=>snapshot.result_work?.followup_keys.includes(r.followup_key))},
     pages:this.db.prepare('SELECT page_key,source_id,request_index,data FROM discovery_pages WHERE batch_id=? ORDER BY rowid').all(id).map(p=>({...p,data:JSON.parse(p.data)}))}:null;}
   checkBatch(id){
@@ -249,9 +250,10 @@ export class DiscoveryStore {
       if(!active){this.db.prepare('UPDATE discovery_sources SET enabled=0,health=? WHERE source_id=?').run(JSON.stringify({reason:'watched_tasks_complete'}),source.source_id);this.invalidateSourceBatches([source.source_id]);}
     }
     const sources=this.sources().filter(s=>s.enabled&&s.next_at<=this.now());
+    const creation=this.work.creation.pending(),triggers=this.work.creation.triggers();
     const resultWork=this.work?.followthrough.pending()??{reviews:[],owners:[]};
     const reviewKeys=resultWork.reviews.map(r=>r.review_key),followupKeys=resultWork.owners.map(r=>r.followup_key);
-    if(!sources.length&&!reviewKeys.length&&!followupKeys.length)return {queued:false,reason:'no_enabled_source_due'};
+    if(!sources.length&&!reviewKeys.length&&!followupKeys.length&&!creation.length)return {queued:false,reason:'no_enabled_source_due'};
     if(!this.config.threads?.discovery)return {queued:false,reason:'discovery_role_not_bound'};
     let b=this.db.prepare("SELECT id FROM discovery_batches WHERE state IN ('pending','running') ORDER BY created_at LIMIT 1").get();
     if(b)b=this.batch(b.id);
@@ -260,7 +262,7 @@ export class DiscoveryStore {
       if(!Number.isSafeInteger(interval)||interval<0||interval>0&&interval<60000)throw new Error('Discovery start interval must be zero or at least one minute');
       // Health selection preserves the actual start of pre-migration generations.
       const last=this.db.prepare('SELECT MAX(at) AS at FROM (SELECT MAX(started_at) AS at FROM discovery_batches UNION ALL SELECT MAX(selected_at) AS at FROM discovery_health_batches)').get().at;
-      if(interval&&last!==null&&this.now()<last+interval)
+      if(!triggers.length&&interval&&last!==null&&this.now()<last+interval)
         return {queued:false,reason:'discovery_start_interval',eligible_at:last+interval};
     }
     const checkpoints=this.db.prepare("SELECT id FROM discovery_batches WHERE state='checkpointed' ORDER BY next_at,created_at").all().map(r=>this.batch(r.id));
@@ -269,15 +271,17 @@ export class DiscoveryStore {
     const fresh=sources.filter(s=>!owned.has(s.source_id));
     const ownedReviews=new Set(checkpoints.flatMap(c=>c.snapshot.result_work?.review_keys??[])),ownedFollowups=new Set(checkpoints.flatMap(c=>c.snapshot.result_work?.followup_keys??[]));
     const freshResults={review_keys:reviewKeys.filter(k=>!ownedReviews.has(k)),followup_keys:followupKeys.filter(k=>!ownedFollowups.has(k))};
-    const newResults=freshResults.review_keys.length+freshResults.followup_keys.length;
+    const ownedCreation=new Set(checkpoints.flatMap(c=>c.snapshot.creation_work?.task_ids??[]));
+    const freshCreation=creation.filter(t=>!ownedCreation.has(t.task_id)||triggers.some(r=>r.task_id===t.task_id));
+    const newResults=freshResults.review_keys.length+freshResults.followup_keys.length+freshCreation.length;
     const forced=checkpoints.find(c=>this.recovery.requested(c));
     const resume=forced??checkpoints.find(c=>c.next_at<=this.now()&&(c.snapshot.sources.some(s=>unfinished(s)&&!this.recovery.isolated(c.id,s)&&sources.some(d=>d.source_id===s.source_id))||
-      c.snapshot.result_work?.review_keys.some(k=>reviewKeys.includes(k))||c.snapshot.result_work?.followup_keys.some(k=>followupKeys.includes(k))));
-    if(!b&&resume&&(forced||!newResults&&(!fresh.length||resume.next_at<Math.min(...fresh.map(s=>s.next_at)))))b=resume;
+      c.snapshot.result_work?.review_keys.some(k=>reviewKeys.includes(k))||c.snapshot.result_work?.followup_keys.some(k=>followupKeys.includes(k))||c.snapshot.creation_work?.task_ids.some(id=>creation.some(t=>t.task_id===id))));
+    if(!b&&resume&&(!triggers.length&&forced||!newResults&&(!fresh.length||resume.next_at<Math.min(...fresh.map(s=>s.next_at)))))b=resume;
     if(!b&&!fresh.length&&!newResults)return {queued:false,reason:'discovery_checkpoint_backoff'};
     if(!b)b=this.atomic(()=>{
       const id=randomUUID(),to=new Date(this.now()).toISOString();
-      const snapshot={...(newResults?{result_work:freshResults}:{}),sources:fresh.map(s=>{const window={from:new Date(Math.max(0,(this.recovery.frontier(s)??this.now()-86400000)-120000)).toISOString(),to};
+      const snapshot={...(freshCreation.length?{creation_work:{task_ids:freshCreation.map(t=>t.task_id),trigger_keys:triggers.filter(r=>freshCreation.some(t=>t.task_id===r.task_id)).map(r=>r.trigger_key)}}:{}),...(newResults?{result_work:freshResults}:{}),sources:fresh.map(s=>{const window={from:new Date(Math.max(0,(this.recovery.frontier(s)??this.now()-86400000)-120000)).toISOString(),to};
         return {...s,window,plan:sourceReadPlan(s,window)};})};
       this.db.prepare("INSERT INTO discovery_batches(id,state,snapshot,mail_key,created_at) VALUES (?,'pending',?,?,?)").run(id,JSON.stringify(snapshot),`discovery:${id}:1`,this.now());return this.batch(id);
     });
@@ -288,7 +292,7 @@ export class DiscoveryStore {
       this.db.prepare("UPDATE discovery_batches SET state='pending',generation=generation+1,prompt=NULL,mail_key=? WHERE id=?").run(`discovery:${b.id}:${b.generation+1}`,b.id);
       b=this.batch(b.id);
     }
-    const prompt=`[workflow-discovery:${b.id}:${b.generation}]\nRead ${root}/DISCOVERY.md and run one fixed intake batch. Obtain exact current native read_thread proof, then discovery begin with batch_id=${b.id} and generation=${b.generation}. Stop if invalidated. Begin returns the compact plan: handle its owner_health targets first under OWNER_RECOVERY.md, even if source history is blocked; then use saved stream cursors and discovery pending/page only when needed; do not dump prior batches, full histories or handled observations. Process fixed result_followthrough reviews and owner creation under RESULT_FOLLOWTHROUGH.md: prepare_owner, actual native creation/project guards, bind/start and verify owner execution; a candidate or queue receipt is insufficient. Process authorized calendar_followups under MEETING_PREPARATION_INTAKE.md without notifying main. For Slack, with:user and explicit-mention searches are separate required streams. After a completed search use ingest followup={parent_page_key,channel_id,thread_ts} for full-thread observations. On a delayed main Slack window use append_catchup once and collect its returned request indices in this same run. Collect only due configured source changes, preserve raw evidence, classify and finish complete coverage or checkpoint the real blocker. No engineering, external replies or new authority. End with one brief source/change-count or blocker line here; no routine main notification.`;
+    const prompt=`[workflow-discovery:${b.id}:${b.generation}]\nRead ${root}/DISCOVERY.md and run one fixed intake batch. Obtain exact current native read_thread proof, then discovery begin with batch_id=${b.id} and generation=${b.generation}. Stop if invalidated. Begin returns the compact plan: handle its owner_health targets first under OWNER_RECOVERY.md, even if source history is blocked; then use saved stream cursors and discovery pending/page only when needed; do not dump prior batches, full histories or handled observations. Process owner_creation first under OWNER_CREATION.md: only discovery creates/binds/starts newly accepted owners; preserve original human authority, pass fresh creation_actor proof and verify actual owner begin. Process fixed result_followthrough reviews and owner creation under RESULT_FOLLOWTHROUGH.md: prepare_owner, actual native creation/project guards, bind/start and verify owner execution; a candidate or queue receipt is insufficient. Process authorized calendar_followups under MEETING_PREPARATION_INTAKE.md without notifying main. For Slack, with:user and explicit-mention searches are separate required streams. After a completed search use ingest followup={parent_page_key,channel_id,thread_ts} for full-thread observations. On a delayed main Slack window use append_catchup once and collect its returned request indices in this same run. Collect only due configured source changes, preserve raw evidence, classify and finish complete coverage or checkpoint the real blocker. No engineering, external replies or new authority. End with one brief source/change-count or blocker line here; no routine main notification.`;
     this.db.prepare('UPDATE discovery_batches SET prompt=COALESCE(prompt,?) WHERE id=?').run(prompt,b.id);
     const queued=mailbox.enqueue({key:b.mail_key,lane:'discovery',kind:'source_scan',payload:{batch_id:b.id,text:prompt}});
     return {...queued,batch_id:b.id};
@@ -296,9 +300,9 @@ export class DiscoveryStore {
   begin({batch_id,generation,native_proof}){
     return this.atomic(()=>{
       const b=this.batch(batch_id);if(!b||b.generation!==generation)throw new Error('Stale discovery generation');
-      verifyExecutionProof(native_proof,{thread_id:this.config.threads.discovery,workspace:this.config.thread_workspaces?.discovery??this.config.scope.project_root,prompt:b.prompt,now:this.now()});
+      const proof=verifyExecutionProof(native_proof,{thread_id:this.config.threads.discovery,workspace:this.config.thread_workspaces?.discovery??this.config.scope.project_root,prompt:b.prompt,now:this.now()});
       if(b.state==='invalidated')return {...b,invalidated:true};
-      this.checkBatch(batch_id);this.selectHealth(b);
+      this.checkBatch(batch_id);this.selectHealth(b);this.work.creation.recordRun(b,proof);
       this.db.prepare("UPDATE discovery_batches SET state='running',started_at=? WHERE id=?").run(b.state==='pending'?this.now():b.started_at,batch_id);
       return compactDiscoveryBatch(this.checkBatch(batch_id),this.sources());
     });
@@ -421,7 +425,7 @@ export class DiscoveryStore {
       return {classified:true,task_id:task?.id??null,execution_authorized:task?.state==='accepted',owner_required:task?.state==='accepted'&&!task.owner_thread_id,...(thread_watch?{thread_watch}:{})};
     });
   }
-  finish({batch_id,generation,source_results,result_followups_reason}){
+  finish({batch_id,generation,source_results,result_followups_reason,owner_creation_reason}){
     return this.atomic(()=>{
       const saved=this.batch(batch_id);if(!saved||saved.generation!==generation)throw new Error('Stale discovery generation');
       if(['finished','checkpointed'].includes(saved.state))return {finished:saved.state==='finished',checkpointed:saved.state==='checkpointed',duplicate:true};
@@ -429,7 +433,13 @@ export class DiscoveryStore {
       const b=this.checkBatch(batch_id);if(b.state!=='running')throw new Error('Discovery scan has not begun');
       this.assertHealthObserved(b);
       let allComplete=true,nextAt=Infinity;
-      const followups=this.batch(batch_id).result_followthrough;
+      const currentBatch=this.batch(batch_id),followups=currentBatch.result_followthrough;
+      if(currentBatch.owner_creation.length){
+        required(owner_creation_reason,'Verify actual owner execution or checkpoint the owner creation blocker');
+        b.snapshot.creation_checkpoint={reason:owner_creation_reason,checked_at:this.now()};
+        this.db.prepare('UPDATE discovery_batches SET snapshot=? WHERE id=?').run(JSON.stringify(b.snapshot),batch_id);
+        allComplete=false;nextAt=this.now()+Math.max(60000,this.config.discovery?.min_start_interval_ms??900000);
+      }
       if(followups.reviews.length||followups.owners.length){
         required(result_followups_reason,'Verify actual followup execution or checkpoint the exact blocker');
         this.db.prepare('UPDATE discovery_batches SET snapshot=? WHERE id=?').run(JSON.stringify({...b.snapshot,result_checkpoint:{reason:result_followups_reason,checked_at:this.now()}}),batch_id);

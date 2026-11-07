@@ -1,3 +1,5 @@
+> New-owner setup belongs to discovery under OWNER_CREATION.md when its policy is enabled. Main registers/accepts tasks and may record a human start trigger; original owners retain their own product delivery.
+
 > Personal PR review: breaking changes, format changes, and owner-assessed broad-impact or high-risk PRs require a proactive decision card to Yang and explicit personally-reviewed clearance before external review delivery. Read PERSONAL_PR_REVIEW.md and PR_REVIEW_CHANNELS.json.personal_review. This narrowly permits owner-to-main decision notifications; preserve Functions/task holds, technical gates and existing receipts.
 
 > Independent review owners proactively deliver substantive completed conclusions to main under REVIEW_RESULT_DELIVERY.md and review-report-policy.json. Save the complete report first and verify the actual notification receipt. Private review-result delivery grants no external review or implementation authority.

@@ -92,3 +92,5 @@ result, call `task review_result` with `task_id`, `source_message_id`,
 `actual_human_verified: true`, `evidence_ref`, then use the original terminal proof
 and report protocol above. Existing T208 followups T213/T214 are reconciliation
 cases: preserve their bindings and actual started wakes; do not recreate/resend.
+
+When discovery_owns_creation is enabled, daemon advancement leaves new-owner setup to discovery, using creation_actor proof at prepare/claim/bind/start under OWNER_CREATION.md. Existing canonical owners keep ordinary result routing; no main creation or parallel setup path.

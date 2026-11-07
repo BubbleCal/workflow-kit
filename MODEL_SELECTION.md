@@ -16,7 +16,7 @@ Other tasks retain the existing simple/other routes. Unknown repository or
 difficulty uses that existing fallback, not a guess from the sidebar project.
 For mixed-repository scope, use the highest-priority applicable route.
 
-The main/discovery agent assesses the whole task before requesting its owner.
+Main may record a whole-task assessment at registration. Under discovery-owned creation, discovery verifies that assessment before requesting its owner; model choices remain centralized.
 Do not judge by the short setup prompt, title, file count or the word "docs".
 A task is simple only when all three dimensions qualify:
 

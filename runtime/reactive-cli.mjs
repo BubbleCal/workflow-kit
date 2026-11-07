@@ -146,6 +146,8 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         else if(input.op==='accept')result=control.work.accept(input);
         else if(input.op==='policy')result=control.work.setPolicy(input);
         else if(input.op==='dismiss')result=control.work.dismiss(input);
+        else if(input.op==='creation_pending')result={owners:control.work.creation.pending(),triggers:control.work.creation.triggers()};
+        else if(input.op==='request_creation')result=control.work.creation.requestStart(input);
         else if(input.op==='prepare_owner')result=await prepareTaskOwner(control,input);
         else if(input.op==='reconcile_runtime_resume')result=reconcileCatalogResume(control,input);
         else if(input.op==='reconcile_history')result=control.work.reconcileHistory(input);
@@ -303,7 +305,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
       output(result);return;
     }
     if(command==='run'){
-      const needsQueue=()=>state.tasks().some(t=>t.mode==='active')||control.discovery.sources().some(s=>s.enabled);
+      const needsQueue=()=>{const results=control.work.followthrough.pending();return state.tasks().some(t=>t.mode==='active')||control.discovery.sources().some(s=>s.enabled)||control.work.creation.pending().length>0||results.reviews.length>0||results.owners.length>0;};
       const capability=needsQueue()?await queueCapability(config,queue):null;
       release=lockRuntime(control);const driver=new ReactiveDriver({root,control,queue,config,capability});
       let stopping=false;const stop=()=>{stopping=true;};process.once('SIGINT',stop);process.once('SIGTERM',stop);
