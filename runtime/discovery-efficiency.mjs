@@ -18,7 +18,7 @@ export function compactDiscoveryBatch(batch, sources = []) {
       coverage_complete: current.last_success_at !== null && current.last_success_at >= Date.parse(source.window.to)} : source;
   })};
   return {...rest, snapshot, streams: [...streams.values()], stored_page_count: pages.length,
-    detail_hint: 'Use discovery page with page_key or discovery pending for unclassified evidence. Raw pages are retained.'};
+    detail_hint: 'Use discovery page with page_key or discovery pending with batch_id for observations in the current batch. Raw pages are retained.'};
 }
 export function nextDiscoverySlot(at, interval, aligned) {
   return aligned ? (Math.floor(at / interval) + 1) * interval : at + interval;

@@ -20,7 +20,7 @@ kinds. User input, PR events and due task schedules do not use this scan cadence
 Read only the current turn for native proof (`turnLimit:1`, no included outputs),
 save the complete raw envelope to a file and print only needed metadata. Start
 from the returned streams and source health, then use `pending` with a source ID
-for unclassified observations. `page` accepts a batch ID and exact page key for
+for unclassified observations. `pending` with batch_id restricts classification to observations in this actual run; older isolated observations remain in their original repair backlog. `page` accepts a batch ID and exact page key for
 needed evidence; `plan` with `detail:full` remains available for an actual gap.
 Do not re-read completed pages, unchanged failed cursors, old transcripts or full
 logs merely to reconstruct state. Keep errors as errors, never empty success.
