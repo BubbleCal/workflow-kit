@@ -549,6 +549,40 @@ export class ControlStore {
     const pr=pullRequestIdentity(payload);
     return pr?this.feedback.gate(pr.repository,pr.pr_number,payload.expected_head_sha):{allowed:false,reasons:['valid_PR_feedback_identity_required']};
   }
+  refreshReviewDecisionContext({key,owner,expected_context,evidence={}}) {
+    return this.atomic(()=>{
+      const row=this.db.prepare('SELECT * FROM actions WHERE action_key=?').get(key);
+      if(!row||row.kind!=='review_decision'||row.imported||!['prepared','deferred'].includes(row.state)||
+        row.attempts!==0||row.attempt_id||row.owner||row.receipt)
+        return {refreshed:false,reasons:['only_unclaimed_unsent_review_decision_can_refresh']};
+      const task=this.reactive.task(row.task_id),wake=this.reactive.openWake(row.task_id);
+      if(!task||task.owner_id!==owner||evidence.executor_thread_id!==owner||task.mode!=='active'||task.status!=='ready'||task.dirty||
+        wake?.state!=='running'||wake.owner_id!==owner||this.reactive.waitPolicy.blocked(row.task_id))
+        return {refreshed:false,reasons:['acknowledged_original_owner_and_current_decision_required']};
+      const context={contract_rev:task.contract_rev,context_rev:task.context_rev,plan_rev:task.plan_rev};
+      const saved=JSON.parse(row.payload),payload={...saved,runtime_context:context};
+      if(canonical(context)!==canonical(expected_context)||saved.runtime_context?.contract_rev!==context.contract_rev)
+        return {refreshed:false,reasons:['current_context_and_unchanged_contract_required']};
+      const reasons=[...reviewDecisionTaskReasons(this,row.kind,row.task_id,payload,evidence,owner,key),
+        ...this.reactive.actionReasons(deliveryGuardKind(row.kind),row.task_id,payload),
+        ...scopeActionReasons(this.taskRegistry(),deliveryGuardKind(row.kind),row.task_id,payload,evidence),
+        ...ownershipReasons(row.kind,row.task_id,payload,evidence,this.taskRegistry(),this.db,key)];
+      if(this.db.prepare("SELECT value FROM settings WHERE key='processing'").get().value!=='on')reasons.push('processing_paused');
+      const gates=assess(row.kind,payload,evidence,this.now(),this.capacity,this.reviewRule(),null,this.dependencyPolicy(),this.reviewChannels());
+      reasons.push(...gates.reasons);
+      const feedback=this.feedbackGate(row.kind,payload);if(!feedback.allowed)reasons.push(...feedback.reasons);
+      if(reasons.length)return {refreshed:false,reasons:[...new Set(reasons)]};
+      const digest=hash({kind:row.kind,task:row.task_id,scope:row.scope_key,payload});
+      if(digest===row.digest)return {refreshed:false,already_current:true,key,state:row.state,runtime_context:context};
+      this.db.exec(`CREATE TABLE IF NOT EXISTS action_context_refreshes (
+        action_key TEXT,from_digest TEXT,to_digest TEXT,previous_payload TEXT,payload TEXT,
+        owner_id TEXT,evidence TEXT,recorded_at INTEGER,PRIMARY KEY(action_key,from_digest,to_digest));`);
+      this.db.prepare('INSERT INTO action_context_refreshes VALUES (?,?,?,?,?,?,?,?)')
+        .run(key,row.digest,digest,row.payload,canonical(payload),owner,canonical(evidence),this.now());
+      this.db.prepare('UPDATE actions SET digest=?,payload=?,updated_at=? WHERE action_key=?').run(digest,canonical(payload),this.now(),key);
+      return {refreshed:true,key,state:row.state,runtime_context:context,requires_claim:true,sent:false};
+    });
+  }
   claim({ key, owner, evidence }) {
     required(owner, 'owner');
     return this.atomic(() => {
@@ -896,7 +930,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
         if (row && (row.kind === 'notify' || row.kind === 'human_input' && JSON.parse(row.payload).thread_id === COORDINATOR))
           return { claimed: false, reason: 'control_plane_delivery_requires_mailbox', send_tool_forbidden: true };
         return control.claim(input);
-      }, authorize_review_send: () => control.authorizeReviewSend(input), settle: () => control.settle(input),
+      }, refresh_review_decision_context: () => control.refreshReviewDecisionContext(input), authorize_review_send: () => control.authorizeReviewSend(input), settle: () => control.settle(input),
       record_creation: () => control.recordCreation(input), confirm_creation: () => control.confirmCreation(input),
       resolve_project: () => resolvePlacement(input),
       reconcile: () => control.reconcile(input), cancel: () => control.cancel(input),

@@ -59,13 +59,14 @@ test('unchanged lifecycle reminders preserve an actual pending human decision',(
  }finally{f.close();}
 });
 
-function dependencyReminderFixture() {
+function dependencyReminderFixture({separateWait=false}={}) {
  const f=setup(),intent='lifecycle:repo#1:waiting',payload=n=>({event:'pr_lifecycle_action',task_id:'T-1',lifecycle_key:intent,lifecycle_generation:n,action:'obtain_readiness',head:'a'.repeat(40),detected_at:`generation-${n}`,snapshot_ref:`read-${n}`});
  f.c.db.prepare("INSERT INTO lifecycle_intents(intent_key,pr_key,action,revision,payload,state,due_at,created_at) VALUES (?,?,?,?,?,?,?,?)").run(intent,'repo#1','obtain_readiness','same',JSON.stringify(payload(1)),'pending',f.now(),f.now());
  const enqueue=n=>{f.c.db.prepare('UPDATE lifecycle_intents SET payload=? WHERE intent_key=?').run(JSON.stringify(payload(n)),intent);f.m.enqueue({key:`${intent}:${n}`,lane:'coordinator',kind:'event',payload:payload(n)});};
  enqueue(1);f.route();f.m.waits.observe({fact_key:'dependency',kind:'dependency',subject:'required-release',data:{available:false,requirement:'published release'},observed_at:new Date(f.now()).toISOString(),expires_at:new Date(f.now()+3600000).toISOString(),evidence_ref:'actual-release-source'});
  f.s.checkWait=c=>f.m.waits.check(c);const fact=f.s.checkpoint('T-1').facts[0];
- f.decide({disposition:'wait',plan:plan('wait for release'),wait:{facts:[{subject:fact.subject,version:fact.version}],expires_at:f.now()+3600000,resume_condition:'Required release becomes available',condition:{kind:'dependency',fact_key:'dependency',subject:'required-release',requirement:'published release'}}});
+ if(separateWait)f.decide({disposition:'continue',plan:plan('wait for release')});
+ f.decide({disposition:'wait',plan:separateWait?undefined:plan('wait for release'),wait:{facts:[{subject:fact.subject,version:fact.version}],expires_at:f.now()+3600000,resume_condition:'Required release becomes available',condition:{kind:'dependency',fact_key:'dependency',subject:'required-release',requirement:'published release'}}});
  f.mode('active');enqueue(2);return {...f,intent,payload,enqueue};
 }
 test('same reminder stays pending after dependency evidence expires without a state change',()=>{
@@ -101,5 +102,26 @@ test('a legacy evidence-expiry reconciliation stays inside runtime while the unc
   f.advance(3600001);f.m.enqueue({key:'old-source-expired',lane:'coordinator',kind:'event',payload:{event:'wait_reconciliation',task_id:'T-1',wait_reason:'evidence_expired'}});
   f.route();f.route();assert.equal(f.s.task('T-1').wake_at,null);assert.equal(f.s.checkpoint('T-1').events.length,0);
   assert.equal(f.c.db.prepare("SELECT COUNT(*) n FROM rt_diagnostics WHERE key='wait-source-stale:old-source-expired'").get().n,1);
+ }finally{f.close();}
+});
+
+test('an obligation handled by continue followed by a separate wait stays quiet across freshness generations',()=>{
+ const f=dependencyReminderFixture({separateWait:true});try{
+  f.route();assert.equal(f.s.task('T-1').wake_at,null);assert.equal(f.s.checkpoint('T-1').events.length,0);
+  f.advance(3600001);f.route();assert.equal(f.s.task('T-1').wake_at,null);
+  const p={...f.payload(3),head:'b'.repeat(40)};f.c.db.prepare('UPDATE lifecycle_intents SET payload=? WHERE intent_key=?').run(JSON.stringify(p),f.intent);
+  f.m.enqueue({key:f.intent+':3',lane:'coordinator',kind:'event',payload:p});f.route();assert.notEqual(f.s.task('T-1').wake_at,null);
+ }finally{f.close();}
+});
+
+test('the first freshness-only verification stays quiet during a deliberate blocker wait, without hiding new source facts',()=>{
+ const f=setup();try{
+  const key='example/service#1',head='a'.repeat(40),intent='lifecycle:'+key+':freshness';
+  f.event('initial-pr',{pr:{head_sha:head,state:'open'}},{subject:key});f.decide({disposition:'continue',plan:plan('assessed source')});
+  f.s.checkWait=()=>({valid:true});f.decide({disposition:'wait',plan:undefined,wait:{facts:f.s.checkpoint('T-1').facts.map(({subject,version})=>({subject,version})),expires_at:f.now()+60000,resume_condition:'Workflow repair is available',condition:{kind:'dependency',fact_key:'repair',subject:'repair',requirement:'safe unsent recovery'}}});f.activate();
+  const payload={event:'pr_lifecycle_action',task_id:'T-1',pr_key:key,head,action:'verify_review_ci',lifecycle_key:intent,lifecycle_generation:1,gate_reasons:['fresh_complete_applicable_CI_evidence_required','fresh_verified_Gatekeeper_surface_required']};
+  f.c.db.prepare("INSERT INTO lifecycle_intents(intent_key,pr_key,action,revision,payload,state,due_at,created_at) VALUES (?,?,?,?,?,'pending',?,?)").run(intent,key,payload.action,'same',JSON.stringify(payload),f.now(),f.now());
+  f.m.enqueue({key:intent+':1',lane:'coordinator',kind:'event',payload});f.route();assert.equal(f.s.task('T-1').wake_at,null);assert.equal(f.s.checkpoint('T-1').events.length,0);
+  f.event('real-new-feedback',{pr:{head_sha:head,state:'open'},issue_comments:[{id:1,body:'New substantive finding',user:{login:'reviewer'}}]},{subject:key});f.route();assert.notEqual(f.s.task('T-1').wake_at,null);
  }finally{f.close();}
 });

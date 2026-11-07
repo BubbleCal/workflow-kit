@@ -77,3 +77,29 @@ their own matching `pr_authorizations` entry under FUNCTIONS_REVIEW_DECISIONS.md
 one explicit user reply may authorize both, but neither is assumed. No new merge,
 release or deployment authority is granted. Already-sent receipts remain intact;
 this rule does not repost PRs or retrospectively undo review delivery.
+
+## Recover an unclaimed card after source context changes
+
+If prepare succeeded but claim rejected a changed task context, preserve the
+canonical key and existing card. After the original owner begins its next actual
+wake, refreshes the PR/head, full feedback, applicable CI and Gatekeeper, and
+records its current assessment, call `runtime/control.mjs` with:
+
+```json
+{
+  "op": "refresh_review_decision_context",
+  "key": "review-decision:https://github.com/owner/repo/pull/123:<head SHA>",
+  "owner": "<original owner thread ID>",
+  "expected_context": {"contract_rev": 1, "context_rev": 5, "plan_rev": 2},
+  "evidence": {"executor_thread_id": "<same owner>", "...": "all current normal decision-delivery evidence"}
+}
+```
+
+The operation is limited to prepared/deferred, never-claimed actions with zero
+attempts, no attempt ID, no receipt, and the same contract. It updates only
+`runtime_context`, preserves the original key/task/owner destination/PR/head/card,
+and saves an audit trail. An actual running owner wake and a clean current plan
+are required. Changed contracts, stale evidence, failed gates or any attempted,
+sent or uncertain effect are rejected. Then claim and perform the unchanged
+final authorize/send/readback/settle protocol. Refreshing is not a send or review
+clearance; never create a suffixed notification key to bypass deduplication.

@@ -120,3 +120,11 @@ When no useful next step is possible, follow `OWNER_WAITS.md`: report the exact
 PR/event condition, and include a timezone-qualified `next_action_at` when the
 next useful time is known or reasonably estimated. Runtime retains inputs and
 coalesces them at that time rather than messaging the owner early.
+
+For change-driven waits, the latest explicit wait may follow a separate continue
+assessment that consumed lifecycle inputs. This still holds unchanged reminder
+generations. Freshness-only CI/Gatekeeper verification inputs also remain inside
+runtime while an acknowledged wait covers the same observed PR head. Evidence
+expiry does not prove a source change. Actual changed source facts, new findings,
+new heads and unhandled substantive obligations retain their event path; refresh
+all technical gates when useful action becomes possible.
