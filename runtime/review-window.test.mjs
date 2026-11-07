@@ -5,6 +5,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { assess, ControlStore, CHANNEL } from './control.mjs';
+import {REVIEW_WINDOW,scopedReviewRule,reviewWindowAt} from './review-window.mjs';
+import {contract} from './test-fixtures/reactive.mjs';
 
 const head = 'a'.repeat(40), url = 'https://github.com/example/service/pull/1';
 const at = time => Date.parse('2026-11-03T' + time + '+08:00');
@@ -79,6 +81,50 @@ test('the review window does not pause already-delivered PR merge gates', () => 
   const inside=assess('merge',{pr_url:url,expected_head_sha:head},e,now);
   assert.equal(inside.allowed,true);
   assert.equal(assess('merge',{pr_url:url,expected_head_sha:head},{...e,approved_head_sha:'b'.repeat(40)},now).allowed,false);
+});
+
+const scopedException={id:'pe-weekend',actual_human_verified:true,source_message_id:'human:pe-now',evidence_ref:'actual-pe-instruction',task_ids:['T-012'],valid_from:'2026-11-07T12:00:00+08:00',valid_until:'2026-11-09T11:00:00+08:00',waive_weekly_blackout:true,retain_daily_blackout:true};
+const scopedRule=()=>({...REVIEW_WINDOW,scoped_weekly_exceptions:[scopedException]});
+const bindPR=c=>c.reactive.adopt({task_id:'T-012',owner_thread_id:'pe-owner',contract:{...contract(),pull_requests:[{repository:'example/service',pr_number:1}]},source_message_id:'actual-pe-task',actual_human_verified:true});
+
+test('scoped weekend exception requires exact task and current PR binding and retains every daily blackout',()=>{
+ const window=(date,task_id='T-012',prs=[{repository:'example/service',pr_number:1}])=>reviewWindowAt(Date.parse(date),scopedReviewRule(scopedRule(),Date.parse(date),{task_id,pull_requests:prs,payload:{pr_url:url}}));
+ assert.equal(window('2026-11-07T18:00:00+08:00').blocked,false);
+ assert.equal(window('2026-11-07T18:00:00+08:00','T-025').blocked,true);
+ assert.equal(window('2026-11-07T18:00:00+08:00','T-012',[]).blocked,true);
+ assert.equal(window('2026-11-07T18:00:00+08:00','T-012',[{repository:'example/service',pr_number:2}]).blocked,true);
+ assert.equal(window('2026-11-07T11:59:59+08:00').blocked,true);
+ assert.equal(window('2026-11-08T03:00:00+08:00').blocked,true);
+ assert.equal(window('2026-11-08T09:59:59+08:00').next_eligible_at,Date.parse('2026-11-08T10:00:00+08:00'));
+ assert.equal(window('2026-11-09T10:59:59+08:00').blocked,false);
+ assert.equal(window('2026-11-09T11:00:00+08:00').scoped_exception_id,undefined);
+ assert.equal(window('2026-11-14T18:00:00+08:00').blocked,true);
+});
+
+test('weekend scoped prepare, deferred claim and final send use fresh task binding without waiving technical gates',()=>{
+ for(const kind of ['slack_pr','pr_ready']){
+  let now=Date.parse('2026-11-07T18:00:00+08:00'),enabled=false;const c=new ControlStore(':memory:',{now:()=>now,reviewRule:()=>enabled?scopedRule():REVIEW_WINDOW});
+  try{bindPR(c);refreshFeedback(c,now);const a={...action(now,kind),task_id:'T-012'};
+   assert.equal(c.prepare(a).deferred,true);enabled=true;
+   assert.equal(c.status().deferred_reviews[0].due_now,true);
+   assert.equal(c.claim({key:a.key,owner:'coordinator',evidence:{...evidence(now,kind),validation_current:false}}).claimed,false);
+   const claim=c.claim({key:a.key,owner:'coordinator',evidence:evidence(now,kind)});assert.equal(claim.claimed,true,JSON.stringify(claim));
+   const permit=c.authorizeReviewSend({key:a.key,attempt_id:claim.attempt_id,owner:'coordinator',evidence:evidence(now,kind),operation_not_started:true});assert.equal(permit.send,true,JSON.stringify(permit));
+  }finally{c.close();}
+ }
+});
+
+test('scoped expiry bounds a send permit and binding changes between prepare, claim and send restore the weekly guard',()=>{
+ for(const boundary of ['claim','send','expiry','expired-before-send']){
+  let now=Date.parse('2026-11-08T17:59:59+08:00');const c=new ControlStore(':memory:',{now:()=>now,reviewRule:()=>({...REVIEW_WINDOW,scoped_weekly_exceptions:[{...scopedException,valid_until:'2026-11-08T18:00:00+08:00'}]})});
+  try{bindPR(c);refreshFeedback(c,now);const a={...action(now),task_id:'T-012'};assert.equal(c.prepare(a).prepared,true);
+   if(boundary==='claim'){const t=c.reactive.task('T-012');c.reactive.amend({task_id:t.task_id,expected_contract_rev:t.contract_rev,contract:{...t.contract,pull_requests:[]},actual_human_verified:true,source_message_id:'actual-unbind'});assert.equal(c.claim({key:a.key,owner:'coordinator',evidence:evidence(now)}).deferred,true);continue;}
+   const claim=c.claim({key:a.key,owner:'coordinator',evidence:evidence(now)});assert(claim.claimed);
+   if(boundary==='expired-before-send'){now=Date.parse('2026-11-08T18:00:00+08:00');assert.equal(c.authorizeReviewSend({key:a.key,attempt_id:claim.attempt_id,owner:'coordinator',evidence:evidence(now),operation_not_started:true}).deferred,true);}
+   else if(boundary==='send'){const t=c.reactive.task('T-012');c.reactive.amend({task_id:t.task_id,expected_contract_rev:t.contract_rev,contract:{...t.contract,pull_requests:[]},actual_human_verified:true,source_message_id:'actual-unbind'});assert.equal(c.authorizeReviewSend({key:a.key,attempt_id:claim.attempt_id,owner:'coordinator',evidence:evidence(now),operation_not_started:true}).deferred,true);}
+   else{const permit=c.authorizeReviewSend({key:a.key,attempt_id:claim.attempt_id,owner:'coordinator',evidence:evidence(now),operation_not_started:true});assert.equal(permit.valid_until,Date.parse('2026-11-08T18:00:00+08:00'));}
+  }finally{c.close();}
+ }
 });
 
 test('weekly blackout covers the weekend until Monday 11 and retains daily boundaries', async () => {

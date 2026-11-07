@@ -28,7 +28,7 @@ import { retainedApprovalReasons } from './merge-approval.mjs';
 import { readDecisionState, taskDisplayText, taskId, resolveReply } from './task-decisions.mjs';
 import { reviewStageReasons } from './pr-review-gates.mjs';
 import { readTaskRegistry, ownershipReasons, scopedHandoffReasons, pausedMigrationSetup } from './task-ownership.mjs';
-import { isReviewDelivery, readReviewWindow, reviewWindowAt, withReviewWindowGuidance, REVIEW_WINDOW } from './review-window.mjs';
+import { isReviewDelivery, readReviewWindow, scopedReviewRule, reviewWindowAt, withReviewWindowGuidance, REVIEW_WINDOW } from './review-window.mjs';
 import {readReviewChannels,reviewDestinationReasons} from './pr-review-routing.mjs';
 import {isQueuedResume,queuedResumeReasons} from './queued-resume.mjs';
 
@@ -502,7 +502,7 @@ export class ControlStore {
         if (!old.imported && old.digest !== digest) throw new Error(`Action key reused with different content: ${key}`);
         return { prepared: false, key, state: old.state, reason: 'already_recorded' };
       }
-      const rule = isReviewDelivery(kind) ? this.reviewRule() : REVIEW_WINDOW;
+      const rule = isReviewDelivery(kind) ? this.reviewRuleFor(task,input.payload) : REVIEW_WINDOW;
       const reactiveReasons = this.reactive.actionReasons(deliveryGuardKind(kind), task, input.payload);
       if (reactiveReasons.length) return { prepared:false, allowed:false, reasons:reactiveReasons };
       const result = assess(kind, input.payload, input.evidence, this.now(), this.capacity, rule, kind === 'notion_sync' && input.payload?.page_id !== PAGE ? this.outcomeBindings() : null, ['pr_ready','slack_pr','review_decision','merge'].includes(kind)?this.dependencyPolicy():null,['pr_ready','slack_pr','review_decision'].includes(kind)?this.reviewChannels():null);
@@ -530,6 +530,7 @@ export class ControlStore {
     }
     return preparation;
   }
+  reviewRuleFor(taskId,payload){const task=this.reactive.task(taskId),item=this.work.get(taskId);return scopedReviewRule(this.reviewRule(),this.now(),{task_id:taskId,pull_requests:task?.contract.pull_requests??(item?.state==='accepted'&&item.authorization?.actual_human_verified===true?item.data.pull_requests:[]),payload});}
   deferReview(key, rule) {
     const due = reviewWindowAt(this.now(), rule).next_eligible_at;
     this.db.prepare("UPDATE actions SET state='deferred',due=?,attempt_id=NULL,owner=NULL,last_error='review_delivery_blackout',updated_at=? WHERE action_key=?")
@@ -595,8 +596,8 @@ export class ControlStore {
       if (this.db.prepare("SELECT value FROM settings WHERE key='processing'").get().value !== 'on' &&
         !pausedMigrationSetup(row.kind,JSON.parse(row.payload))) return { claimed: false, reason: 'processing_paused' };
       if (!['prepared','deferred'].includes(row.state)) return { claimed: false, reason: row.state };
-      if (isReviewDelivery(row.kind) && reviewWindowAt(this.now(),this.reviewRule()).blocked)
-        return { claimed: false, ...this.deferReview(key,this.reviewRule()) };
+      if (isReviewDelivery(row.kind) && reviewWindowAt(this.now(),this.reviewRuleFor(row.task_id,JSON.parse(row.payload))).blocked)
+        return { claimed: false, ...this.deferReview(key,this.reviewRuleFor(row.task_id,JSON.parse(row.payload))) };
       if (row.due > this.now() && !(isReviewDelivery(row.kind) && row.state==='deferred' && row.last_error==='review_delivery_blackout'))
         return { claimed: false, reason: 'backoff', due: row.due };
       const blocked = this.db.prepare("SELECT action_key FROM actions WHERE scope_key=? AND state IN ('claimed','uncertain') AND action_key<>? LIMIT 1").get(row.scope_key, key);
@@ -661,7 +662,7 @@ export class ControlStore {
         checkedEvidence = { ...checkedEvidence, dispatches_this_run: Number.isSafeInteger(evidence?.dispatches_this_run) && evidence.dispatches_this_run >= 0
           ? Math.max(evidence.dispatches_this_run, claimedInRun) : evidence?.dispatches_this_run };
       }
-      const result = assess(row.kind, payload, checkedEvidence, this.now(), this.capacity, isReviewDelivery(row.kind) ? this.reviewRule() : REVIEW_WINDOW, row.kind === 'notion_sync' && payload.page_id !== PAGE ? this.outcomeBindings() : null, ['pr_ready','slack_pr','review_decision','merge'].includes(row.kind)?this.dependencyPolicy():null,['pr_ready','slack_pr','review_decision'].includes(row.kind)?this.reviewChannels():null);
+      const result = assess(row.kind, payload, checkedEvidence, this.now(), this.capacity, isReviewDelivery(row.kind) ? this.reviewRuleFor(row.task_id,payload) : REVIEW_WINDOW, row.kind === 'notion_sync' && payload.page_id !== PAGE ? this.outcomeBindings() : null, ['pr_ready','slack_pr','review_decision','merge'].includes(row.kind)?this.dependencyPolicy():null,['pr_ready','slack_pr','review_decision'].includes(row.kind)?this.reviewChannels():null);
       if (!result.allowed) return { claimed: false, ...result };
       const feedback = this.feedbackGate(row.kind,payload);
       if (!feedback.allowed) return {claimed:false,...feedback};
@@ -688,14 +689,14 @@ export class ControlStore {
       if (reactiveReasons.length) return { send:false, reasons:reactiveReasons };
       const scopeReasons=scopeActionReasons(this.taskRegistry(),deliveryGuardKind(row.kind),row.task_id,JSON.parse(row.payload),evidence);
       if(scopeReasons.length)return {send:false,allowed:false,reasons:scopeReasons};
-      const rule = this.reviewRule(), window = reviewWindowAt(this.now(),rule);
+      const rule = this.reviewRuleFor(row.task_id,JSON.parse(row.payload)), window = reviewWindowAt(this.now(),rule);
       if (window.blocked) return { send: false, ...this.deferReview(key,rule) };
       if (this.db.prepare("SELECT value FROM settings WHERE key='processing'").get().value !== 'on') return { send: false, reason: 'processing_paused' };
       const result = assess(row.kind,JSON.parse(row.payload),evidence,this.now(),this.capacity,rule,null,this.dependencyPolicy(),['pr_ready','slack_pr','review_decision'].includes(row.kind)?this.reviewChannels():null);
       if (!result.allowed) return { send: false, ...result };
       const feedback = this.feedbackGate(row.kind,JSON.parse(row.payload));
       if (!feedback.allowed) return {send:false,...feedback};
-      const validUntil = Math.min(this.now()+60000,window.next_block_at);
+      const validUntil = Math.min(this.now()+60000,window.next_block_at,window.exception_valid_until??Infinity);
       this.db.prepare('INSERT INTO review_send_permits VALUES (?,?,?,?)').run(attempt_id,key,this.now(),validUntil);
       return { send: true, key, attempt_id, payload: JSON.parse(row.payload), valid_until: validUntil,
         ...(row.kind==='review_decision'?{native_arguments:{threadId:JSON.parse(row.payload).thread_id,prompt:JSON.parse(row.payload).prompt}}:{}),
@@ -835,9 +836,10 @@ export class ControlStore {
       review_window: window,
       deferred_reviews: this.db.prepare("SELECT action_key,kind,task_id,payload,due,last_error FROM actions WHERE state='deferred' ORDER BY due,created_at").all()
         .map(row => {
+          const window=reviewWindowAt(this.now(),this.reviewRuleFor(row.task_id,JSON.parse(row.payload)));
           const due=isReviewDelivery(row.kind) && row.last_error==='review_delivery_blackout' ?
             window.blocked?window.next_eligible_at:Math.min(row.due,this.now()):row.due;
-          return { ...row, recorded_due:row.due, due, payload: JSON.parse(row.payload), due_now: due <= this.now() };
+          return { ...row, recorded_due:row.due, due, review_window:window, payload: JSON.parse(row.payload), due_now: due <= this.now() };
         }),
       prepared_reviews: this.db.prepare("SELECT action_key,kind,task_id,due FROM actions WHERE kind IN ('slack_pr','pr_ready') AND state='prepared' ORDER BY due,created_at").all(),
       events: this.db.prepare('SELECT COUNT(*) AS count FROM events').get().count,
@@ -939,7 +941,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       resolve_project: () => resolvePlacement(input),
       reconcile: () => control.reconcile(input), cancel: () => control.cancel(input),
       processing: () => control.processing(input.enabled), status: () => control.status(),
-      review_window: () => reviewWindowAt(control.now(),control.reviewRule()),
+      review_window: () => reviewWindowAt(control.now(),input.task_id?control.reviewRuleFor(input.task_id,input.payload??{pr_url:input.pr_url}):control.reviewRule()),
       feedback_ingest: () => control.atomic(()=>{
         const snapshot = input.snapshot_file ? JSON.parse(readFileSync(input.snapshot_file,'utf8')) : input.snapshot;
         const result = control.feedback.ingest(snapshot);

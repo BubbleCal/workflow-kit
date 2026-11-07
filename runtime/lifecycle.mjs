@@ -2,7 +2,7 @@ import {isSetupNotice} from './owner-wake.mjs';
 import {reviewSurfaceDigest} from './review-feedback.mjs';
 import { scopeActionReasons } from './scope-exclusions.mjs';
 import { createHash } from 'node:crypto';
-import { reviewWindowAt, readReviewWindow } from './review-window.mjs';
+import { reviewWindowAt, readReviewWindow, scopedReviewRule } from './review-window.mjs';
 import { readDependencyPolicy, forkRoute, releaseSuccessorVerified } from './dependency-provenance.mjs';
 import { ciFailures } from './ci-state.mjs';
 import { reviewStageReasons } from './pr-review-gates.mjs';
@@ -169,7 +169,9 @@ export class LifecycleLedger {
         {pr_url:url,expected_head_sha:s.head_sha},s,this.now(),20*60000);
       if(stageReasons.length) return answer(stageReasons.some(r=>r.includes('CI'))?'review_ci_pending':'gatekeeper_pending',
         stageReasons.some(r=>r.includes('CI'))?'verify_review_ci':'verify_gatekeeper',{gate_reasons:stageReasons});
-      const window = reviewWindowAt(this.now(), readReviewWindow());
+      const native=this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='rt_tasks'").get()&&this.db.prepare('SELECT contract FROM rt_tasks WHERE task_id=?').get(w.task_id);
+      const rule=scopedReviewRule(readReviewWindow(),this.now(),{task_id:w.task_id,pull_requests:native?JSON.parse(native.contract).pull_requests:task?.pull_requests??[],payload:{pr_url:url}});
+      const window = reviewWindowAt(this.now(),rule);
       if (window.blocked) return answer('review_window', null, { due_at: window.next_eligible_at });
       return answer('ready_undelivered', 'deliver_review', { draft: s.draft });
     }
