@@ -14,7 +14,7 @@ export class DiscoveryRecovery {
  frontier(source){
   const end=this.db.prepare(`SELECT MAX(at) at FROM (
    SELECT MAX(window_to) at FROM discovery_coverage_ranges WHERE source_id=? AND revision=?
-   UNION ALL SELECT MAX(window_to) at FROM discovery_source_gaps WHERE source_id=? AND revision=? AND state='open')`)
+   UNION ALL SELECT MAX(window_to) at FROM discovery_source_gaps WHERE source_id=? AND revision=? AND state IN ('open','progressing'))`)
    .get(source.source_id,source.revision,source.source_id,source.revision).at;
   return Math.max(source.last_success_at??0,end??0)||null;
  }
@@ -26,6 +26,7 @@ export class DiscoveryRecovery {
     if(!current?.enabled||current.revision!==saved.revision||current.last_success_at>=Math.max(Date.parse(saved.window.to),...(saved.catchup_windows??[]).map(w=>Date.parse(w.window.to)))||!(health?.failure_streak>=threshold))continue;
     this.db.prepare("INSERT OR IGNORE INTO discovery_source_gaps VALUES (?,?,?,?,?,?,'open',?)")
      .run(row.id,saved.source_id,saved.revision,Date.parse(saved.window.from),Math.max(Date.parse(saved.window.to),...(saved.catchup_windows??[]).map(w=>Date.parse(w.window.to))),health.reason,this.store.now());
+    this.db.prepare("UPDATE discovery_source_gaps SET state='open' WHERE batch_id=? AND source_id=? AND revision=? AND state='progressing'").run(row.id,saved.source_id,saved.revision);
     mailbox.enqueue({key:`discovery-stalled:${row.id}:${saved.source_id}:${saved.revision}`,lane:'maintenance',kind:'workflow_recovery',payload:{
      event:'discovery_source_stalled',batch_id:row.id,source_id:saved.source_id,source_revision:saved.revision,failure_streak:health.failure_streak,
      reason:health.reason,evidence_ref:`control.sqlite#discovery_batches/${row.id}`,user_notification_required:false,
@@ -33,6 +34,7 @@ export class DiscoveryRecovery {
    }
   }
  }
+ noteProgress(batch,source){this.db.prepare("UPDATE discovery_source_gaps SET state='progressing' WHERE batch_id=? AND source_id=? AND revision=? AND state='open'").run(batch.id,source.source_id,source.revision);}
  requestRetry({batch_id,generation,evidence_ref}){
   if(!evidence_ref?.trim())throw new Error('Verified repair evidence required');
   return this.store.atomic(()=>{
@@ -53,12 +55,12 @@ export class DiscoveryRecovery {
   const current=this.store.sources().find(x=>x.source_id===source.source_id);
   const windows=[source.window,...(source.catchup_windows??[]).map(w=>w.window)];
   for(const w of windows)this.db.prepare('INSERT OR IGNORE INTO discovery_coverage_ranges VALUES (?,?,?,?,?,?)').run(batch.id,source.source_id,source.revision,Date.parse(w.from),Date.parse(w.to),this.store.now());
-  const gaps=this.db.prepare("SELECT * FROM discovery_source_gaps WHERE source_id=? AND revision=? AND state='open'").all(source.source_id,source.revision);
+  const gaps=this.db.prepare("SELECT * FROM discovery_source_gaps WHERE source_id=? AND revision=? AND state IN ('open','progressing')").all(source.source_id,source.revision);
   const ranges=this.db.prepare('SELECT * FROM discovery_coverage_ranges WHERE source_id=? AND revision=? ORDER BY window_from,window_to').all(source.source_id,source.revision);
   let point=current.last_success_at??Math.min(...ranges.map(r=>r.window_from),...gaps.map(g=>g.window_from));
   for(const r of ranges)if(r.window_from<=point)point=Math.max(point,r.window_to);
   this.db.prepare("UPDATE discovery_source_gaps SET state='resolved' WHERE source_id=? AND revision=? AND window_to<=?").run(source.source_id,source.revision,point);
-  const remaining=gaps.filter(g=>g.window_to>point),latest=Math.max(...windows.map(w=>Date.parse(w.to)));
+  const remaining=gaps.filter(g=>g.window_to>point),latest=Math.max(point,...windows.map(w=>Date.parse(w.to)));
   const health=remaining.length?JSON.stringify({...JSON.parse(current.health??'{}'),coverage_gap:true,open_gaps:remaining.length,observed_frontier:latest}):null;
   const end=current.last_success_at===null&&point===Math.min(...gaps.map(g=>g.window_from))?null:point;
   this.db.prepare('UPDATE discovery_sources SET last_success_at=?,health=?,next_at=? WHERE source_id=?').run(end,health,this.store.nextSlot(latest,current.interval_ms),source.source_id);

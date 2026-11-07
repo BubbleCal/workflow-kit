@@ -1,7 +1,7 @@
 {
   "version": "0.9.1",
   "source": "workflow-kit repository source",
-  "upstream_base_commit": "19bbea5eb48e2598ce5084fb26306a124be3e674",
+  "upstream_base_commit": "dd64598618266b9c6e437e121a8fe2527e2fd4ae",
   "source_files": {
     "package.json": "80ba1b31f033e1d5c6727bbf5381196cf7c644b6b90ecedc9ceedd376df42a8d",
     "runtime/calendar-preparation.mjs": "82a2e06cdbb08a8932b7d71bb17958067a5994e917e8a2f944d0a3e916f694ca",
@@ -18,9 +18,9 @@
     "runtime/desktop-loader.mjs": "4c063d5fdffcc211a90ee2a65c8ca4c1a3b704aa13fd8b8dc7830a026ae85295",
     "runtime/desktop-loader.test.mjs": "335eb54c6fe6c71fe3217261f31c67a1b34cc0a9350fe6a684c4f5bb8fdc63fc",
     "runtime/discovery-efficiency.mjs": "f047cc08de49f4b7b65a19dee7026786a4c4e03041194212ef4f3b5191dba605",
-    "runtime/discovery-recovery.mjs": "0496c8557401634447b31885e7ac7a22936af8373e62523761f593bacdbfd8f7",
-    "runtime/discovery-recovery.test.mjs": "dc2ba2ccb5062598675a65f91b38cc6cfbe72a595f26dfe5b236190987c945a9",
-    "runtime/discovery.mjs": "410a9a22c85a5a2ee828c42e427efbd5ab6464521fecd234e2e3193e7b8b0439",
+    "runtime/discovery-recovery.mjs": "be4161d775bdb6aa356b4e22923d9a401acdc39ec44876792409404493556aef",
+    "runtime/discovery-recovery.test.mjs": "6943a512067c22e65f2295d8993722760c8bdd52c33f3611ea6ec14676d91a13",
+    "runtime/discovery.mjs": "09e411f180e20f804a3c59f8fd7a3497ef7620c8d453bd317cf04202ad19ae36",
     "runtime/discovery.test.mjs": "a5ba4c152f4bd3d4097db99b354ca2c6e69a90c0825fcc799877caa1eceb350c",
     "runtime/dispatcher-invocation.test.mjs": "e90f65f6ae34e85f2a387e493db1b92d3969e7525066b2dad7c499304c25575e",
     "runtime/engineering-principles.mjs": "04c91677387887f5c093a299704eadbb5d895bc99eb3b19f16cbcaa06e04bb1d",

@@ -158,3 +158,8 @@ resumes that checkpoint through the normal queue and start interval; a live run
 is never reset. Closing the gap joins contiguous verified ranges and advances the
 watermark. Routine escalation is coalesced in the existing maintenance lane and
 never posts to Slack or main.
+
+New durable source pages mark an isolated checkpoint as progressing, allowing its
+normal bounded continuation without another manual retry. Replayed pages do not
+count as progress; repeated or cyclic provider cursors are rejected. Three further
+unchanged failures isolate it again. Progress alone never closes a coverage gap.

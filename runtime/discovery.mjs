@@ -319,10 +319,10 @@ export class DiscoveryStore {
       const prior=source.catchup_windows?.find(w=>w.generation===generation);if(prior)return prior;
       const windows=source.catchup_windows??[];
       if(windows.some(w=>w.request_indices.some(i=>!b.pages.filter(p=>p.source_id===source_id&&p.request_index===i&&!p.data.followup).at(-1)?.data.complete)))throw new Error('Resume saved catchup cursors before extending the window');
-      const original=sourceReadPlan(source,source.window).requests;
-      for(const request of original)if(!source.plan.requests.some(r=>hash(r)===hash(request)))source.plan.requests.push(request);
+      const original=sourceReadPlan(source,source.window).requests,request_indices=[];
+      for(const request of original)if(!source.plan.requests.some(r=>hash(r)===hash(request))){request_indices.push(source.plan.requests.length);source.plan.requests.push(request);}
       const from=Math.max(Date.parse(source.window.to),...windows.map(w=>Date.parse(w.window.to)))-120000;
-      const window={from:new Date(from).toISOString(),to:new Date(this.now()).toISOString()},request_indices=[];
+      const window={from:new Date(from).toISOString(),to:new Date(this.now()).toISOString()};
       if(Date.parse(window.to)<=Date.parse(source.window.to))throw new Error('No later source window to catch up');
       for(const request of sourceReadPlan(source,window).requests){request_indices.push(source.plan.requests.length);source.plan.requests.push(request);}
       const entry={generation,window,request_indices,evidence_ref};source.catchup_windows=[...windows,entry];
@@ -349,6 +349,7 @@ export class DiscoveryStore {
       const old=this.db.prepare('SELECT * FROM discovery_pages WHERE page_key=?').get(page_key);
       if(old){if(old.batch_id!==batch_id||old.source_id!==source_id||old.digest!==digest)throw new Error('An ingested page cannot change meaning');return {recorded:false};}
       const previous=b.pages.filter(p=>p.source_id===source_id&&p.request_index===request_index&&(p.data.followup?.stream_key??null)===(followup?.stream_key??null)).at(-1)?.data;
+      if(next_cursor&&(next_cursor===cursor||b.pages.some(p=>p.source_id===source_id&&p.request_index===request_index&&(p.data.followup?.stream_key??null)===(followup?.stream_key??null)&&p.data.cursor===next_cursor)))throw new Error('Source cursor did not advance; preserve the exact blocked stream');
       if(previous?.complete || cursor!==(previous?.next_cursor??null))throw new Error('Resume the exact saved source cursor; a completed search page is immutable. Ingest thread observations with followup={parent_page_key,channel_id,thread_ts} in a separate stream');
       for(const value of observations){
         const o=source.kind==='slack'?scopedSlackObservation(value):value;
@@ -364,7 +365,7 @@ export class DiscoveryStore {
         if(previous){const prior=JSON.parse(previous.data);if(hash({...prior,evidence_ref:null})!==hash({...stored,evidence_ref:null}))throw new Error('Immutable source version changed');continue;}
         this.db.prepare('INSERT INTO discovery_observations VALUES (?,?,?,?,?,?,NULL,NULL,NULL,?)').run(id,source_id,o.entity_key,o.item_key,o.version,JSON.stringify(stored),this.now());
       }
-      this.db.prepare('INSERT INTO discovery_pages VALUES (?,?,?,?,?,?)').run(page_key,batch_id,source_id,request_index,digest,JSON.stringify(data));return {recorded:true};
+      this.db.prepare('INSERT INTO discovery_pages VALUES (?,?,?,?,?,?)').run(page_key,batch_id,source_id,request_index,digest,JSON.stringify(data));this.recovery.noteProgress(b,source);return {recorded:true};
     });
   }
   classify({observation_id,disposition,reason,evidence_ref,candidate,meeting,task_id,identity_verified}){

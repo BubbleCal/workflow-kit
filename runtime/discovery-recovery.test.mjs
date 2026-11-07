@@ -90,3 +90,35 @@ test('repair priority preserves the minimum actual start interval and the schedu
   assert.throws(()=>f.d.recovery.requestRetry({batch_id:b.id,generation:1,evidence_ref:'stale'}),/Exact checkpoint generation/);
  }finally{f.c.close();}
 });
+
+test('a saved with-only legacy window returns the missing original mention request alongside current catchup requests',()=>{
+ const f=setup();try{
+  const b=f.scan(),snapshot=structuredClone(b.snapshot);snapshot.sources[0].plan.requests=snapshot.sources[0].plan.requests.slice(0,1);
+  f.c.db.prepare('UPDATE discovery_batches SET snapshot=? WHERE id=?').run(JSON.stringify(snapshot),b.id);
+  f.ingest(b);const original=f.d.batch(b.id).pages[0];f.advance(86400000);
+  const added=f.d.appendCatchup({batch_id:b.id,generation:b.generation,source_id:'slack',evidence_ref:'real-with-only-migration'});
+  assert.deepEqual(added.request_indices,[1,2,3]);
+  const requests=f.d.batch(b.id).snapshot.sources[0].plan.requests;assert.equal(requests[1].arguments.before,String(Date.parse(snapshot.sources[0].window.to)/1000));
+  assert.deepEqual(requests[1].arguments.keywords,['<@U123>']);
+  for(const index of added.request_indices)f.ingest(b,index);
+  assert.equal(f.finish(b).finished,true);assert.deepEqual(f.d.batch(b.id).pages[0],original);
+  assert.equal(f.d.sources().find(s=>s.source_id==='slack').last_success_at,Date.parse(added.window.to));
+ }finally{f.c.close();}
+});
+
+test('real page progress resumes the original checkpoint automatically, while cyclic cursors cannot masquerade as progress',()=>{
+ const f=setup('linear');try{
+  let old=f.scan();f.ingest(old,0,{complete:false,next_cursor:'page-A'});
+  for(let n=1;n<=3;n++){f.finish(old,{complete:false,reason:'same old blocked cursor'});f.advance(f.d.sources().find(s=>s.source_id==='linear').next_at-f.now());if(n<3)old=f.scan();}
+  const fresh=f.scan();f.ingest(fresh);f.finish(fresh);
+  f.d.recovery.requestRetry({batch_id:old.id,generation:old.generation,evidence_ref:'verified-cursor-parser-fix'});
+  const repaired=f.scan();f.ingest(repaired,0,{page_key:'actual-new-page',cursor:'page-A',complete:false,next_cursor:'page-B'});
+  assert.equal(f.c.db.prepare('SELECT state FROM discovery_source_gaps WHERE batch_id=?').get(old.id).state,'progressing');
+  assert.throws(()=>f.ingest(repaired,0,{page_key:'loop',cursor:'page-B',complete:false,next_cursor:'page-B'}),/cursor did not advance/);
+  assert.throws(()=>f.ingest(repaired,0,{page_key:'cycle-back',cursor:'page-B',complete:false,next_cursor:'page-A'}),/cursor did not advance/);
+  f.finish(repaired,{complete:false,reason:'Bounded budget after real progress'});f.advance(f.d.sources().find(s=>s.source_id==='linear').next_at-f.now());
+  const continuation=f.scan();assert.equal(continuation.id,old.id);
+  f.ingest(continuation,0,{page_key:'last-actual-page',cursor:'page-B'});f.finish(continuation);
+  const source=f.d.sources().find(s=>s.source_id==='linear');assert.equal(source.health,null);assert.equal(source.last_success_at,Date.parse(fresh.snapshot.sources[0].window.to));assert.equal(source.next_at,source.last_success_at+source.interval_ms);
+ }finally{f.c.close();}
+});
