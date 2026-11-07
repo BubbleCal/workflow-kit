@@ -1,7 +1,7 @@
 {
   "version": "0.9.1",
   "source": "workflow-kit repository source",
-  "upstream_base_commit": "dd64598618266b9c6e437e121a8fe2527e2fd4ae",
+  "upstream_base_commit": "45444387bba709480fcec6dc453abbc4e1c16fc6",
   "source_files": {
     "package.json": "80ba1b31f033e1d5c6727bbf5381196cf7c644b6b90ecedc9ceedd376df42a8d",
     "runtime/calendar-preparation.mjs": "82a2e06cdbb08a8932b7d71bb17958067a5994e917e8a2f944d0a3e916f694ca",
@@ -97,8 +97,8 @@
     "runtime/review-queue.mjs": "6e32136b650f0763d89b2230751ce3d4c7f7ed0d1bdc32f71a8d775dc41bdaf1",
     "runtime/review-report.mjs": "75c11218be6567670953cce54550fe39f57130cb89f3152ba367adb583a027ca",
     "runtime/review-report.test.mjs": "4851b00d03d5bc8e5f7043e9c8dc3b46c29877b83315bf8231560d6b650fcab3",
-    "runtime/review-window.mjs": "f119bc09c0f30cf3c2c814d01449b542434e8542a3431f2973063dcece406809",
-    "runtime/review-window.test.mjs": "470d2705088b5bc5dd185516d507f4ec5db5fc1fa70052ad8e1dc7c864fc3e75",
+    "runtime/review-window.mjs": "797eb6258035e856c6b0aaa65bb68e2ccb974e2f968984cfec65c5539942c706",
+    "runtime/review-window.test.mjs": "ca29105320e1e20fe09f2b11d033a5a304ca4421f1075fa593e91f648d0abf5c",
     "runtime/schedule-source.mjs": "2910cee5e7b7951032c2d4952f980d2495fcde5f427b1f4463ca14bd4591440d",
     "runtime/schedule-source.test.mjs": "27b5889fdd1a21927552575dcba637f3d5030300df7185a48de8398d7b138cd0",
     "runtime/scheduler.mjs": "4eb2c48f21c6f3e05cf9ef5cc7dc3469f98645888efef0027bd57dff15445143",

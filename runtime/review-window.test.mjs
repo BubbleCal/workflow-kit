@@ -80,3 +80,52 @@ test('the review window does not pause already-delivered PR merge gates', () => 
   assert.equal(inside.allowed,true);
   assert.equal(assess('merge',{pr_url:url,expected_head_sha:head},{...e,approved_head_sha:'b'.repeat(40)},now).allowed,false);
 });
+
+test('weekly blackout covers the weekend until Monday 11 and retains daily boundaries', async () => {
+  const {reviewWindowAt,REVIEW_WINDOW}=await import('./review-window.mjs');
+  const cases=[
+    ['2026-11-06T23:59:59+08:00',false,null,'2026-11-07T00:00:00+08:00'],
+    ['2026-11-07T00:00:00+08:00',true,'2026-11-09T11:00:00+08:00'],
+    ['2026-11-08T12:00:00+08:00',true,'2026-11-09T11:00:00+08:00'],
+    ['2026-11-09T02:59:59+08:00',true,'2026-11-09T11:00:00+08:00'],
+    ['2026-11-09T10:59:59+08:00',true,'2026-11-09T11:00:00+08:00'],
+    ['2026-11-09T11:00:00+08:00',false,null,'2026-11-10T03:00:00+08:00'],
+    ['2026-11-10T03:00:00+08:00',true,'2026-11-10T10:00:00+08:00'],
+    ['2026-11-10T10:00:00+08:00',false,null,'2026-11-11T03:00:00+08:00']
+  ];
+  for(const [date,blocked,next,nextBlock] of cases){
+    const now=Date.parse(date),w=reviewWindowAt(now,REVIEW_WINDOW);
+    assert.equal(w.blocked,blocked,date);
+    assert.equal(w.next_eligible_at,next?Date.parse(next):now,date);
+    if(nextBlock)assert.equal(w.next_block_at,Date.parse(nextBlock),date);
+    for(const kind of ['slack_pr','pr_ready']){
+      const a=action(now,kind),result=assess(kind,a.payload,a.evidence,now,undefined,REVIEW_WINDOW);
+      assert.equal(result.reasons.includes('review_delivery_blackout'),blocked,kind+date);
+    }
+  }
+  assert.throws(()=>reviewWindowAt(Date.now(),{...REVIEW_WINDOW,weekly_blackout:{...REVIEW_WINDOW.weekly_blackout,end_time:'bad'}}));
+});
+
+test('a Friday permit expires at Saturday midnight and an unstarted send defers until Monday 11', async () => {
+  const {REVIEW_WINDOW}=await import('./review-window.mjs');
+  let now=Date.parse('2026-11-06T23:59:59+08:00');
+  const c=new ControlStore(':memory:',{now:()=>now,reviewRule:()=>REVIEW_WINDOW}),a=action(now);
+  try{
+    refreshFeedback(c,now);assert.equal(c.prepare(a).prepared,true);
+    const claim=c.claim({key:a.key,owner:'coordinator',evidence:evidence(now)});
+    assert.equal(claim.claimed,true);
+    const args={key:a.key,attempt_id:claim.attempt_id,owner:'coordinator',evidence:evidence(now),operation_not_started:true};
+    const permit=c.authorizeReviewSend(args);assert.equal(permit.send,true);
+    assert.equal(permit.valid_until,Date.parse('2026-11-07T00:00:00+08:00'));
+    // An unstarted action must not reuse the expiring authorization across the boundary.
+    now=Date.parse('2026-11-07T00:00:00+08:00');
+    const later=c.authorizeReviewSend({...args,evidence:evidence(now)});
+    assert.equal(later.send,false);
+  }finally{c.close();}
+  now=Date.parse('2026-11-08T12:00:00+08:00');
+  const queued=refreshFeedback(new ControlStore(':memory:',{now:()=>now,reviewRule:()=>REVIEW_WINDOW}),now);
+  try{
+    assert.equal(queued.prepare(action(now)).deferred,true);
+    assert.equal(queued.status().deferred_reviews[0].due,Date.parse('2026-11-09T11:00:00+08:00'));
+  }finally{queued.close();}
+});

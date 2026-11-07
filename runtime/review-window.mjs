@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-export const REVIEW_WINDOW = Object.freeze({ timezone: 'Asia/Shanghai', blocked_start_inclusive: '03:00:00', blocked_end_exclusive: '10:00:00' });
+export const REVIEW_WINDOW = Object.freeze({ timezone: 'Asia/Shanghai', blocked_start_inclusive: '03:00:00', blocked_end_exclusive: '10:00:00', weekly_blackout: { start_day: 6, start_time: '00:00:00', end_day: 1, end_time: '11:00:00' } });
 export const isReviewDelivery = kind => ['slack_pr', 'pr_ready', 'review_decision'].includes(kind);
 export function withReviewWindowGuidance(kind, payload, prior) {
   if (!['dispatch','create_thread'].includes(kind)) return payload;
@@ -10,7 +10,8 @@ export function withReviewWindowGuidance(kind, payload, prior) {
   const saved = typeof original === 'string' && original.includes(marker) ? original.slice(original.lastIndexOf(marker)) : null;
   const rule = readReviewWindow();
   reviewWindowAt(Date.now(),rule);
-  const guidance = saved ?? marker + `\nEvery day in ${rule.timezone}, do not send PRs for review from ${rule.blocked_start_inclusive.slice(0,5)} inclusive to ${rule.blocked_end_exclusive.slice(0,5)} exclusive. Continue implementation, tests, repairs and internal review. Create new PRs as drafts; the original task owner performs authorized review-intended draft-to-ready transitions and canonical Slack URL delivery using control kind=pr_ready/slack_pr and authorize_review_send immediately before the external operation. Preserve deferred work until the original owner rechecks the current head/readiness/CI/Gatekeeper/receipts after the saved window opens. Do not bypass via direct non-draft creation, other channels, comments or reviewer requests; do not create a timer or restart healthy work.`;
+  const weekly = rule.weekly_blackout ? ' Also stop all review delivery every Saturday and Sunday, and on Monday before 11:00; resume Monday at 11:00 (Asia/Shanghai).' : '';
+  const guidance = saved ?? marker + `\nEvery day in ${rule.timezone}, do not send PRs for review from ${rule.blocked_start_inclusive.slice(0,5)} inclusive to ${rule.blocked_end_exclusive.slice(0,5)} exclusive.${weekly} Continue implementation, tests, repairs and internal review. Create new PRs as drafts; the original task owner performs authorized review-intended draft-to-ready transitions and canonical Slack URL delivery using control kind=pr_ready/slack_pr and authorize_review_send immediately before the external operation. Preserve deferred work until the original owner rechecks the current head/readiness/CI/Gatekeeper/receipts after the saved window opens. Do not bypass via direct non-draft creation, other channels, comments or reviewer requests; do not create a timer or restart healthy work.`;
   const append = text => text.includes(marker) ? text : text + '\n\n' + guidance;
   return { ...payload, review_window_guidance_version: version,
     ...(typeof payload.prompt === 'string' ? { prompt: append(payload.prompt) } : {}),
@@ -30,7 +31,28 @@ export function reviewWindowAt(now, rule = REVIEW_WINDOW) {
     .formatToParts(now).filter(x => x.type !== 'literal').map(x => [x.type,Number(x.value)]));
   const {year,month,day,hour,minute,second} = parts;
   const offset = Date.UTC(year,month-1,day,hour,minute,second) - Math.floor(now / 1000) * 1000;
-  const local=hour*3600+minute*60+second, blocked = local >= start && local < end;
-  return { timezone: rule.timezone, blocked, next_eligible_at: blocked ? Date.UTC(year,month-1,day,0,0,end)-offset : now,
-    next_block_at: Date.UTC(year,month-1,day+(local>=end?1:0),0,0,start)-offset };
+  const week = rule.weekly_blackout;
+  if (week && (week.start_day !== 6 || week.end_day !== 1 || week.start_time !== '00:00:00' || !Number.isFinite(time(week.end_time))))
+    throw new Error('Unsupported weekly PR review blackout');
+  const midnight = Date.UTC(year,month-1,day)-offset;
+  const intervals = [];
+  for (let delta=-7; delta<=8; delta++) {
+    const date = new Date(Date.UTC(year,month-1,day+delta));
+    const base = midnight + delta*86400000;
+    intervals.push([base+start*1000, base+end*1000]);
+    if (week && date.getUTCDay()===week.start_day)
+      intervals.push([base,base+2*86400000+time(week.end_time)*1000]);
+  }
+  intervals.sort((a,b)=>a[0]-b[0]);
+  const merged=[];
+  for(const interval of intervals){
+    const last=merged.at(-1);
+    if(last && interval[0]<=last[1])last[1]=Math.max(last[1],interval[1]);
+    else merged.push([...interval]);
+  }
+  const current=merged.find(([from,to])=>now>=from && now<to);
+  return { timezone: rule.timezone, blocked:!!current,
+    next_eligible_at:current?current[1]:now,
+    next_block_at:merged.find(([from])=>from>(current?current[1]:now))?.[0] };
+
 }
