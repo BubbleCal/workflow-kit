@@ -116,3 +116,45 @@ for a second handoff; it cannot broaden that task or create a replacement owner.
 ## Fixed result followthrough
 
 Use RESULT_FOLLOWTHROUGH.md for begin.result_followthrough. Handle original-owner terminal evidence, deduplication and guarded setup, then verify actual execution or persist result_followups_reason. Source access failures do not skip these fixed items. Keep the global 15-minute minimum; do not create another timer, coordinator or engineering owner for existing canonical work.
+
+## Slack search, supplemental threads and delayed coverage
+
+Main Slack discovery uses two independent required queries within the same user
+and channel scope: `with:<@USER>` for conversations, and `keywords: ["<@USER>"]`
+for explicit channel mentions. A completed with-user query does not prove mention
+coverage. Preserve the original requests/pages; do not overwrite a terminal page
+or append thread messages to its search cursor chain.
+
+For a full thread read linked to a saved search page, use ordinary `ingest` with
+its parent request_index and an additional object:
+
+```json
+{"followup":{"parent_page_key":"<full saved search page key>","channel_id":"C123","thread_ts":"1794027285.772359"}}
+```
+
+Use fresh unique page_key values and the real thread cursor/next_cursor. Every
+observation must identify that exact channel/root thread and satisfy the original
+user/professional/private scope. Supplemental streams appear separately in plan;
+primary pages remain immutable. Finish requires all search variants, thread
+cursors and classifications. Followup completion cannot replace primary coverage.
+
+When a saved main Slack window is overdue, the acknowledged discovery owner may
+call `append_catchup` with batch_id/generation/source_id/evidence_ref. It preserves
+the original cutoff/pages, adds any missing mention query for the original window,
+and appends fixed later search requests in the same actual run. Re-read plan and
+collect every returned request index and its full-thread followups. One extension
+per generation is idempotent; unfinished catchup cursors must resume first. This
+adds no timer, new owner or additional automatic start and does not bypass the
+15-minute minimum between actual starts. Respect the bounded turn budget.
+
+Three repeated source failures create one durable maintenance input and an open
+coverage gap. Later windows can be read/classified while that old checkpoint is
+isolated. The normal success watermark remains the contiguous completed prefix;
+it never crosses the unread gap. Completed ranges and all old pages/cursors stay
+durable. `health.coverage_gap` distinguishes newer observation progress from full
+coverage. After a verified repair, existing maintenance can request one
+`retry_checkpoint` with exact batch_id/generation/evidence_ref. The original owner
+resumes that checkpoint through the normal queue and start interval; a live run
+is never reset. Closing the gap joins contiguous verified ranges and advances the
+watermark. Routine escalation is coalesced in the existing maintenance lane and
+never posts to Slack or main.

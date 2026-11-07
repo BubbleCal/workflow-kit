@@ -5,11 +5,11 @@ export function compactDiscoveryBatch(batch, sources = []) {
   const {pages = [], prompt, ...rest} = batch;
   const streams = new Map();
   for (const page of pages) {
-    const key = `${page.source_id}:${page.request_index}`;
+    const key = `${page.source_id}:${page.request_index}:${page.data.followup?.stream_key??'search'}`;
     const prior = streams.get(key);
     streams.set(key, {source_id: page.source_id, request_index: page.request_index,
       last_page_key: page.page_key, page_count: (prior?.page_count ?? 0) + 1, complete: page.data.complete,
-      next_cursor: page.data.next_cursor ?? null, evidence_ref: page.data.evidence_ref,
+      next_cursor: page.data.next_cursor ?? null, ...(page.data.followup?{followup:page.data.followup}:{}), evidence_ref: page.data.evidence_ref,
       observation_count: (prior?.observation_count ?? 0) + (page.data.observations?.length ?? 0)});
   }
   const snapshot = {...rest.snapshot, sources: rest.snapshot.sources.map(source => {

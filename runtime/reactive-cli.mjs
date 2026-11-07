@@ -177,6 +177,8 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
           mailbox.begin(mail.batch_id);
           if(result.invalidated)mailbox.finish(mail.batch_id,{processed_keys:[result.mail_key],note:'source scope changed; no source reads'});
         }else if(input.op==='ingest')result=control.discovery.ingest(input);
+        else if(input.op==='append_catchup')result=control.discovery.appendCatchup(input);
+        else if(input.op==='retry_checkpoint')result=control.discovery.recovery.requestRetry(input);
         else if(input.op==='classify'){result=control.discovery.classify(input);if(result.shared_service)result={...result,schedule_update:scheduleCalendarPreparation(control,result.task_id)};}
         else if(input.op==='watch_thread')result=control.discovery.watchThread(input);
         else if(input.op==='recover'){
