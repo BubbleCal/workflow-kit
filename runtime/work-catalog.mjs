@@ -299,7 +299,7 @@ export class WorkCatalog {
     required(owner_thread_id,'execution owner');required(evidence_ref,'native owner evidence');
     return this.atomic(()=>{
       const t=this.get(task_id);if(!t||t.state!=='accepted')throw new Error('Accept the task before binding its owner');
-      const actor=!t.owner_thread_id||t.binding?.creation_action_key&&!this.creation.executed(t)?this.creation.actor(task_id,creation_actor):null;
+      const actor=!t.owner_thread_id||t.binding?.creation_actor&&!this.creation.executed(t)?this.creation.actor(task_id,creation_actor):null;
       const protectedOwners=this.config.layout==='native'?[this.config.threads?.main,this.config.threads?.discovery]:Object.values(this.config.threads??{});
       if(protectedOwners.includes(owner_thread_id))throw new Error('Control/discovery conversations cannot own ordinary execution or exploration tasks');
       if(t.owner_thread_id&&t.owner_thread_id!==owner_thread_id)throw new Error('Do not replace a live canonical owner');
@@ -335,7 +335,7 @@ export class WorkCatalog {
   start(reactive,{task_id,queue_compatibility_verified,creation_actor}){
     if(queue_compatibility_verified!==true)throw new Error('Native desktop queue verification is required');
     const t=this.get(task_id);if(t?.state==='completed')return {started:false,reason:'already_complete',task:t};
-    if(t&&(!this.execution(t.id)||t.binding?.creation_action_key&&!this.creation.executed(t)))this.creation.actor(task_id,creation_actor);
+    if(t&&(!this.execution(t.id)||t.binding?.creation_actor&&!this.creation.executed(t)))this.creation.actor(task_id,creation_actor);
     const reasons=this.blockers(task_id);if(reasons.length)throw new Error(reasons.join(', '));
     if(this.execution(t.id)?.mode==='active')return reactive.checkpoint(t.id);
     const contract=this.contract(t.id),a=t.authorization;

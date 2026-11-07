@@ -100,3 +100,16 @@ test('the separately authorized Review Queue retains only its selected read-only
   assert.throws(()=>f.work.creation.actor(other.id,actor),/authorized_review_actor/);
  }finally{f.c.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+test('enabling discovery ownership preserves an already created owner that has not reached its scheduled execution',async()=>{
+ const f=fixture();try{
+  const t=f.task(),{actor}=f.begin();
+  const p=await prepareTaskOwner(f.c,{task_id:t.id,creation_actor:actor,projects:[{hostId:'local',projectId:f.config.scope.project_id}],project_catalog_ref:'actual-projects',checked_at:new Date(f.now()).toISOString()});
+  const c=f.c.claim({key:p.key,owner:DISCOVERY,evidence:p.evidence});assert(c.claimed);
+  f.c.settle({key:p.key,attempt_id:c.attempt_id,outcome:'sent',evidence_ref:'prior-native-create',native_result:{threadId:OWNER,hostId:'local'}});
+  f.c.confirmCreation({key:p.key,snapshot:{id:OWNER,hostId:'local',projectId:f.config.scope.project_id},source:'list_threads',verified_at:new Date(f.now()).toISOString(),evidence_ref:'prior-project-readback'});
+  const set=enabled=>f.work.setPolicy({key:'discovery_owns_creation',enabled,allowed_kinds:['work','project','exploration'],source_message_id:'human:roles',verbatim_text:'Discovery creates new owners; preserve existing schedules',actual_human_verified:true,evidence_ref:'actual-role-request'});
+  set(false);f.work.bindOwner({task_id:t.id,owner_thread_id:OWNER,creation_action_key:p.key,evidence_ref:'existing-owner',native_binding:nativeProof({status:'completed',now:f.now()})});
+  set(true);assert.deepEqual(f.work.creation.pending(),[]);assert.equal(f.work.get(t.id).owner_thread_id,OWNER);assert.equal(f.work.execution(t.id),null);
+ }finally{f.c.close();}
+});

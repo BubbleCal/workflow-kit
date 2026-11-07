@@ -33,7 +33,7 @@ rebinding it to each day's temporary automation source/result conversation.
 
 native 布局的统一目录在 control.sqlite 的 work_items 中。work、project、exploration 共用同一任务 ID、唯一 canonical key、接收授权、独立 owner、执行合同、计划、队列和验收。探索没有单独执行器。
 
-init 自动登记一条实例内稳定的探索草稿。task builtin 可幂等补齐。外部来源全部关闭时，这条任务仍可正常配置、接收、绑定和执行；不需要 discovery 对话。
+init 自动登记一条实例内稳定的探索草稿。task builtin 可幂等补齐。外部来源全部关闭时，这条任务仍可正常配置和接收。启用 discovery_owns_creation 后，新 owner 仍由工作发现创建和启动；未启用该规则的实例保留原有创建授权流程。
 
 ## Registration and execution
 

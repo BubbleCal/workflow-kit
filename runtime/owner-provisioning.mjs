@@ -51,7 +51,7 @@ export class OwnerProvisioning {
    if(t.data.source?.review_queue_service_task_id)return [];
    const execution=this.work.execution(t.id);
    if(execution&&(execution.mode==='paused'||['complete','needs_decision','superseded'].includes(execution.status)))return [];
-   if(t.owner_thread_id&&!t.binding?.creation_action_key)return [];
+   if(t.owner_thread_id&&!t.binding?.creation_actor)return [];
    const started=this.executed(t);
    if(started)return [];
    const action=this.db.prepare("SELECT action_key,state FROM actions WHERE task_id=? AND kind='create_thread' ORDER BY created_at DESC LIMIT 1").get(t.id);
