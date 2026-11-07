@@ -14,6 +14,34 @@ function setup(kind='slack'){
  return {...f,d,mail,scan,ingest,finish};
 }
 
+test('Notion row details use a separate scoped stream after terminal database discovery',()=>{
+ const f=workFixture(),d=f.c.discovery,root='https://app.notion.com/p/3f3fbb61f872818cb54fef2ef3965622',row='https://app.notion.com/p/40efbb61f8728151a9c2e3abc2e5b7e0';
+ try{
+  d.configure({source_id:'notion',enabled:true,scope:{page_ids:[root]},source_message_id:'user:notion-scope',actual_human_verified:true,evidence_ref:'actual-source-scope'});
+  const queued=d.enqueueDue({enqueue:v=>({queued:true,key:v.key})},'/instance'),b=d.batch(queued.batch_id);
+  d.begin({batch_id:b.id,generation:b.generation,native_proof:nativeProof({thread:DISCOVERY,message:b.prompt,now:f.now()})});
+  const ingest=patch=>d.ingest({batch_id:b.id,generation:b.generation,source_id:'notion',page_key:'parent',observations:[],complete:true,evidence_ref:'actual-notion-fetch',...patch});
+  ingest({});const parent=d.batch(b.id).pages[0];
+  const observation={entity_key:'source-work:interview',item_key:row,version:'actual-row-version',scope_key:root,summary:'Source context only; no execution authorization',url:row};
+  const followup={parent_page_key:parent.page_key,page_id:row};
+  assert.throws(()=>ingest({page_key:'invalid-parent',followup:{...followup,parent_page_key:'another-batch'},observations:[observation]}),/authorized Notion page/);
+  assert.throws(()=>ingest({page_key:'wrong-page',followup,observations:[{...observation,url:root}]}),/authorized Notion page/);
+  assert.throws(()=>ingest({page_key:'wrong-scope',followup,observations:[{...observation,scope_key:'unconfigured-root'}]}),/authorized Notion page/);
+  assert.throws(()=>ingest({page_key:'foreign-host',followup:{...followup,page_id:'https://example.com/40efbb61f8728151a9c2e3abc2e5b7e0'},observations:[observation]}),/authorized Notion page/);
+  ingest({page_key:'row',followup,observations:[observation],complete:false,next_cursor:'discussion-2'});
+  assert.equal(ingest({page_key:'row',followup:{...followup,page_id:'40efbb61-f872-8151-a9c2-e3abc2e5b7e0'},observations:[observation],complete:false,next_cursor:'discussion-2'}).recorded,false);
+  const finish=patch=>d.finish({batch_id:b.id,generation:b.generation,source_results:[{source_id:'notion',complete:true,followups_complete:true,...patch}]});
+  assert.throws(()=>finish(),/supplemental thread cursor/);
+  ingest({page_key:'row-comments',followup,cursor:'discussion-2'});
+  const pending=d.pending({batch_id:b.id,source_id:'notion'});assert.equal(pending.length,1);
+  d.classify({observation_id:pending[0].observation_id,disposition:'ignore',reason:'Existing source context, no new task',evidence_ref:'actual-source-judgment'});
+  assert.equal(d.plan(b.id).streams.filter(s=>s.followup).length,1);
+  assert.equal(finish({complete:false,reason:'Comments API unavailable; keep coverage unknown'}).checkpointed,true);
+  assert.equal(d.sources().find(s=>s.source_id==='notion').last_success_at,null);
+  assert.deepEqual(d.batch(b.id).pages[0],parent);
+ }finally{f.c.close();}
+});
+
 test('mention search is independent of with-user search and both remain required within the original scope',()=>{
  const plan=sourceReadPlan({kind:'slack',scope:{with_user_id:'U123',access:'private'}},{from:'2026-11-06T07:00:00Z',to:'2026-11-07T07:00:00Z'});
  assert.equal(plan.requests.length,2);assert.equal(plan.requests[0].arguments.filters,'with:<@U123>');

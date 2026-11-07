@@ -9,6 +9,13 @@ const required=(v,n)=>{if(typeof v!=='string'||!v.trim())throw new Error(`${n} i
 const arr=value=>Array.isArray(value)?value:[];
 const observationId=(source,o)=>`${source.source_id}:${source.revision}:${o.item_key}:${o.version}`;
 const coverageEnd=s=>Math.max(Date.parse(s.window.to),...(s.catchup_windows??[]).map(w=>Date.parse(w.window.to)));
+const notionPageId=value=>{
+ if(typeof value!=='string')return null;
+ if(/^[a-f0-9]{32}$|^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(value))return value.replaceAll('-','').toLowerCase();
+ try{const url=new URL(value);if(!['app.notion.com','notion.so','www.notion.so'].includes(url.hostname)&&!url.hostname.endsWith('.notion.site'))return null;
+  return notionPageId(url.pathname.match(/([a-f0-9]{32}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})\/?$/i)?.[1]);
+ }catch{return null;}
+};
 
 // Older discovery prompts used these names for the same scoped assertions.
 // Normalize only unambiguous aliases; conflicting or false assertions still fail.
@@ -340,9 +347,15 @@ export class DiscoveryStore {
       if(complete===true&&next_cursor)throw new Error('A source with a next cursor is not complete');
       if(followup){
         const parent=b.pages.find(p=>p.page_key===followup.parent_page_key&&p.source_id===source_id&&p.request_index===request_index&&!p.data.followup);
-        if(source.kind!=='slack'||source.scope.watched_thread||!parent||!/^C[A-Z0-9]+$|^D[A-Z0-9]+$|^G[A-Z0-9]+$/.test(followup.channel_id??'')||!/^\d+\.\d+$/.test(followup.thread_ts??'')||
+        if(source.kind==='notion'){
+          const page_id=notionPageId(followup.page_id),scope_key=source.plan.requests[request_index].arguments.id;
+          if(!parent||!page_id||!arr(source.scope.page_ids).includes(scope_key)||observations.some(o=>notionPageId(o.url)!==page_id||notionPageId(o.item_key)!==page_id||o.scope_key!==scope_key))throw new Error('Followup must reference an exact authorized Notion page and its primary source page');
+          followup={parent_page_key:parent.page_key,page_id,stream_key:`page:${page_id}`};
+        }else{
+         if(source.kind!=='slack'||source.scope.watched_thread||!parent||!/^C[A-Z0-9]+$|^D[A-Z0-9]+$|^G[A-Z0-9]+$/.test(followup.channel_id??'')||!/^\d+\.\d+$/.test(followup.thread_ts??'')||
           !followup.channel_id.startsWith('C')&&(source.scope.access!=='private'||source.scope.private_access_authorized!==true)||arr(source.scope.channel_ids).length&&!source.scope.channel_ids.includes(followup.channel_id)||observations.some(o=>o.channel_id!==followup.channel_id||o.thread_ts!==followup.thread_ts))throw new Error('Followup must reference an exact authorized Slack thread and its primary source page');
-        followup={parent_page_key:parent.page_key,channel_id:followup.channel_id,thread_ts:followup.thread_ts,stream_key:`thread:${followup.channel_id}:${followup.thread_ts}`};
+         followup={parent_page_key:parent.page_key,channel_id:followup.channel_id,thread_ts:followup.thread_ts,stream_key:`thread:${followup.channel_id}:${followup.thread_ts}`};
+        }
       }
       const data={observations,complete:complete===true,cursor,next_cursor:next_cursor??null,evidence_ref,...(followup?{followup}:{})},digest=hash(data);
       page_key=`${batch_id}:${source_id}:${request_index}:${followup?followup.stream_key+':':''}${page_key}`;

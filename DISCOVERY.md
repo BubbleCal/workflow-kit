@@ -163,3 +163,13 @@ New durable source pages mark an isolated checkpoint as progressing, allowing it
 normal bounded continuation without another manual retry. Replayed pages do not
 count as progress; repeated or cyclic provider cursors are rejected. Three further
 unchanged failures isolate it again. Progress alone never closes a coverage gap.
+
+For a full Notion row fetched after a terminal parent search, ingest it with
+`followup={parent_page_key,page_id}`. Verify its ancestor path or saved query row
+belongs to that exact authorized parent first. The row's `url` and `item_key` must
+identify the same Notion page, and `scope_key` must match the original request's
+configured page URL. Its own stream preserves the parent page and observation
+version. Resume actual discussion cursors within that stream. An unavailable
+comments response (including only `suggested_edits_status=upgrade_required`)
+does not prove zero comments or complete followups: retain the coverage gap and
+checkpoint the provider limitation after recording/classifying available rows.
