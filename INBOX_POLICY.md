@@ -2,12 +2,20 @@
 
 > Completed review reports have a separately authorized owner-to-main exception when review-report-policy.json enables it. Follow REVIEW_RESULT_DELIVERY.md; findings and private review conclusions do not use external PR review-delivery gates. Unrelated notifications remain on-request.
 
+> Completed finite tasks must proactively report their work, result, effect and
+> impact in main before archival. TASK_COMPLETION_DELIVERY.md and
+> completion-report-policy.json define this narrowly authorized completion_report
+> exception, verified against actual main readback. A queued inbox item is not
+> user delivery. Other on-request behavior remains unchanged.
+
 # Main conversation: on-request inbox
 
-Main only interacts with the user. With `runtime.json.inbox.delivery_mode` set to
-`on_request`, workflow events never start a main conversation turn, including real
-decisions, requested answers and important completions. The runtime does not reserve
-or send inbox batches; its queue transport also blocks the main thread UUID.
+Main handles user discussion and the explicitly authorized finished-card
+exceptions above. With `runtime.json.inbox.delivery_mode` set to `on_request`,
+ordinary workflow events do not start main. The runtime does not reserve or send
+inbox batches; its queue transport also blocks the main thread UUID. Guarded
+owner-to-main completion, review-result and authorized review-decision cards use
+their separate native delivery protocols, not that queue transport.
 New inbox bindings default to this mode. Existing explicitly configured `automatic`
 bindings retain their delivery behavior until changed.
 
@@ -23,7 +31,8 @@ previously acknowledged entries. Reading never acknowledges, reserves, dispatche
 or claims that a result has been presented to the user. Main needs no machine batch
 `begin` or `finish` to answer a human question.
 
-Owners continue recording actual decisions, verified answers and important results
+Outside those explicit finished-card exceptions, owners record actual decisions,
+verified answers and important results
 using the existing guarded notify path. In on-request mode this writes the ledger
 only. Keep the original question ID, task ID, evidence and notification key. Do not
 send directly to main or create another conversation to relay notifications.

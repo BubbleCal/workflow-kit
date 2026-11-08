@@ -97,12 +97,14 @@ This is part of delivery, not a separate coordinator or documentation task.
   descriptions, assignee/project/priority changes, or modifying another owner's
   ticket. A status API failure does not stop independent engineering work.
 
-After completion, finish the task wake. The runtime records one important completion
-and its archive_request in the durable inbox. In on-request mode this does not send
-a message or start main. The original owner can perform its own archive through the
-existing archive guard after finishing, with fresh idle/no-pending-input evidence.
-If archival cannot yet proceed, preserve the request for authorized maintenance;
-do not wake main or mark the archive request fulfilled without its native receipt.
+After completion, finish the task wake and follow TASK_COMPLETION_DELIVERY.md.
+The original owner must present what was completed, the result, measured effect
+or its limits, and practical impact to Yang in main. This finished-result notice
+is a narrow exception to on-request delivery. The durable inbox/archive request
+alone is not user delivery. Guarded completion_report plus actual main readback,
+or a verified result already presented by main, must precede archival. Existing
+idle/no-pending-input/resource guards still apply; preserve unfulfilled archive
+requests for authorized maintenance and never claim success without the receipt.
 
 Routine updates remain in task evidence and bound pages. Use the guarded inbox for
 actual decisions, requested answers or important completion; INBOX_POLICY.md defines

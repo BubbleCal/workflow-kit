@@ -1,5 +1,6 @@
 import {reviewClosureArchiveActor} from './review-closure.mjs';
 import {readReviewReportPolicy,reviewReportTaskReasons} from './review-report.mjs';
+import {readCompletionReportPolicy,initCompletionNotices,completionReportStatus,completionReportReasons,completionArchiveReasons,confirmCompletionReport,recordPresentedCompletion} from './completion-report.mjs';
 import {deliveryGuardKind,reviewDecisionReasons,reviewDecisionTaskReasons} from './review-decision.mjs';
 import {personalReviewReasons,personalReviewAllowsStage} from './pr-personal-review.mjs';
 import {reviewCreationReasons} from './review-intake.mjs';
@@ -41,14 +42,14 @@ export function resolveCapacity(value = {}) {
   return { ...value, max_new_heavy_concurrency: value.automatic_limit,
     max_dispatches_per_run: value.automatic_limit };
 }
-const KINDS = new Set(['task_queue', 'task_wake', 'dispatch', 'create_thread', 'assign_project', 'human_input', 'notify', 'review_report', 'slack_pr', 'review_decision', 'pr_ready', 'merge', 'archive', 'unarchive', 'auth', 'notion_sync', 'automation_update']);
+const KINDS = new Set(['task_queue', 'task_wake', 'dispatch', 'create_thread', 'assign_project', 'human_input', 'notify', 'review_report', 'completion_report', 'slack_pr', 'review_decision', 'pr_ready', 'merge', 'archive', 'unarchive', 'auth', 'notion_sync', 'automation_update']);
 const PROTECTED_THREADS = new Set(Object.values(bindings.threads));
 const prUrl = value => typeof value === 'string' && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*$/.test(value);
 function scopeKey(kind, payload) {
   if (kind === 'create_thread') return `new-thread:${required(payload?.canonical_task_key, 'payload.canonical_task_key')}`;
   if (kind === 'assign_project') return `project-membership:${required(payload?.host_id, 'host_id')}:${required(payload?.thread_id, 'thread_id')}`;
   if (['task_queue', 'task_wake', 'dispatch', 'human_input', 'archive', 'unarchive'].includes(kind)) return `thread:${required(payload?.thread_id, 'payload.thread_id')}`;
-  if (kind === 'notify' || kind === 'review_report') return `inbox:${INBOX}`;
+  if (['notify','review_report','completion_report'].includes(kind)) return `inbox:${INBOX}`;
   if (kind === 'notion_sync') return `notion:${payload?.data_source_id ?? required(payload?.page_id, 'payload.page_id')}`;
   if (kind === 'auth') return `browser:${required(payload?.host_id, 'payload.host_id')}`;
   if (kind === 'automation_update') return `automation:${required(payload?.automation_id, 'payload.automation_id')}`;
@@ -379,6 +380,7 @@ export class ControlStore {
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       INSERT OR IGNORE INTO settings VALUES ('processing', 'on');`);
     this.feedback = new ReviewFeedback(this.db,this.now);
+    initCompletionNotices(this.db);
     this.reactive = new ReactiveState(this.db, { now:this.now, registry:this.taskRegistry });
     this.lifecycle = new LifecycleLedger(this.db, { now: this.now, scopeRegistry:this.taskRegistry, dependencyPolicy:this.dependencyPolicy, deliveryMode:bindings.delivery.slack_enabled?'slack':'local', unacknowledged:()=>{
       const file=path === ':memory:' ? null : resolve(dirname(path),'mailbox.sqlite');
@@ -400,6 +402,7 @@ export class ControlStore {
         const task=this.reactive.task(id),item=this.work.get(id);
         this.db.prepare("INSERT OR IGNORE INTO work_notices VALUES (?,?,?,'pending')").run(`complete:${wake}`,id,canonical({task_id:id,task_completed:true,
           text:`${id} · ${item?.data.title??task.contract.objective}：已完成全部任务验收。成果证据：${evidence_ref}`,
+          notification_status:'pending_user_visible_delivery',delivery_protocol:'TASK_COMPLETION_DELIVERY.md',
           archive_request:{task_id:id,thread_id:task.owner_id,evidence_ref},evidence_ref}));
       }
     };
@@ -449,12 +452,17 @@ export class ControlStore {
     });
   }
   reviewReportPolicy() { return readReviewReportPolicy(); }
+  completionReportPolicy() { return readCompletionReportPolicy(); }
+  recordCompletionNotice(input) { return recordPresentedCompletion(this,input); }
   prepare(input) {
     const key = required(input.key, 'action key');
     const creationActorReasons=this.work.creation.reasons(input.kind,input.task_id,input.payload,input.evidence);
     if(creationActorReasons.length)return {prepared:false,allowed:false,reasons:creationActorReasons};
     const reportReasons=reviewReportTaskReasons(this,input.kind,input.task_id,input.payload,input.evidence,null,key);
     if(reportReasons.length)return {prepared:false,allowed:false,reasons:reportReasons};
+    const completionReasons=[...completionReportReasons(this,input.kind,input.task_id,input.payload,input.evidence,null,key),
+      ...completionArchiveReasons(this,input.kind,input.task_id,input.payload,key)];
+    if(completionReasons.length)return {prepared:false,allowed:false,reasons:completionReasons};
     const decisionReasons=reviewDecisionTaskReasons(this,input.kind,input.task_id,input.payload,input.evidence,null,key);
     if(decisionReasons.length)return {prepared:false,allowed:false,reasons:decisionReasons};
     const reviewReasons=reviewCreationReasons(this,input);
@@ -607,6 +615,9 @@ export class ControlStore {
       if(creationActorReasons.length)return {claimed:false,reasons:creationActorReasons};
       const reportReasons=reviewReportTaskReasons(this,row.kind,row.task_id,payload,evidence,owner,key);
       if(reportReasons.length)return {claimed:false,reasons:reportReasons};
+      const completionReasons=[...completionReportReasons(this,row.kind,row.task_id,payload,evidence,owner,key),
+        ...completionArchiveReasons(this,row.kind,row.task_id,payload,key)];
+      if(completionReasons.length)return {claimed:false,reasons:completionReasons};
       const decisionReasons=reviewDecisionTaskReasons(this,row.kind,row.task_id,payload,evidence,owner,key);
       if(decisionReasons.length)return {claimed:false,reasons:decisionReasons};
       if(isQueuedResume(row.kind,payload)){
@@ -670,7 +681,7 @@ export class ControlStore {
       this.db.prepare("UPDATE actions SET state='claimed',attempt_id=?,owner=?,attempts=attempts+1,last_error=NULL,updated_at=? WHERE action_key=?").run(attempt, owner, this.now(), key);
       if (row.kind === 'task_queue') this.db.prepare("UPDATE rt_wakes SET state='claimed' WHERE id=? AND state='reserved'").run(payload.wake_id);
       return { claimed: true, key, attempt_id: attempt, payload: JSON.parse(row.payload),
-        ...(row.kind==='review_report'?{native_arguments:{threadId:payload.thread_id,prompt:payload.prompt}}:{}),
+        ...(['review_report','completion_report'].includes(row.kind)?{native_arguments:{threadId:payload.thread_id,prompt:payload.prompt}}:{}),
         ...(isReviewDelivery(row.kind) ? { send_tool_forbidden: true, requires_review_send_authorization: true } : {}) };
     });
   }
@@ -720,6 +731,7 @@ export class ControlStore {
         }
       }
       if (!row || row.state !== 'claimed' || row.attempt_id !== attempt_id) throw new Error(`Stale or unowned attempt: ${key}`);
+      if(row.kind==='completion_report'&&outcome==='sent')confirmCompletionReport(this,row,native_result);
       const retryable = outcome === 'not_sent' && ['rejected_before_send', 'transient_before_send'].includes(error_class) && row.attempts < 2;
       const state = outcome === 'not_sent' ? retryable ? 'prepared' : 'failed' : outcome;
       const due = retryable ? this.now() + Math.min(300000, 5000 * 2 ** (row.attempts - 1)) : this.now();
@@ -789,13 +801,14 @@ export class ControlStore {
           native_move: { threadId: setup.thread_id, hostId: setup.host_id, source: 'codex', projectId: project } }) };
     });
   }
-  reconcile({ key, confirmed_outcome, evidence_ref, owner_quiescent, verified_at, recover_queue=false, native_binding }) {
+  reconcile({ key, confirmed_outcome, evidence_ref, owner_quiescent, verified_at, recover_queue=false, native_binding, native_result }) {
     required(evidence_ref, 'reconciliation evidence_ref');
     if (!['sent', 'not_sent'].includes(confirmed_outcome)) throw new Error('Reconciliation needs a verified sent/not_sent outcome');
     if (owner_quiescent !== true || !freshness({ verified_at }, this.now())) throw new Error('Fresh quiescent-owner evidence required before reconciliation');
     return this.atomic(() => {
       const row = this.db.prepare('SELECT * FROM actions WHERE action_key=?').get(key);
       if (!row || !['claimed','uncertain',...(recover_queue?['prepared','failed']:[])].includes(row.state)) throw new Error(`Action does not require reconciliation: ${key}`);
+      if(row.kind==='completion_report'&&confirmed_outcome==='sent')confirmCompletionReport(this,row,native_result);
       let rejectedWake;
       if(recover_queue){
         const p=JSON.parse(row.payload),task=this.reactive.task(row.task_id);
@@ -937,6 +950,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
           return { claimed: false, reason: 'control_plane_delivery_requires_mailbox', send_tool_forbidden: true };
         return control.claim(input);
       }, refresh_review_decision_context: () => control.refreshReviewDecisionContext(input), authorize_review_send: () => control.authorizeReviewSend(input), settle: () => control.settle(input),
+      completion_status: () => completionReportStatus(control,input.task_id), record_completion_notice: () => control.recordCompletionNotice(input),
       record_creation: () => control.recordCreation(input), confirm_creation: () => control.confirmCreation(input),
       resolve_project: () => resolvePlacement(input),
       reconcile: () => control.reconcile(input), cancel: () => control.cancel(input),

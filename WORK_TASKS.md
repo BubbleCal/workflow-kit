@@ -1,3 +1,5 @@
+> Before completion archival, deliver the actual work, result, effect and impact to Yang in main under TASK_COMPLETION_DELIVERY.md. A file or pending inbox entry is insufficient; the archive guard requires verified main delivery. Reuse an already presented result without duplicate notification.
+
 > Cloud authentication is part of execution. Before declaring AWS access blocked or asking Yang to sign in, read AUTH_RECOVERY.md, reuse its verified Chrome/Bitwarden flow and save the concrete remaining step. Passive autofill failure or a detached page is not a human-only factor. Original owners recover; existing discovery/maintenance coach when needed. Preserve one login owner per shared session.
 
 > Important reusable conclusions belong in the user knowledge base. Original owners follow OWNER_KNOWLEDGE.md and the instance knowledge-base.json at meaningful result delivery; setup, routine status and raw logs are not knowledge records.

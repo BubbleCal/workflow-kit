@@ -39,6 +39,11 @@ that review, resolves its waits and preserves old decisions/contracts/reports.
 It refuses live wakes and prepared/claimed/uncertain actions. It does not mutate
 GitHub or archive the native chat itself.
 
+Before archiving, follow TASK_COMPLETION_DELIVERY.md: the terminal review result
+and its actual scope/impact must have reached Yang in main. Review Queue may
+report its saved terminal closure; do not wake a finished reviewer to repeat an
+already presented result. A closed PR does not imply the review was performed.
+
 Then use normal control prepare -> claim -> native set_thread_archived -> settle,
 with `kind:archive`, `purpose:review_pr_terminal`, the above user source ID and
 fresh current runtime_context. All normal archive guards remain, including

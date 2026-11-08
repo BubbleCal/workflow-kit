@@ -10,6 +10,7 @@ import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {ControlStore} from './control.mjs';
+import {completionReportStatus} from './completion-report.mjs';
 import {Mailbox} from './mailbox.mjs';
 import {NativeQueue,validateQueueCompatibility,verifyExecutionProof,verifyNativeBinding,nativeReadback} from './native-queue.mjs';
 import {ReactiveDriver} from './reactive-driver.mjs';
@@ -272,7 +273,12 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         mailbox=new Mailbox(join(root,'mailbox.sqlite'));state.checkWait=c=>['pr','review_request'].includes(c?.kind)?control.checkReactiveWait(c):mailbox.waits.check(c);
         if(input.disposition==='cycle_complete')new NativeServices({root,control,config}).assertFinished(input.task_id,input.wake_id);
         result=state.decide(input);
-      }else if(input.op==='finish'){const w=state.openWake(input.task_id);result=state.finish({...input,turn_id:input.turn_id??w?.turn_id});}
+      }else if(input.op==='finish'){
+        const w=state.openWake(input.task_id);result=state.finish({...input,turn_id:input.turn_id??w?.turn_id});
+        if(result.task_complete&&control.completionReportPolicy()?.enabled===true)
+          result={...result,completion_delivery:completionReportStatus(control,input.task_id),
+            instruction:'Before archival, follow TASK_COMPLETION_DELIVERY.md: notify Yang in main with completed work, result, effect and impact; verify actual main delivery. A saved file or inbox/queue ACK is insufficient. Reuse an already presented result without sending twice.'};
+      }
       else if(input.op==='wait_observe'){
         mailbox=new Mailbox(join(root,'mailbox.sqlite'));
         result=mailbox.atomic(()=>mailbox.waits.observe(input));
