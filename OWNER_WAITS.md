@@ -5,6 +5,15 @@ there is no coordinator reminder or periodic owner turn just to recheck evidence
 Read the current checkpoint and submit `runtime op decide` with the original task,
 owner, acknowledged wake, and expected context/plan revisions. Finish that wake.
 
+## Authentication is not an unexplored access wait
+
+For AWS authentication failures, follow AUTH_RECOVERY.md before an access wait.
+Save the current identity failure, recovery owner, supported attempts (including
+explicit Bitwarden Fill where available), and the visible remaining factor.
+An expired token or failed passive autofill alone does not establish a human
+blocker. Reuse shared successful login and revalidate guest credentials; source
+expiry must not keep a repaired session blocked. Never record credentials.
+
 ## Wait for a real source change
 
 Use `disposition: "wait"` with a typed condition and exact checkpoint fact versions.

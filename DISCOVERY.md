@@ -1,3 +1,5 @@
+> AWS access waits require the recovery evidence in AUTH_RECOVERY.md. During the existing owner-health audit, inspect new authentication failures and coach the original owner with the relevant verified success/failure procedure. Do not renew a generic "please log in" wait when ordinary supported recovery was not attempted. Keep one recovery owner per shared session and preserve human-only MFA boundaries.
+
 > Owner recovery runs before source reads. `discovery begin/plan` returns a fixed
 > `owner_health` target set when due; observe it even if chat-history pagination or
 > another provider is blocked. The batch cannot finish/checkpoint without these

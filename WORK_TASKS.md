@@ -1,3 +1,5 @@
+> Cloud authentication is part of execution. Before declaring AWS access blocked or asking Yang to sign in, read AUTH_RECOVERY.md, reuse its verified Chrome/Bitwarden flow and save the concrete remaining step. Passive autofill failure or a detached page is not a human-only factor. Original owners recover; existing discovery/maintenance coach when needed. Preserve one login owner per shared session.
+
 > Important reusable conclusions belong in the user knowledge base. Original owners follow OWNER_KNOWLEDGE.md and the instance knowledge-base.json at meaningful result delivery; setup, routine status and raw logs are not knowledge records.
 
 > Before creating an owner, assess the whole accepted task under MODEL_SELECTION.md. Save a short rationale through task assess_difficulty or request_owner; use the actual model/thinking returned by control claim. Existing owner models do not change.
