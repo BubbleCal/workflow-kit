@@ -1,3 +1,7 @@
+import {reconcileCreationWorkspace} from './creation-workspace-repair.mjs';
+import {beginDiscoveryFollowup,settleDiscoveryDelivery} from './discovery-followup.mjs';
+import {reconcileArtifactBinding} from './registration-repair.mjs';
+import {reconcileQueuedFollowup} from './human-followup.mjs';
 import {verifyQueuedRecoveryProof} from './queued-resume.mjs';
 import {scheduleCalendarPreparation,prepareTaskOwner} from './calendar-preparation.mjs';
 import {transferPausedOwner} from './owner-transfer.mjs';
@@ -151,6 +155,8 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         else if(input.op==='request_creation')result=control.work.creation.requestStart(input);
         else if(input.op==='prepare_owner')result=await prepareTaskOwner(control,input);
         else if(input.op==='reconcile_runtime_resume')result=reconcileCatalogResume(control,input);
+        else if(input.op==='reconcile_artifact')result=reconcileArtifactBinding(control,input);
+        else if(input.op==='reconcile_creation_workspace')result=reconcileCreationWorkspace(control,input);
         else if(input.op==='reconcile_history')result=control.work.reconcileHistory(input);
         else if(input.op==='assess_difficulty')result=control.work.assessDifficulty(input);
         else if(input.op==='request_owner')result=control.work.requestOwner(input);
@@ -174,12 +180,13 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         else if(input.op==='page')result=control.discovery.page(input);
         else if(input.op==='pending')result=control.discovery.pending(input);
         else if(input.op==='begin'){
-          result=control.discovery.begin(input);mailbox=new Mailbox(join(root,'mailbox.sqlite'));
+          result=control.discovery.begin(input);if(result.skipped){output(result);return;}mailbox=new Mailbox(join(root,'mailbox.sqlite'));
           const mail=mailbox.db.prepare('SELECT batch_id FROM mail WHERE item_key=?').get(result.mail_key);
           if(!mail?.batch_id)throw new Error('Discovery has no native queue batch receipt');
           mailbox.begin(mail.batch_id);
           if(result.invalidated)mailbox.finish(mail.batch_id,{processed_keys:[result.mail_key],note:'source scope changed; no source reads'});
         }else if(input.op==='ingest')result=control.discovery.ingest(input);
+        else if(input.op==='begin_followup')result=beginDiscoveryFollowup(control,input);
         else if(input.op==='append_catchup')result=control.discovery.appendCatchup(input);
         else if(input.op==='retry_checkpoint')result=control.discovery.recovery.requestRetry(input);
         else if(input.op==='classify'){result=control.discovery.classify(input);if(result.shared_service)result={...result,schedule_update:scheduleCalendarPreparation(control,result.task_id)};}
@@ -194,9 +201,8 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         }
         else if(input.op==='finish'){
           const b=control.discovery.batch(input.batch_id);result=control.discovery.finish(input);
-          mailbox=new Mailbox(join(root,'mailbox.sqlite'));const mail=mailbox.db.prepare('SELECT batch_id FROM mail WHERE item_key=?').get(b.mail_key);
-          if(!mail?.batch_id)throw new Error('Discovery queue receipt unavailable');
-          mailbox.finish(mail.batch_id,{processed_keys:[b.mail_key],note:result.finished?'source scan completed':'source scan checkpointed'});
+          mailbox=new Mailbox(join(root,'mailbox.sqlite'));const delivery=settleDiscoveryDelivery(control,mailbox,b,result);
+          if(delivery)result={...result,delivery};
         }else throw new Error('Unknown source-only discovery operation');
       }
       output(result);return;
@@ -263,6 +269,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
       }else if(input.op==='amend'){input.contract.workspace=realpathSync(input.contract.workspace);result=state.amend(input);}
       else if(input.op==='service_begin')result=new NativeServices({root,control,config}).begin(input);
       else if(input.op==='health_targets')result=new OwnerHealth(control).targets(input);
+      else if(input.op==='reconcile_followup')result=reconcileQueuedFollowup(control,input);
       else if(input.op==='health_observe')result=new OwnerHealth(control).observe(input);
       else if(input.op==='checkpoint')result=state.checkpoint(input.task_id);
       else if(input.op==='clear_next_action')result=state.waitPolicy.clear(input);

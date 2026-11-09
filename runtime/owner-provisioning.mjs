@@ -1,3 +1,4 @@
+import {verifyDiscoveryExecution} from './human-followup.mjs';
 import {verifyExecutionProof} from './native-queue.mjs';
 import {readReviewIntake,reviewCreationReasons} from './review-intake.mjs';
 
@@ -22,9 +23,9 @@ export class OwnerProvisioning {
   if(!actor?.thread_id||actor.thread_id===config.threads.main||owner&&owner!==actor.thread_id)throw new Error('owner_creation_discovery_actor_required');
   if(actor.thread_id===config.threads.discovery){
    const run=this.db.prepare('SELECT * FROM work_creation_runs WHERE batch_id=? AND generation=?').get(actor.batch_id??'',actor.generation??-1);
-   const batch=this.db.prepare('SELECT state,generation,prompt FROM discovery_batches WHERE id=?').get(actor.batch_id??'');
+   const batch=this.db.prepare('SELECT id,state,generation,prompt FROM discovery_batches WHERE id=?').get(actor.batch_id??'');
    if(!run||run.thread_id!==actor.thread_id||batch?.state!=='running'||batch.generation!==actor.generation)throw new Error('owner_creation_running_discovery_required');
-   const proof=verifyExecutionProof(actor.native_proof,{thread_id:actor.thread_id,workspace:config.thread_workspaces?.discovery??config.scope.project_root,prompt:batch.prompt,now:this.work.now()});
+   const proof=verifyDiscoveryExecution(this.db,config,batch,actor.native_proof,this.work.now())??verifyExecutionProof(actor.native_proof,{thread_id:actor.thread_id,workspace:config.thread_workspaces?.discovery??config.scope.project_root,prompt:batch.prompt,now:this.work.now()});
    if(proof.turn_id!==run.turn_id)throw new Error('owner_creation_native_turn_changed');
    return {thread_id:actor.thread_id,turn_id:proof.turn_id,batch_id:actor.batch_id,generation:actor.generation};
   }

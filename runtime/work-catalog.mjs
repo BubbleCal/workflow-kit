@@ -327,6 +327,7 @@ export class WorkCatalog {
     if(this.execution(id)){const existing=this.db.prepare('SELECT contract FROM rt_tasks WHERE task_id=?').get(id);if(existing)return parse(existing.contract);}
     return {objective:t.data.objective,requirements:t.data.requirements,constraints:t.data.constraints,workspace:t.data.workspace,
       project_id:this.config.scope.project_id,canonical_key:t.canonical_key,authorization_ref:t.authorization?.evidence_ref,
+      ...(t.data.product_workspace?{product_workspace:t.data.product_workspace}:{}),
       task_kind:t.kind,job_sources:t.data.job_sources,pull_requests:t.data.pull_requests,
       ...(t.data.meeting_service?{meeting_service:t.data.meeting_service}:{}),
       ...(t.data.schedule_sources?{schedule_sources:t.data.schedule_sources,trigger_only:t.data.trigger_only===true}:{}),

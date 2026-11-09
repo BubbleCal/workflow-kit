@@ -89,3 +89,30 @@ models unchanged. It cannot resume a completed runtime goal, bind another owner,
 expand the contract, start work or submit a report on the owner's behalf.
 
 Owner creation, actor proofs and explicit human start triggers follow OWNER_CREATION.md. Use task creation_pending to inspect accepted setup; task request_creation records an actual human start request for an already accepted ownerless task.
+
+`task reconcile_artifact` restores an already authorized lifecycle artifact to
+the same accepted implementation task's current contract and catalog. Supply
+task_id, repository, pr_number, original owner_thread_id, expected_contract_rev,
+expected_revision, actual repair source_message_id/evidence_ref and fresh
+native_proof of an acknowledged original-owner turn. It rejects foreign/untracked
+PRs, owner changes, review-only tasks and in-flight effects. Only pull_requests
+metadata changes, with a durable audit and one reconciliation event; original
+goals, source authority and all delivery/approval holds remain. This is not a
+product goal amendment or permission to send a card. The original owner refreshes
+its checkpoint and all gates before actual delivery.
+
+### Repair an unbound creation workspace
+
+`task op` `reconcile_creation_workspace` is only for an accepted implementation
+task with no bound owner or runtime execution and one completed, sent native
+creation. Supply exact task/creation/owner identity, expected_revision, fresh
+native_proof of the terminal setup prompt, a fresh `codex_app.list_projects`
+project_listing, and original native human_authorization plus its exact
+source_thread_id/source_turn_id/source_message_id/verbatim_text,
+actual_human_verified and evidence_ref. The verified project path becomes the
+conversation workspace; the original accepted path remains product_workspace
+in the catalog and execution contract. Goals, acceptance, repository scope and
+permissions remain unchanged. The original discovery actor still binds/starts
+the same owner. This does not change App directories, grant filesystem access,
+replace an owner, or repair running task contracts. Run product commands in
+product_workspace (or the task's authorized worktree), not the launch directory.

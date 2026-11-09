@@ -1,3 +1,4 @@
+import {verifyHumanFollowup} from './human-followup.mjs';
 import {verifyQueuedRecoveryProof} from './queued-resume.mjs';
 import {prWakeProjection,prChangeReasons} from './owner-wake.mjs';
 import {OwnerWaitPolicy,changeDrivenWait} from './owner-wait-policy.mjs';
@@ -423,6 +424,7 @@ export class ReactiveState {
       const task=this.task(task_id),wake=this.openWake(task_id);
       if(task?.contract.retired===true)return {begun:false,skipped:true,quiet:true,reason:'service_retired',instruction:'End immediately. Responsibilities were transferred to original owners; do not process or resend this historical wake.'};
       const retired=this.db.prepare("SELECT task_id,state FROM rt_wakes WHERE id=?").get(wake_id);
+      if(retired?.task_id===task_id&&retired.state==='superseded'&&this.db.prepare('SELECT 1 FROM rt_diagnostics WHERE key=?').get(`followup-superseded:${wake_id}`))return {begun:false,skipped:true,quiet:true,reason:'superseded_by_verified_followup',instruction:'Preserve the old unconsumed receipt; do not replay obsolete work or disturb the current original-owner execution.'};
       if(retired?.task_id===task_id&&['finished','ended_unresolved'].includes(retired.state))
         return {begun:false,skipped:true,quiet:true,reason:'wake_already_terminal',instruction:'This wake was already handled or recovered. End this duplicate delivery immediately without work, retry or finish; preserve the original receipt and current owner.'};
       const deferred=parse(this.db.prepare('SELECT data FROM rt_diagnostics WHERE key=?').get(`maintenance-deferred:${wake_id}`)?.data);
@@ -430,11 +432,15 @@ export class ReactiveState {
         deferred?.reason==='user_rescheduled_maintenance' && deferred.authorization_ref && deferred.evidence_ref)
         return {begun:false,skipped:true,quiet:true,reason:'user_rescheduled_maintenance',next_eligible_at:deferred.next_eligible_at,
           instruction:'End this obsolete wake immediately without maintenance, notification, retry or finish. The accepted queue receipt remains historical.'};
-      if(!task || task.mode!=='active' || wake?.id!==wake_id || wake.transport!=='native_queue' ||
+      if(!task || task.mode!=='active' || wake?.id!==wake_id || !['native_queue','native_followup'].includes(wake.transport) ||
         !['claimed','queued','uncertain','running'].includes(wake.state))
         throw new Error('Execution must match the original task, wake and actual new turn');
       let execution;
-      try{execution=verifyExecutionProof(native_proof,{thread_id:task.owner_id,workspace:task.contract.workspace,prompt:wake.prompt,now:this.now()});}
+      if(wake.transport==='native_followup'){
+        const binding=parse(this.db.prepare('SELECT data FROM rt_diagnostics WHERE key=?').get(`followup-binding:${wake.id}`)?.data);
+        const action=binding&&this.db.prepare('SELECT * FROM actions WHERE action_key=?').get(binding.action_key);
+        execution=verifyHumanFollowup(native_proof,{task,action,source_message_id:binding?.source_message_id,now:this.now()});
+      }else try{execution=verifyExecutionProof(native_proof,{thread_id:task.owner_id,workspace:task.contract.workspace,prompt:wake.prompt,now:this.now()});}
       catch(error){
         const action=this.db.prepare('SELECT * FROM actions WHERE action_key=?').get(`resume-input:${task_id}:${wake.queue_id}`);
         if(!action)throw error;

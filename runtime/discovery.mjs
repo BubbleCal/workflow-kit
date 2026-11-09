@@ -1,3 +1,4 @@
+import {verifyDiscoveryExecution} from './human-followup.mjs';
 import {DiscoveryRecovery} from './discovery-recovery.mjs';
 import {OwnerHealth} from './owner-health.mjs';
 import {compactDiscoveryBatch,nextDiscoverySlot} from './discovery-efficiency.mjs';
@@ -300,7 +301,12 @@ export class DiscoveryStore {
   begin({batch_id,generation,native_proof}){
     return this.atomic(()=>{
       const b=this.batch(batch_id);if(!b||b.generation!==generation)throw new Error('Stale discovery generation');
-      const proof=verifyExecutionProof(native_proof,{thread_id:this.config.threads.discovery,workspace:this.config.thread_workspaces?.discovery??this.config.scope.project_root,prompt:b.prompt,now:this.now()});
+      const recovery=this.db.prepare('SELECT data FROM rt_diagnostics WHERE key=?').get(`discovery-followup:${b.id}:${b.generation}`);
+      if(recovery&&JSON.parse(recovery.data).turn_id!==nativeReadback(native_proof.readback).turns?.[0]?.id){
+        verifyExecutionProof(native_proof,{thread_id:this.config.threads.discovery,workspace:this.config.thread_workspaces?.discovery??this.config.scope.project_root,prompt:b.prompt,now:this.now()});
+        return {...b,begun:false,skipped:true,quiet:true,reason:'batch_bound_to_verified_followup'};
+      }
+      const proof=verifyDiscoveryExecution(this.db,this.config,b,native_proof,this.now())??verifyExecutionProof(native_proof,{thread_id:this.config.threads.discovery,workspace:this.config.thread_workspaces?.discovery??this.config.scope.project_root,prompt:b.prompt,now:this.now()});
       if(b.state==='invalidated')return {...b,invalidated:true};
       this.checkBatch(batch_id);this.selectHealth(b);this.work.creation.recordRun(b,proof);
       this.db.prepare("UPDATE discovery_batches SET state='running',started_at=? WHERE id=?").run(b.state==='pending'?this.now():b.started_at,batch_id);

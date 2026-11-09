@@ -86,3 +86,30 @@ only when the matching guarded recovery action has a successful native receipt.
 This records execution through recovery without claiming the original queue item
 was consumed; the original message and queue ID are retained. Later delivery of
 that old wake skips execution when another turn already owns or finished it.
+
+## Binding an authenticated human relay
+
+A controlled human_input relay is not a literal native human userMessage. Do not
+forge it or weaken report/creation guards. `runtime op reconcile_followup` accepts
+the existing sent correction/steering action_key, task_id, source_message_id,
+actual_human_verified, evidence_ref, expected_context_rev, expected_wake_id and
+expected_queue_id (null only if no open wake). Supply fresh original-owner
+native_proof with includeOutputs=true and an untruncated native functionCallOutput
+for the exact action sender/prompt, plus human_authorization containing the
+original actual codex_app.read_thread source proof. The human message ID, thread,
+turn and verbatim text must agree with the previously guarded sent action.
+
+The API preserves the sole writer, current contract, holds, jobs and old queue
+receipt. An unconsumed old execution is superseded with queue_consumed=false; a
+late delivery skips quietly. An active actual relay turn gets an acknowledged
+normal report/decide/finish wake. An already ended relay gets ended_unresolved
+evidence and normal subsequent continuation, without redoing historical effects.
+Uncertain sends, mismatched/expired proofs and competing running wakes fail closed.
+
+For the existing discovery owner use `discovery op begin_followup` with exact
+batch_id, generation, expected_mail_key and the same action/source/proofs. Only
+its actual active native relay can begin the original batch. No replacement
+batch/chat or weaker creation actor is allowed. A still-unsent mailbox delivery
+is superseded with its immutable input retained; accepted/uncertain receipts are
+left untouched, and late original queue turns skip. prepare_owner/claim/bind/start
+still require fresh native actor/project proofs and actual owner execution.

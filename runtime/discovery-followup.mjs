@@ -1,0 +1,47 @@
+import {DatabaseSync} from 'node:sqlite';
+import {join} from 'node:path';
+import {verifyHumanFollowup,verifyFollowupAuthority} from './human-followup.mjs';
+
+export function beginDiscoveryFollowup(control,input){
+ const {batch_id,generation,action_key,source_message_id,expected_mail_key,evidence_ref,native_proof,human_authorization,actual_human_verified}=input;
+ if(actual_human_verified!==true||!source_message_id||!evidence_ref)throw new Error('Actual scoped human recovery authorization required');
+ const discovery=control.discovery,config=control.work.config;
+ const result=control.atomic(()=>{
+  const b=discovery.checkBatch(batch_id);
+  if(b.generation!==generation||b.mail_key!==expected_mail_key)throw new Error('Exact existing discovery batch/generation/delivery identity required');
+  const action=control.db.prepare('SELECT * FROM actions WHERE action_key=?').get(action_key),task={task_id:'discovery',owner_id:config.threads.discovery,contract:{workspace:config.thread_workspaces?.discovery??config.scope.project_root}};
+  const proof=verifyHumanFollowup(native_proof,{task,action,source_message_id,now:control.now()});verifyFollowupAuthority(human_authorization,proof.payload);
+  if(proof.status!=='inProgress')throw new Error('Only the actual active discovery followup can begin setup');
+  const previous=control.db.prepare('SELECT * FROM work_creation_runs WHERE batch_id=? AND generation=?').get(batch_id,generation);
+  if(previous&&previous.turn_id!==proof.turn_id)throw new Error('Preserve an already acknowledged discovery writer');
+  control.reactive.diagnostic(`discovery-followup:${batch_id}:${generation}`,{action_key,source_message_id,evidence_ref,turn_id:proof.turn_id,original_queue_consumed:false,mail_key:b.mail_key});
+  discovery.selectHealth(b);control.work.creation.recordRun(b,proof);
+  control.db.prepare("UPDATE discovery_batches SET state='running',started_at=COALESCE(started_at,?) WHERE id=?").run(control.now(),batch_id);
+  return {batch_id,generation,turn_id:proof.turn_id,original_queue_consumed:false,owner_unchanged:true,mail_key:b.mail_key};
+ });
+ // A human relay may arrive before the normal queue sends the pending batch.
+ // Retire only a still-unsent delivery, retaining its immutable input. If the
+ // daemon raced ahead, leave its receipt untouched; a late begin is skipped.
+ const mailbox=new DatabaseSync(join(config.instance_root,'mailbox.sqlite'));
+ try{mailbox.exec('PRAGMA busy_timeout=5000');const update=mailbox.prepare("UPDATE mail SET state='superseded' WHERE item_key=? AND state='pending' AND batch_id IS NULL").run(result.mail_key);
+  return {...result,unsent_delivery_superseded:!!update.changes,batch:discovery.plan(batch_id)};
+ }finally{mailbox.close();}
+}
+
+// An authenticated relay can retire a never-sent mailbox item. Its durable
+// source checkpoint still needs a truthful local settlement, not a fake ACK.
+export function settleDiscoveryDelivery(control,mailbox,batch,result){
+ const mail=mailbox.db.prepare('SELECT state,batch_id FROM mail WHERE item_key=?').get(batch.mail_key);
+ if(mail?.batch_id){mailbox.finish(mail.batch_id,{processed_keys:[batch.mail_key],note:result.finished?'source scan completed':'source scan checkpointed'});return null;}
+ const current=control.discovery.batch(batch.id),row=control.db.prepare('SELECT data FROM rt_diagnostics WHERE key=?').get(`discovery-followup:${batch.id}:${batch.generation}`),binding=row&&JSON.parse(row.data);
+ const action=binding&&control.db.prepare('SELECT * FROM actions WHERE action_key=?').get(binding.action_key),payload=JSON.parse(action?.payload??'{}'),receipt=JSON.parse(action?.receipt??'{}');
+ const native=receipt.native_result?.structuredContent??receipt.native_result?.content?.flatMap(c=>{try{return [JSON.parse(c.text)];}catch{return [];}}).find(c=>c.threadId);
+ if(mail?.state!=='superseded'||!current||current.generation!==batch.generation||!['finished','checkpointed'].includes(current.state)||
+  !binding?.turn_id||binding.mail_key!==batch.mail_key||binding.original_queue_consumed!==false||action?.kind!=='human_input'||action.task_id!=='discovery'||
+  action.state!=='sent'||payload.thread_id!==control.work.config.threads.discovery||receipt.outcome!=='sent'||receipt.native_result?.isError===true||native?.threadId!==payload.thread_id)
+  throw new Error('Discovery queue receipt or exact authenticated superseded unsent relay required');
+ const key=`discovery-relay-finish:${batch.id}:${batch.generation}`,prior=control.db.prepare('SELECT data FROM rt_diagnostics WHERE key=?').get(key);
+ if(prior)return JSON.parse(prior.data);
+ const settlement={settled:true,transport:'native_followup',batch_id:batch.id,generation:batch.generation,mail_key:batch.mail_key,action_key:binding.action_key,turn_id:binding.turn_id,state:current.state,original_queue_consumed:false,unsent_delivery_preserved:true};
+ control.reactive.diagnostic(key,settlement);return settlement;
+}
