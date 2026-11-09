@@ -71,6 +71,21 @@ head or revoked decision cannot silently reuse one. Do not repeatedly notify an
 unchanged PR. If the user expressly approves a bounded later adjustment, preserve
 that actual scope and verify it when recording clearance for the resulting head.
 
+Main may also verify an actual human reply in a side conversation. Keep its real
+`source_thread_id`, `source_turn_id`, message ID and verbatim text; add
+`recorded_by_thread_id` equal to main and `source_actor_verified:true` only after
+native readback. An agent relay alone is not consent and must not be relabeled
+as a human message in main.
+
+Explicit permission to merge a nonordinary change is separate from review
+delivery. Main records it in `PR_REVIEW_CHANNELS.json.merge_authorizations` with
+the exact `pr_url`, `head_sha`, `decision:allow_merge`,
+`nonordinary_change_accepted:true` and the same verified human provenance.
+It releases only that PR/head's nonordinary-change restriction. Full feedback,
+designated human approval, CI, repository rules, ownership, no-admin and
+expected-head guards still apply. Review permission alone never permits merge;
+neither permission authorizes publication, deployment or another PR in a stack.
+
 After clearance the original owner refreshes the normal review gates and delivers
 the canonical URL once to the authorized destination. Functions scope holds need
 their own matching `pr_authorizations` entry under FUNCTIONS_REVIEW_DECISIONS.md;

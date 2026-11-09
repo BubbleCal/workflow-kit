@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {personalReviewState,personalReviewReasons} from './pr-personal-review.mjs';
+import {personalReviewState,personalReviewReasons,explicitMergeAllowed} from './pr-personal-review.mjs';
 import {fixture,OWNER,NOW} from './test-fixtures/reactive.mjs';
 import {passedReviewGates} from './test-fixtures/pr-review.mjs';
 import {INBOX,CHANNEL,assess} from './control.mjs';
@@ -12,6 +12,39 @@ const impact=()=>({pr_url:url,head_sha:head,checked_at:new Date(NOW).toISOString
 const rule=()=>({enabled:true,thread_id:INBOX,source_message_id:'human:risk-policy',evidence_ref:'actual-human-policy',authorizations:[]});
 const authorization=()=>({pr_url:url,head_sha:head,decision:'allow_external_review',actual_human_verified:true,
   reviewed_personally:true,source_thread_id:INBOX,source_message_id:'human:reviewed-and-release',evidence_ref:'actual-human-reply'});
+
+test('side conversation clearance requires main-verified actual human provenance',()=>{
+  const d={...authorization(),source_thread_id:'side-thread',source_turn_id:'side-turn',
+    verbatim_text:'Send this PR for review',recorded_by_thread_id:INBOX,source_actor_verified:true};
+  const policy={personal_review:{...rule(),authorizations:[d]}};
+  const payload={pr_url:url,expected_head_sha:head},e={pr_url:url,current_head_sha:head,executor_thread_id:OWNER,pr_impact:impact()};
+  assert.equal(personalReviewState(payload,e,policy,NOW).authorized,true);
+  for(const patch of [{recorded_by_thread_id:OWNER},{source_actor_verified:false},{source_turn_id:''},{verbatim_text:''},
+    {actual_human_verified:false},{head_sha:'b'.repeat(40)},{revoked:true}]) {
+    policy.personal_review.authorizations=[{...d,...patch}];
+    assert.equal(personalReviewState(payload,e,policy,NOW).authorized,false);
+  }
+});
+
+test('explicit nonordinary merge permission binds PR and head and preserves every technical gate',()=>{
+  const f=setup();try {
+    const d={...authorization(),decision:'allow_merge',nonordinary_change_accepted:true};
+    const e={...f.evidence,ordinary_change:false,approver:'test-reviewer',approver_identity_verified:true,
+      approval_state:'APPROVED',approved_head_sha:head,required_checks_pass:true,repository_rules_satisfied:true,
+      mergeable:true,admin_override:false};
+    f.policy.merge_authorizations=[d];
+    const gate=patch=>assess('merge',f.action.payload,{...e,...patch},NOW,undefined,undefined,null,null,f.policy);
+    assert.equal(gate({}).allowed,true);
+    for(const patch of [{material_findings_open:true},{required_checks_pass:false},{approval_state:'CHANGES_REQUESTED'},
+      {repository_rules_satisfied:false},{validation_current:false},{admin_override:true}])assert.equal(gate(patch).allowed,false);
+    for(const patch of [{head_sha:'b'.repeat(40)},{pr_url:url+'0'},{revoked:true},
+      {decision:'allow_external_review'},{nonordinary_change_accepted:false},{actual_human_verified:false}]) {
+      f.policy.merge_authorizations=[{...d,...patch}];
+      assert.equal(explicitMergeAllowed(f.action.payload,e,f.policy),false);
+      assert.ok(gate({}).reasons.includes('important_or_unresolved_change'));
+    }
+  }finally{f.c.close();}
+});
 function setup(){
   const f=fixture(),task=f.s.task('T-1');
   f.s.amend({task_id:'T-1',expected_contract_rev:task.contract_rev,contract:{...task.contract,pull_requests:[{repository:'example/service',pr_number:1}]},source_message_id:'human:bind',actual_human_verified:true});

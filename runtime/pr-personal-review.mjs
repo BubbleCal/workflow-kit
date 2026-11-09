@@ -3,6 +3,23 @@ import {bindings} from './instance.mjs';
 const flags=['breaking_change','format_change','broad_impact','high_risk'];
 const present=value=>typeof value==='string'&&!!value.trim();
 
+// Main may verify an actual human reply in a side conversation. Preserve its
+// real source identity rather than relabeling it as a message in main.
+function humanAuthorizationSource(d,main) {
+  return d?.actual_human_verified===true&&present(d.source_message_id)&&present(d.evidence_ref)&&
+    (d.source_thread_id===main||d.recorded_by_thread_id===main&&
+      d.source_actor_verified===true&&present(d.source_thread_id)&&
+      present(d.source_turn_id)&&present(d.verbatim_text));
+}
+
+export function explicitMergeAllowed(payload,e,policy) {
+  const main=bindings.threads.inbox,pr=payload?.pr_url,head=payload?.expected_head_sha;
+  return pr===e.pr_url&&head===e.current_head_sha&&
+    Array.isArray(policy?.merge_authorizations)&&policy.merge_authorizations.some(d=>
+      d.pr_url===pr&&d.head_sha===head&&d.decision==='allow_merge'&&
+      d.nonordinary_change_accepted===true&&d.revoked!==true&&humanAuthorizationSource(d,main));
+}
+
 // Owner assessment is required even when a PR has no risk labels. Labels can
 // add a trigger, never remove an owner's assessment of the actual diff.
 export function personalReviewState(payload,e,policy,now=Date.now()) {
@@ -25,8 +42,7 @@ export function personalReviewState(payload,e,policy,now=Date.now()) {
   if(labels.some(l=>['format-change','file-format-change'].includes(l))&&!triggers.includes('format_change'))triggers.push('format_change');
   if(e.ordinary_change===false&&!triggers.length)triggers.push('nonordinary_change');
   const authorized=rule.authorizations.some(d=>d?.pr_url===pr&&d.head_sha===head&&
-    d.decision==='allow_external_review'&&d.actual_human_verified===true&&
-    d.source_thread_id===rule.thread_id&&present(d.source_message_id)&&present(d.evidence_ref)&&
+    d.decision==='allow_external_review'&&humanAuthorizationSource(d,rule.thread_id)&&
     d.reviewed_personally===true&&d.revoked!==true);
   return {enabled:true,reasons:[],required:triggers.length>0,authorized,triggers,rule};
 }
