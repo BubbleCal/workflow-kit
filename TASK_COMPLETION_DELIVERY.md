@@ -59,7 +59,12 @@ queue receipt, truncated/nonmatching readback or another task's message cannot
 unlock archival. Unknown sends remain uncertain; reconcile, never blindly resend.
 For a later proven delivery, use normal `op:reconcile`, confirmed_outcome=sent,
 fresh quiescent-owner evidence and the same native_result.main_readback. This
-records the actual result without a second native send.
+records the actual result without a second native send. The delegated XML transport is
+decoded exactly once for content comparison; the original proof stays unchanged.
+For an uncertain action with its original stored successful send ACK and exact
+cached main readback, reconciliation may reuse that historical proof. It records
+only the original accepted completion, even if later input reopened the task. It
+cannot complete the new scope or satisfy its current archival gate.
 
 Only after verified delivery may the existing archive prepare/claim/native
 set_thread_archived/settle/readback process run. All idle/no-jobs/no-pending-input,

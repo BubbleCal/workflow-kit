@@ -108,3 +108,33 @@ test('a newly completed scope cannot reuse the prior result receipt or its prepa
     assert.ok(f.c.claim({key:f.archive.key,owner:OWNER,evidence:f.archive.evidence}).reasons.includes('completion_result_not_presented_in_main'));
   }finally{f.c.close();}
 });
+
+
+test('completion readback decodes XML transport escaping once and preserves literal entity text',()=>{
+ const f=setup();try{
+  const text=f.payload.prompt+'\nCompare 2 > 1 and x < y; keep literal &gt; and &amp; unchanged.';
+  const action={...f.action,payload:{...f.payload,prompt:text}};f.c.prepare(action);const claim=f.c.claim({key:action.key,owner:OWNER,evidence:f.evidence});assert(claim.claimed);
+  const encoded=text.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+  f.c.settle({key:action.key,attempt_id:claim.attempt_id,outcome:'sent',evidence_ref:'actual-escaped-main-message',native_result:{main_readback:f.proof(encoded)}});
+  assert(completionReportStatus(f.c,'T-1').delivered);
+ }finally{f.c.close();}
+});
+
+test('XML-looking result text cannot escape its sender envelope or be recursively decoded',()=>{
+ for(const alter of [text=>text.replace('Merged','Changed'),text=>text.replaceAll('&gt;','>')]){
+  const f=setup();try{const text=f.payload.prompt+'\nKeep literal &gt;';const action={...f.action,payload:{...f.payload,prompt:text}};f.c.prepare(action);const claim=f.c.claim({key:action.key,owner:OWNER,evidence:f.evidence});const bad=alter(text).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');assert.throws(()=>f.c.settle({key:action.key,attempt_id:claim.attempt_id,outcome:'sent',evidence_ref:'wrong-result',native_result:{main_readback:f.proof(bad)}}),/exact delivered/);assert.equal(completionReportStatus(f.c,'T-1').delivered,false);}finally{f.c.close();}
+ }
+});
+
+
+test('a preserved uncertain send/readback can confirm its historical completion without completing reopened work',()=>{
+ const f=setup();try{f.c.prepare(f.action);const claim=f.c.claim({key:f.action.key,owner:OWNER,evidence:f.evidence}),proof=f.proof(),native={main_readback:proof,send:{isError:false,content:[{type:'text',text:JSON.stringify({threadId:INBOX})}]}};
+  f.c.settle({key:f.action.key,attempt_id:claim.attempt_id,outcome:'uncertain',evidence_ref:'original-immutable-receipt',native_result:native});
+  f.advance(301000);f.event('new-source-after-completion',{new_work:true});assert.equal(f.s.task('T-1').status,'needs_decision');
+  const input={key:f.action.key,confirmed_outcome:'sent',evidence_ref:'unchanged-original-proof',owner_quiescent:true,verified_at:new Date(f.now()).toISOString()};
+  const changed=structuredClone(native);changed.main_readback.readback.turns[0].items[0].output.text+='changed';assert.throws(()=>f.c.reconcile({...input,native_result:changed}),/fresh/);
+  f.c.reconcile({...input,native_result:native});assert.equal(f.c.db.prepare('SELECT state FROM actions WHERE action_key=?').get(f.action.key).state,'sent');
+  assert.equal(f.s.task('T-1').status,'needs_decision');assert.equal(completionReportStatus(f.c,'T-1').delivered,false);assert.equal(f.c.prepare(f.archive).allowed,false);
+  assert.equal(f.c.db.prepare('SELECT completion_id FROM task_completion_notices').get().completion_id,f.completion.id);
+ }finally{f.c.close();}
+});

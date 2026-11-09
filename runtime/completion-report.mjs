@@ -1,3 +1,4 @@
+import {isDeepStrictEqual} from 'node:util';
 import {existsSync,readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -58,11 +59,13 @@ export function completionReportReasons(control,kind,id,payload,e={},actor,key){
     reasons.push('completion_already_delivered');
   return reasons;
 }
-function verifyMainMessage(control,proof,{text,actor,assistantOnly=false}){
+// Decode the XML transport layer exactly once, without reparsing result markup.
+const xmlText=value=>value.replace(/&(amp|lt|gt|quot|apos);/g,(_,entity)=>({amp:'&',lt:'<',gt:'>',quot:'\"',apos:"'"})[entity]);
+function verifyMainMessage(control,proof,{text,actor,assistantOnly=false,historical=false}){
   const p=control.completionReportPolicy();let read;
   try{read=nativeReadback(proof?.readback);}catch{throw new Error('Actual fresh main-chat readback is required');}
   if(!policyValid(p)||proof?.source!=='codex_app.read_thread'||!proof.evidence_ref||
-    !fresh(proof.checked_at,control.now())||read?.thread?.id!==p.thread_id)
+    !(fresh(proof.checked_at,control.now())||historical)||read?.thread?.id!==p.thread_id)
     throw new Error('Actual fresh main-chat readback is required');
   for(const turn of read.turns??[])for(const item of turn.items??[]){
     if(item.type==='agentMessage'&&item.phase==='final_answer'&&item.text===text&&item.id)return item.id;
@@ -70,18 +73,26 @@ function verifyMainMessage(control,proof,{text,actor,assistantOnly=false}){
     if(item.type==='functionCallOutput'&&item.name==='send_message_to_thread'&&item.namespace==='codex_app'&&
       item.output?.truncated!==true&&item.id){
       const delegated=item.output?.text?.match(/^\s*<codex_delegation>\s*<source_thread_id>([^<]+)<\/source_thread_id>\s*<input>([\s\S]*)<\/input>\s*<\/codex_delegation>\s*$/);
-      if(delegated?.[1]===actor&&delegated[2]===text)return item.id;
+      if(delegated?.[1]===actor&&xmlText(delegated[2])===text)return item.id;
     }
   }
   throw new Error('Main readback must contain the exact delivered completion, not a queue or send acknowledgement');
 }
 export function confirmCompletionReport(control,row,nativeResult){
-  const payload=JSON.parse(row.payload),x=completionIdentity(control,row.task_id);
-  if(!x||x.id!==payload.completion_id)throw new Error('Completion changed before notification confirmation');
-  const proof=nativeResult?.main_readback;
-  const message=verifyMainMessage(control,proof,{text:payload.prompt,actor:row.owner});
+  const payload=JSON.parse(row.payload),completion=control.db.prepare("SELECT id,created_at FROM rt_decisions WHERE id=? AND task_id=? AND disposition='complete'").get(payload.completion_id,row.task_id);
+  if(!completion||row.created_at<completion.created_at)throw new Error('Original accepted completion required before notification confirmation');
+  const proof=nativeResult?.main_readback,cached=JSON.parse(row.receipt??'{}').native_result;
+  const send=cached?.send;
+  let acknowledged=send?.structuredContent?.threadId;
+  for(const item of send?.content??[])if(item.type==='text'){try{acknowledged=JSON.parse(item.text).threadId;}catch{}}
+  // A later event may reopen the task. Confirm only its old delivery fact; this
+  // never completes the new scope or makes its archival notice current.
+  const historical=row.state==='uncertain'&&send?.isError!==true&&acknowledged===control.completionReportPolicy()?.thread_id&&
+    isDeepStrictEqual(cached?.main_readback,proof)&&Number.isFinite(Date.parse(proof?.checked_at))&&
+    Date.parse(proof.checked_at)>=row.created_at&&Date.parse(proof.checked_at)<=control.now()+5000;
+  const message=verifyMainMessage(control,proof,{text:payload.prompt,actor:row.owner,historical});
   control.db.prepare('INSERT OR IGNORE INTO task_completion_notices VALUES (?,?,?,?,?,?,?)')
-    .run(row.task_id,x.id,row.action_key,message,digest(payload.prompt),proof.evidence_ref,control.now());
+    .run(row.task_id,completion.id,row.action_key,message,digest(payload.prompt),proof.evidence_ref,control.now());
 }
 // Reuse a result already presented in main, without waking a completed owner or
 // notifying twice. Only main may register its own actual final-answer evidence.

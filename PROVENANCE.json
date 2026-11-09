@@ -1,7 +1,7 @@
 {
   "version": "0.9.1",
   "source": "workflow-kit repository source",
-  "upstream_base_commit": "994a58e397de1a2ea19669d30cde73eead263b47",
+  "upstream_base_commit": "571fe04a3ca795bb79a60b9344457e1d617df185",
   "source_files": {
     "package.json": "80ba1b31f033e1d5c6727bbf5381196cf7c644b6b90ecedc9ceedd376df42a8d",
     "runtime/calendar-preparation.mjs": "e6c4de5e26b3ecf782cb8143732a58a7ba859ecbf55031e570ddbf78ac6f3113",
@@ -9,8 +9,8 @@
     "runtime/catalog-resume.mjs": "a716367e1022dd93f7777ff1a208a0ba7daa6ef66bd4f68995bc12911c0c73e4",
     "runtime/catalog-resume.test.mjs": "1b0478a91f1fe0e3a4f7ffe412ff78c84a43e0981c21f41f4ff180ac7e90b43c",
     "runtime/ci-state.mjs": "8f00790daaa150c53f93c36ea0cabbcebd9bc2c0e571c478328a68db7444de58",
-    "runtime/completion-report.mjs": "27803d0fcfdbb3a15cc7858a7686e2342a9ece23da9d4058b77157dfd899ade5",
-    "runtime/completion-report.test.mjs": "fc8dd250da3260779ae1df6ade4f82f796f039e6c98afae2d4a98b88ae83b7ca",
+    "runtime/completion-report.mjs": "195ca2d1392d9a4b513f844c3ef7076a12341a0f1f73c6227872f96621b92431",
+    "runtime/completion-report.test.mjs": "c6ff87f46a15dd1146dcd9703eb0e98820c2c1e445b399ea2b528ef9cb9bc8d4",
     "runtime/control.mjs": "e6c75e0a1a54491e646eb1902f9ca2751c617fd7dace0fea0d3bb21e596096a4",
     "runtime/control.test.mjs": "acfd912ad5b4571ed68cd0769daa3f5bb14696db6b37814e31cd262659743e50",
     "runtime/creation-workspace-repair.mjs": "d0362845b393c4b57e1d9eb898b1be901c3582b574c330d00cd56a4c9f18ce60",
