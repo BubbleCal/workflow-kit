@@ -1,23 +1,16 @@
+import {humanAuthorizationSource,reviewDerivedMergeAllowed,mergeAuthorizationReasons} from './pr-authorization.mjs';
 import {bindings} from './instance.mjs';
 
 const flags=['breaking_change','format_change','broad_impact','high_risk'];
 const present=value=>typeof value==='string'&&!!value.trim();
 
-// Main may verify an actual human reply in a side conversation. Preserve its
-// real source identity rather than relabeling it as a message in main.
-function humanAuthorizationSource(d,main) {
-  return d?.actual_human_verified===true&&present(d.source_message_id)&&present(d.evidence_ref)&&
-    (d.source_thread_id===main||d.recorded_by_thread_id===main&&
-      d.source_actor_verified===true&&present(d.source_thread_id)&&
-      present(d.source_turn_id)&&present(d.verbatim_text));
-}
-
 export function explicitMergeAllowed(payload,e,policy) {
   const main=bindings.threads.inbox,pr=payload?.pr_url,head=payload?.expected_head_sha;
   return pr===e.pr_url&&head===e.current_head_sha&&
     Array.isArray(policy?.merge_authorizations)&&policy.merge_authorizations.some(d=>
-      d.pr_url===pr&&d.head_sha===head&&d.decision==='allow_merge'&&
-      d.nonordinary_change_accepted===true&&d.revoked!==true&&humanAuthorizationSource(d,main));
+      d.pr_url===pr&&d.head_sha===head&&(!d.task_id||d.task_id===(e.task_id??payload.task_id))&&d.decision==='allow_merge'&&
+      d.nonordinary_change_accepted===true&&d.revoked!==true&&humanAuthorizationSource(d,main)&&
+      (!d.derived_from_review||reviewDerivedMergeAllowed(d,payload,e,policy)));
 }
 
 // Owner assessment is required even when a PR has no risk labels. Labels can
@@ -48,17 +41,20 @@ export function personalReviewState(payload,e,policy,now=Date.now()) {
 }
 
 export function personalReviewReasons(kind,payload,e,policy,now) {
-  if(!['pr_ready','slack_pr','review_decision'].includes(kind))return [];
+  if(!['pr_ready','slack_pr','review_decision','merge'].includes(kind))return [];
+  if(kind==='merge'&&policy?.review_implies_conditional_merge===undefined)return mergeAuthorizationReasons(payload,e,policy,now);
   const s=personalReviewState(payload,e,policy,now);
-  if(!s.enabled)return [];
-  if(s.reasons.length)return s.reasons;
+  const merge=kind==='merge'?mergeAuthorizationReasons(payload,e,policy,now):[];
+  if(!s.enabled)return merge;
+  if(s.reasons.length)return [...merge,...s.reasons];
+  if(kind==='merge'&&s.required&&!s.authorized)return [...merge,'Yang_personal_review_required_before_merge'];
   if(kind==='slack_pr'&&s.required&&!s.authorized)
     return ['Yang_personal_review_required_before_external_delivery'];
-  return [];
+  return merge;
 }
 
 // A risky PR may become Ready for the existing automatic technical gate, then
-// reach Yang privately. This never grants merge authority for important changes.
+// reach Yang privately. System readiness alone never grants human merge authority.
 export function personalReviewAllowsStage(kind,payload,e,policy,now) {
   const s=personalReviewState(payload,e,policy,now);
   return s.enabled&&!s.reasons.length&&

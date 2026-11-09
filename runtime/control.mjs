@@ -1,3 +1,4 @@
+import {recordPrReviewAuthorization} from './pr-authorization.mjs';
 import {reviewClosureArchiveActor} from './review-closure.mjs';
 import {readReviewReportPolicy,reviewReportTaskReasons} from './review-report.mjs';
 import {readCompletionReportPolicy,initCompletionNotices,completionReportStatus,completionReportReasons,completionArchiveReasons,confirmCompletionReport,recordPresentedCompletion} from './completion-report.mjs';
@@ -513,7 +514,7 @@ export class ControlStore {
       const rule = isReviewDelivery(kind) ? this.reviewRuleFor(task,input.payload) : REVIEW_WINDOW;
       const reactiveReasons = this.reactive.actionReasons(deliveryGuardKind(kind), task, input.payload);
       if (reactiveReasons.length) return { prepared:false, allowed:false, reasons:reactiveReasons };
-      const result = assess(kind, input.payload, input.evidence, this.now(), this.capacity, rule, kind === 'notion_sync' && input.payload?.page_id !== PAGE ? this.outcomeBindings() : null, ['pr_ready','slack_pr','review_decision','merge'].includes(kind)?this.dependencyPolicy():null,['pr_ready','slack_pr','review_decision','merge'].includes(kind)?this.reviewChannels():null);
+      const result = assess(kind, input.payload, {...input.evidence,task_id:input.task_id}, this.now(), this.capacity, rule, kind === 'notion_sync' && input.payload?.page_id !== PAGE ? this.outcomeBindings() : null, ['pr_ready','slack_pr','review_decision','merge'].includes(kind)?this.dependencyPolicy():null,['pr_ready','slack_pr','review_decision','merge'].includes(kind)?this.reviewChannels():null);
       const deferred = result.reasons.length === 1 && result.reasons[0] === 'review_delivery_blackout';
       if (!result.allowed && !deferred) return { prepared: false, key, ...result };
       const feedback = this.feedbackGate(kind,input.payload);
@@ -658,7 +659,7 @@ export class ControlStore {
             return { claimed: false, reason: 'replacement_receipt_chain_invalid' };
         }
       }
-      let checkedEvidence = evidence;
+      let checkedEvidence = {...evidence,task_id:row.task_id};
       if (row.kind === 'dispatch' || row.kind === 'create_thread') {
         if (payload.dispatch_origin === 'manual_direct') {
           const event = this.db.prepare('SELECT * FROM events WHERE event_key=?').get(payload.manual_event_key ?? '');
@@ -933,6 +934,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     }
     const operations = {
       observe: () => control.observe(input),
+      record_pr_review_authorization: () => recordPrReviewAuthorization(control,input),
       human_trigger_status: () => {mailbox ??= new Mailbox(resolve(base,'mailbox.sqlite'));return mailbox.immediate.status(input.source_message_id,control);},
       human_trigger_prepare: () => {mailbox ??= new Mailbox(resolve(base,'mailbox.sqlite'));return mailbox.immediate.invocation(input.source_message_id,input.snapshot,control);},
       human_trigger_claim: () => {mailbox ??= new Mailbox(resolve(base,'mailbox.sqlite'));return mailbox.immediate.invocation(input.source_message_id,input.snapshot,control,true);},

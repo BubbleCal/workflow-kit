@@ -77,21 +77,45 @@ Main may also verify an actual human reply in a side conversation. Keep its real
 native readback. An agent relay alone is not consent and must not be relabeled
 as a human message in main.
 
-Explicit permission to merge a nonordinary change is separate from review
-delivery. Main records it in `PR_REVIEW_CHANNELS.json.merge_authorizations` with
-the exact `pr_url`, `head_sha`, `decision:allow_merge`,
-`nonordinary_change_accepted:true` and the same verified human provenance.
-It releases only that PR/head's nonordinary-change restriction. Full feedback,
-designated human approval, CI, repository rules, ownership, no-admin and
-expected-head guards still apply. Review permission alone never permits merge;
-neither permission authorizes publication, deployment or another PR in a stack.
+From the effective human instruction in the centralized
+`PR_REVIEW_CHANNELS.json.review_implies_conditional_merge` rule, explicit human
+permission to send a clearly scoped PR/task for external review also permits
+conditional merge within that same scope. Do not ask for a separate nonordinary
+merge permission. System technical Ready, a notification, automatic approval or
+an agent relay is not this human grant. Earlier grants and explicit historical
+holds are not bulk promoted or cleared.
 
-After clearance the original owner refreshes the normal review gates and delivers
-the canonical URL once to the authorized destination. Functions scope holds need
-their own matching `pr_authorizations` entry under FUNCTIONS_REVIEW_DECISIONS.md;
-one explicit user reply may authorize both, but neither is assumed. No new merge,
-release or deployment authority is granted. Already-sent receipts remain intact;
-this rule does not repost PRs or retrospectively undo review delivery.
+Main records each exact PR/head through `runtime/control.mjs`, operation
+`record_pr_review_authorization`. Supply task_id/pr_url/head_sha, the exact
+source_thread_id/source_turn_id/source_message_id/verbatim_text and fresh
+`native_proof` from `codex_app.read_thread`; evidence_ref,
+recorded_by_thread_id equal to main, explicit_external_review_permission_verified,
+scope_verified, reviewed_personally and authorized_scope={task_id,pr_urls:[url]}.
+Read the current policy bytes and pass their SHA-256 as expected_policy_digest.
+The original bound implementation task is required. Main must verify the actual
+human meaning and resolve scope before recording; one call records exactly one
+PR, never every PR in a stack or every task. Use merge_prohibited=true for an
+explicit review-without-merge instruction. A paused task remains paused.
+
+The recorder preserves prior records, stores the actual human turn's source_at,
+and appends a derived allow_merge/nonordinary_change_accepted record only for
+sources at or after the standing rule's effective_at. It links that merge record
+to the still-valid review grant and exact PR/head. Revocation, a different PR or
+head, or disabling the rule invalidates derived permission. A changed head needs
+source-backed revalidation within the actual human-authorized scope, not blanket
+inheritance and not an automatic demand for a new independent merge grant.
+When reusing a source message at a different head, supply head_revalidation with
+from_head_sha, to_head_sha, source_message_id, within_authorized_scope=true, a
+fresh checked_at and an actual diff/scope evidence_ref; preserve the older record.
+Pre-existing explicit allow_merge records remain intact.
+
+Personal inspection remains a prerequisite for important changes. Functions
+still needs its own exact per-PR channel permission; the general rule grants no
+channel hold override. At merge, the original owner refreshes current applicable
+CI, Gatekeeper, all feedback, valid designated Xuanwo approval, repository rules,
+ownership and expected-head. Explicit no-merge holds and pauses take precedence.
+No admin bypass, publication or deployment is authorized. Already-sent review
+receipts remain intact and must not be reposted.
 
 ## Recover an unclaimed card after source context changes
 

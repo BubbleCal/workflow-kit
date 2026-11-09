@@ -118,3 +118,17 @@ must remain available until the actual native handoff is verified.
 Follow NO_HOSTED_CI.md for the narrow source-backed absence contract. Empty
 checks alone still fail. Keep actual local validation, fresh exact repository/
 head/base/rules/workflow evidence and independent Gatekeeper/merge requirements.
+
+## Human review permission and conditional merge
+
+Read PERSONAL_PR_REVIEW.md and the centralized review_implies_conditional_merge
+rule. From its effective human instruction, actual explicit permission for a
+clearly identified PR/task to enter external review also permits the same scope
+to merge after all current gates pass; do not request a second independent merge
+permission for nonordinary changes. Main records exact PR/head provenance through
+record_pr_review_authorization. Ready status, a delivered card or automatic
+approval is not human permission. Preserve personal inspection, explicit merge
+holds/pauses, Functions per-PR channel authorization, Xuanwo approval, CI,
+Gatekeeper, complete feedback, repository rules, ownership and expected-head.
+A changed head requires checking actual authorized scope. No other PR/stack,
+release or deployment authority is implied, and old holds are not bulk cleared.

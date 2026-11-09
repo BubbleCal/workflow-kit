@@ -132,3 +132,17 @@ runtime while an acknowledged wait covers the same observed PR head. Evidence
 expiry does not prove a source change. Actual changed source facts, new findings,
 new heads and unhandled substantive obligations retain their event path; refresh
 all technical gates when useful action becomes possible.
+
+## Human review permission and conditional merge
+
+Read PERSONAL_PR_REVIEW.md and the centralized review_implies_conditional_merge
+rule. From its effective human instruction, actual explicit permission for a
+clearly identified PR/task to enter external review also permits the same scope
+to merge after all current gates pass; do not request a second independent merge
+permission for nonordinary changes. Main records exact PR/head provenance through
+record_pr_review_authorization. Ready status, a delivered card or automatic
+approval is not human permission. Preserve personal inspection, explicit merge
+holds/pauses, Functions per-PR channel authorization, Xuanwo approval, CI,
+Gatekeeper, complete feedback, repository rules, ownership and expected-head.
+A changed head requires checking actual authorized scope. No other PR/stack,
+release or deployment authority is implied, and old holds are not bulk cleared.

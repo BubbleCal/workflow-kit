@@ -1,7 +1,7 @@
 {
   "version": "0.9.1",
   "source": "workflow-kit repository source",
-  "upstream_base_commit": "5209d7f984c5b38631c9057d58b6ebb7acc8bc42",
+  "upstream_base_commit": "6bc742f6943765adb215f7344cb27d4495f7b4e9",
   "source_files": {
     "package.json": "80ba1b31f033e1d5c6727bbf5381196cf7c644b6b90ecedc9ceedd376df42a8d",
     "runtime/calendar-preparation.mjs": "e6c4de5e26b3ecf782cb8143732a58a7ba859ecbf55031e570ddbf78ac6f3113",
@@ -11,7 +11,7 @@
     "runtime/ci-state.mjs": "8f00790daaa150c53f93c36ea0cabbcebd9bc2c0e571c478328a68db7444de58",
     "runtime/completion-report.mjs": "27803d0fcfdbb3a15cc7858a7686e2342a9ece23da9d4058b77157dfd899ade5",
     "runtime/completion-report.test.mjs": "fc8dd250da3260779ae1df6ade4f82f796f039e6c98afae2d4a98b88ae83b7ca",
-    "runtime/control.mjs": "1a3761209ba226000cff915bbf01faae563c9d89602d4d4e801f38edc6a2d565",
+    "runtime/control.mjs": "e6c75e0a1a54491e646eb1902f9ca2751c617fd7dace0fea0d3bb21e596096a4",
     "runtime/control.test.mjs": "acfd912ad5b4571ed68cd0769daa3f5bb14696db6b37814e31cd262659743e50",
     "runtime/creation-workspace-repair.mjs": "d0362845b393c4b57e1d9eb898b1be901c3582b574c330d00cd56a4c9f18ce60",
     "runtime/creation-workspace-repair.test.mjs": "a37c43caa5b54cf7b6480ad84aec404707018815cbf030ad026a15f92f28f649",
@@ -72,7 +72,9 @@
     "runtime/owner-wait-policy.test.mjs": "dcb040f05ef3cd7411302bd63ff184c899106166658767bc564f4f1e26a7d566",
     "runtime/owner-wake.mjs": "579513c90bfe1fc237f1e44a1964a306f24e46dc6b1a534d69228d651c453874",
     "runtime/owner-wake.test.mjs": "3dacd110b353ca65f9b2d627c4916fba65edd456d3f1ddcd6a945cef257f88f6",
-    "runtime/pr-personal-review.mjs": "ba1377782d5afab1ac50d00ea375fc315d07be62625d2ba8a40e465489c11e51",
+    "runtime/pr-authorization.mjs": "e6ac62de38bf2172914b874f1c4b0a939c73b56f5f0839e1b67bde5b8851bc10",
+    "runtime/pr-authorization.test.mjs": "d3e55ca7f0e9ba5f3f592de9598ab5a95f36e1b265c492960f735e374ccae9c8",
+    "runtime/pr-personal-review.mjs": "16c8474abf7204eb95bdd84ed3510cdefc9fecdebbc0fdbf7fd2edea3575ddcb",
     "runtime/pr-personal-review.test.mjs": "208fe05b919450f3a50fb098018ad4e0b766f68185ba0afa16b59189aafdcda0",
     "runtime/pr-review-gates.mjs": "aa2df9faaf98a941c2b218bcc6d33ca07e4b98cf41a62fa8fb16934b7c837f40",
     "runtime/pr-review-gates.test.mjs": "44f8f868bfd8b610048c20abe98a22ddf7d7a565dab3d2a5fd5b4d93192d9be2",
