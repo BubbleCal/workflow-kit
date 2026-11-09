@@ -142,3 +142,29 @@ are required. Changed contracts, stale evidence, failed gates or any attempted,
 sent or uncertain effect are rejected. Then claim and perform the unchanged
 final authorize/send/readback/settle protocol. Refreshing is not a send or review
 clearance; never create a suffixed notification key to bypass deduplication.
+
+## Reconcile an already-authorized parent squash restack
+
+The same `record_pr_review_authorization` operation supports
+`revalidation_only:true` for the existing active maintenance owner. Record its
+actual thread in recorded_by_thread_id; do not impersonate main. This path can
+only carry an unrevoked, main-origin personal-review and merge grant for the
+same accepted task/PR to a new head after its own bound parent PR was verified
+merged. Pauses, decisions, explicit no-merge holds and original ownership remain.
+
+Supply the original genuine native human proof with its original checked_at,
+exact source fields, fresh head_revalidation and fresh current_pr evidence with
+pr_url/head_sha/head_before/head_after/checked_at/evidence_ref. Also include
+repository_path, parent_pr_url, old_parent and new_parent. The API reads Git and
+the existing lifecycle ledger: both heads must be direct children of the
+verified original parent head and its actual merge SHA. Feature diffs must be
+identical after removing only blob identities and hunk coordinates. Whitespace,
+paths, modes and binary data remain significant. An arbitrary patch-id match
+or a caller's within-scope boolean is insufficient. Original human timestamps
+and records are retained, and revoking their scope invalidates the carried grant.
+
+This is authorization bookkeeping only. It does not create an automated review
+at a new head or convert a skipped Gatekeeper check into approval. If the current
+app skipped review and the required current-head automated review is absent,
+keep merge blocked and report the app's exact documented manual trigger. Agent
+comments and reviewer requests remain prohibited without actual authorization.

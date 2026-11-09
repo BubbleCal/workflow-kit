@@ -1,7 +1,7 @@
 {
   "version": "0.9.1",
   "source": "workflow-kit repository source",
-  "upstream_base_commit": "6bc742f6943765adb215f7344cb27d4495f7b4e9",
+  "upstream_base_commit": "994a58e397de1a2ea19669d30cde73eead263b47",
   "source_files": {
     "package.json": "80ba1b31f033e1d5c6727bbf5381196cf7c644b6b90ecedc9ceedd376df42a8d",
     "runtime/calendar-preparation.mjs": "e6c4de5e26b3ecf782cb8143732a58a7ba859ecbf55031e570ddbf78ac6f3113",
@@ -72,7 +72,7 @@
     "runtime/owner-wait-policy.test.mjs": "dcb040f05ef3cd7411302bd63ff184c899106166658767bc564f4f1e26a7d566",
     "runtime/owner-wake.mjs": "579513c90bfe1fc237f1e44a1964a306f24e46dc6b1a534d69228d651c453874",
     "runtime/owner-wake.test.mjs": "3dacd110b353ca65f9b2d627c4916fba65edd456d3f1ddcd6a945cef257f88f6",
-    "runtime/pr-authorization.mjs": "e6ac62de38bf2172914b874f1c4b0a939c73b56f5f0839e1b67bde5b8851bc10",
+    "runtime/pr-authorization.mjs": "15b4cce09b90841dc3d5b8f94003bc1061f6324e1c4730c36f30409bc0d0931e",
     "runtime/pr-authorization.test.mjs": "d3e55ca7f0e9ba5f3f592de9598ab5a95f36e1b265c492960f735e374ccae9c8",
     "runtime/pr-personal-review.mjs": "16c8474abf7204eb95bdd84ed3510cdefc9fecdebbc0fdbf7fd2edea3575ddcb",
     "runtime/pr-personal-review.test.mjs": "208fe05b919450f3a50fb098018ad4e0b766f68185ba0afa16b59189aafdcda0",
@@ -112,6 +112,8 @@
     "runtime/review-report.test.mjs": "4851b00d03d5bc8e5f7043e9c8dc3b46c29877b83315bf8231560d6b650fcab3",
     "runtime/review-window.mjs": "94862b3d3b3689e9f8506507557a034aa44bda774dd8bdbc1ecf2546359471fc",
     "runtime/review-window.test.mjs": "38ef7287cdaede843c0b8dc2e62c93bb88e143dd782134f697bf6856b20d6091",
+    "runtime/reviewed-restack.mjs": "e1b81f7d112eedea0b374a8dcbdaff03384187d97875147a43c3ab8a85ec940a",
+    "runtime/reviewed-restack.test.mjs": "cec1c38286da823272e5a96edc32757ba76208e0d8f7db30e34aa78034a2e311",
     "runtime/schedule-source.mjs": "2910cee5e7b7951032c2d4952f980d2495fcde5f427b1f4463ca14bd4591440d",
     "runtime/schedule-source.test.mjs": "27b5889fdd1a21927552575dcba637f3d5030300df7185a48de8398d7b138cd0",
     "runtime/scheduler.mjs": "4eb2c48f21c6f3e05cf9ef5cc7dc3469f98645888efef0027bd57dff15445143",
