@@ -1,3 +1,4 @@
+import {continuationAfterReport} from './owner-continuation.mjs';
 import {assessDifficulty,routineMeetingDifficulty} from './model-selection.mjs';
 import {calendarPreparation} from './calendar-preparation.mjs';
 import {createHash} from 'node:crypto';
@@ -113,7 +114,7 @@ export class WorkCatalog {
   }
   taskForSource(key){const r=this.db.prepare('SELECT task_id FROM work_sources WHERE source_key=?').get(key);return r?this.get(r.task_id):null;}
   setPolicy({key,enabled,allowed_kinds,assignee_id,calendar_id,self_email,lead_minutes=45,service_task_id,timezone,profiles,exclusions,source_message_id,verbatim_text,evidence_ref,actual_human_verified}){
-    if(!['create_owner','discovery_owns_creation','accept_assigned_linear','accept_calendar_preparation','accept_result_followups'].includes(key))throw new Error('Unknown work policy');
+    if(!['create_owner','discovery_owns_creation','accept_assigned_linear','accept_calendar_preparation','accept_result_followups','continuous_authorized_work'].includes(key))throw new Error('Unknown work policy');
     if(actual_human_verified!==true)throw new Error('A standing work policy needs actual user authorization');
     for(const [n,v] of Object.entries({source_message_id,verbatim_text,evidence_ref}))required(v,n);
     if(enabled&&(!Array.isArray(allowed_kinds)||!allowed_kinds.length||allowed_kinds.some(k=>!['work','project','exploration'].includes(k))))throw new Error('Declare allowed ordinary task kinds');
@@ -384,7 +385,7 @@ export class WorkCatalog {
       if(outcome==='findings'&&!followups.length)this.followthrough.reviewInside(t.id,{key:wake?.id??report_key,turn_id:wake?this.db.prepare('SELECT turn_id FROM rt_wakes WHERE id=?').get(wake.id)?.turn_id:null,evidence_ref:report_key,force:true});
       if(review)this.db.prepare("UPDATE work_result_reviews SET state='reviewed' WHERE review_key=?").run(review_key);
       this.onReportInside?.(t.id,{key:report_key,type:'research_report',payload:{report_key,outcome,summary,evidence_refs},evidence_ref:report_key});
-      return {recorded:true,report_key,proposals:created.map(x=>x.task.id),followups:result_followups,task_complete:false,discovery_wake_required:result_followups.some(r=>r.state==='needs_owner')};
+      return {...continuationAfterReport(this,t),recorded:true,report_key,proposals:created.map(x=>x.task.id),followups:result_followups,task_complete:false,discovery_wake_required:result_followups.some(r=>r.state==='needs_owner')};
     });
   }
 }

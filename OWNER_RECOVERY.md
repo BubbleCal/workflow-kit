@@ -113,3 +113,10 @@ batch/chat or weaker creation actor is allowed. A still-unsent mailbox delivery
 is superseded with its immutable input retained; accepted/uncertain receipts are
 left untouched, and late original queue turns skip. prepare_owner/claim/bind/start
 still require fresh native actor/project proofs and actual owner execution.
+
+
+Follow OWNER_CONTINUATION.md: a phase report or negative experiment does not
+complete an authorized unfinished goal. Continue bounded independent work, retain
+actual jobs/waits, and request only a material human-only decision. Conditional
+holds use their original wording and observable release predicate; unconditional
+pauses and all external-action gates remain. Record remaining goal and next step.

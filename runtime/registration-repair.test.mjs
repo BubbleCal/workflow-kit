@@ -59,6 +59,27 @@ test('sent real human followup supersedes execution without claiming the old que
  }finally{f.c.close();}
 });
 
+test('only a newer verified task-specific human continuation resolves a stale decision projection, without releasing external holds',()=>{
+ for(const variant of ['valid','wrong-decision','older-source','wrong-task','status-only','paused']){
+  const f=followup();try{
+   f.c.work.setPolicy({key:'continuous_authorized_work',enabled:true,allowed_kinds:['work'],actual_human_verified:true,source_message_id:'human:continuous',verbatim_text:'Continue authorized work without routine pause questions',evidence_ref:'actual-rule'});
+   f.c.db.prepare("INSERT INTO rt_decisions VALUES ('old-decision','T-1',0,0,'needs_decision','{}',?)").run(f.now()-1);
+   f.c.db.prepare("UPDATE rt_tasks SET status='needs_decision' WHERE task_id='T-1'").run();
+   const action=f.c.db.prepare('SELECT payload FROM actions WHERE action_key=?').get(f.key),p=JSON.parse(action.payload);p.verbatim_text=variant==='wrong-task'?'Continue T-2 optimization':'Continue T-1 optimization; personal external review hold remains';if(variant==='status-only')p.verbatim_text='What is the status of T-1?';p.prompt='Continue T-1 accepted engineering scope; do not perform held external delivery';
+   f.c.db.prepare('UPDATE actions SET payload=? WHERE action_key=?').run(JSON.stringify(p),f.key);
+   f.input.native_proof.readback.turns[0].items[0].output.text=`<codex_delegation>\n  <source_thread_id>main</source_thread_id>\n  <input>${p.prompt}</input>\n</codex_delegation>`;
+   f.input.human_authorization.readback.turns[0].items[0].content[0].text=p.verbatim_text;
+   f.input.resume_authorized_work=true;f.input.expected_decision_id=variant==='wrong-decision'?'another-decision':'old-decision';
+   if(variant==='older-source')f.c.db.prepare('UPDATE actions SET created_at=? WHERE action_key=?').run(f.now()-2,f.key);
+   if(variant==='paused')f.c.db.prepare("UPDATE rt_tasks SET mode='paused' WHERE task_id='T-1'").run();
+   const contract=f.s.task('T-1').contract;
+   if(variant!=='valid'){assert.throws(()=>reconcileQueuedFollowup(f.c,f.input));assert.equal(f.s.task('T-1').status,'needs_decision');continue;}
+   const result=reconcileQueuedFollowup(f.c,f.input);assert.equal(result.state,'running');assert.equal(result.original_queue_consumed,false);assert.equal(f.s.task('T-1').status,'ready');assert.deepEqual(f.s.task('T-1').contract,contract);
+   const binding=JSON.parse(f.c.db.prepare('SELECT data FROM rt_diagnostics WHERE key=?').get(`followup-binding:${result.wake_id}`).data);assert.equal(binding.decision_resolution.scope,'authorized_remaining_work_only');
+  }finally{f.c.close();}
+ }
+});
+
 test('a completed followup leaves truthful ended-unresolved evidence and allows one normal continuation',()=>{
  const f=followup('completed');try{const r=reconcileQueuedFollowup(f.c,f.input);assert.equal(r.state,'ended_unresolved');assert.equal(f.s.openWake('T-1'),null);assert.equal(f.s.reserveQueuedWake('T-1').reserved,true);}finally{f.c.close();}
 });

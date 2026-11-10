@@ -1,11 +1,13 @@
+import {hasNewHumanInput} from './owner-continuation.mjs';
 import {nativeReadback} from './native-queue.mjs';
 
 export function classifyOwnerHealth(task,wake,snapshot) {
   const status=snapshot.thread?.status?.type,turn=snapshot.latestTurn;
   if(task.status==='complete')return 'complete';
-  if(task.mode!=='active'||task.status==='needs_decision'||task.contract?.retired)return 'protected';
+  if(task.mode!=='active'||task.contract?.retired)return 'protected';
   if(status==='awaiting_input'||(snapshot.thread?.status?.activeFlags??[]).length)return 'awaiting_native_input';
   if(status==='active'&&turn?.status==='inProgress')return wake?.state==='running'&&wake.turn_id===turn.id?'running':'active_unbound';
+  if(task.status==='needs_decision'&&!(wake?.state==='running'&&wake.turn_id===turn?.id&&turn?.status==='failed'))return 'protected';
   const error=JSON.stringify(turn?.error??'');
   if(turn?.status==='failed'&&/context_length_exceeded|context.window|ran out of room/i.test(error))return 'context_window_exhausted';
   if(turn?.status==='failed')return 'turn_failed';
@@ -27,9 +29,9 @@ export class OwnerHealth {
   targets({limit=8}={}) {
     if(!Number.isInteger(limit)||limit<1||limit>8)throw new Error('Health sweep limit must be 1..8');
     const tasks=this.control.reactive.tasks().filter(t=>t.mode==='active'&&t.status!=='complete'&&
-      t.status!=='needs_decision'&&!t.contract.service_lane&&!t.contract.retired&&
+      (t.status!=='needs_decision'||this.control.reactive.openWake(t.task_id)?.state==='running'||hasNewHumanInput(this.db,t))&&!t.contract.service_lane&&!t.contract.retired&&
       !this.control.reactive.waitPolicy.blocked(t.task_id)&&
-      (this.control.reactive.openWake(t.task_id)||t.status==='ready'));
+      (this.control.reactive.openWake(t.task_id)||t.status==='ready'||hasNewHumanInput(this.db,t)));
     return tasks.map(t=>({task:t,health:this.db.prepare('SELECT * FROM rt_owner_health WHERE task_id=?').get(t.task_id),wake:this.control.reactive.openWake(t.task_id)}))
       .filter(x=>!x.health||x.health.next_check_at<=this.now())
       .sort((a,b)=>Number(!['queued','uncertain'].includes(a.wake?.state))-Number(!['queued','uncertain'].includes(b.wake?.state))||(a.health?.checked_at??0)-(b.health?.checked_at??0)||(a.wake?.created_at??a.task.updated_at)-(b.wake?.created_at??b.task.updated_at))
@@ -53,6 +55,7 @@ export class OwnerHealth {
     if(snapshot.thread?.id!==task.owner_id||snapshot.thread.hostId!=='local'||!snapshot.latestTurn?.id)
       throw new Error('Observed owner identity is missing or changed');
     const wake=this.control.reactive.openWake(task_id);let state=classifyOwnerHealth(task,wake,snapshot);
+    if(state==='protected'&&task.mode==='active'&&task.status==='needs_decision'&&snapshot.latestTurn.status==='failed'&&hasNewHumanInput(this.db,task))state='unbound_turn_failed';
     const resume=wake?.queue_id&&this.db.prepare('SELECT state FROM actions WHERE action_key IN (?,?) ORDER BY updated_at DESC LIMIT 1').get(`resume-input:${task_id}:${wake.queue_id}`,`resume-execute:${task_id}:${wake.queue_id}`);
     if(state==='queued_unconsumed'&&['uncertain','failed'].includes(resume?.state))state='native_recovery_blocked';
     const prior=this.db.prepare('SELECT * FROM rt_owner_health WHERE task_id=?').get(task_id);
@@ -66,8 +69,8 @@ export class OwnerHealth {
       checked_at=excluded.checked_at,next_check_at=excluded.next_check_at,context_failures=excluded.context_failures,
       evidence_ref=excluded.evidence_ref,snapshot=excluded.snapshot`).run(task_id,task.owner_id,state,snapshot.latestTurn.id,wake?.id??null,at,next,failures,native_proof.evidence_ref,JSON.stringify(snapshot));
     const action=state==='context_window_exhausted'?(failures>1?'checkpoint_and_replace_if_authorized':'recover_exact_failed_turn'):
-      ['turn_failed','unfinished_terminal_turn'].includes(state)?'inspect_and_recover_exact_turn':
-      state==='queued_unconsumed'?'reconcile_unconsumed_queue':state==='native_recovery_blocked'?'report_verified_client_blocker':state==='continuation_needed'?'continue_authorized_work':'preserve';
+      state==='unbound_turn_failed'?'inspect_and_bind_actual_failed_turn':['turn_failed','unfinished_terminal_turn'].includes(state)?'inspect_and_recover_exact_turn':
+      state==='queued_unconsumed'?'reconcile_unconsumed_queue':state==='native_recovery_blocked'?'report_verified_client_blocker':state==='continuation_needed'?'continue_authorized_work':state==='active_unbound'?'reconcile_actual_native_execution':'preserve';
     return {task_id,state,next_action:action,context_failures:failures,next_check_at:next,task_complete:task.status==='complete',
       queue_consumed:wake?.state==='running'&&wake.turn_id===snapshot.latestTurn.id&&!this.db.prepare('SELECT 1 FROM rt_diagnostics WHERE key=?').get(`recovery-execution:${wake.id}`),execution_started:wake?.state==='running'&&wake.turn_id===snapshot.latestTurn.id,original_queue_id:wake?.queue_id??null};
   }

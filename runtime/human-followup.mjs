@@ -1,3 +1,4 @@
+import {continuationPolicy} from './owner-continuation.mjs';
 import {nativeReadback,verifyExecutionProof} from './native-queue.mjs';
 
 export function verifyDirectDiscoveryHuman(proof,{config,source_message_id,verbatim_text,now,terminal=false}){
@@ -54,10 +55,19 @@ export function reconcileQueuedFollowup(control,input){
  if(actual_human_verified!==true||!source_message_id||!evidence_ref)throw new Error('Actual human workflow-repair authority and evidence required');
  return control.atomic(()=>{
   const state=control.reactive,task=state.task(task_id),old=state.openWake(task_id),action=control.db.prepare('SELECT * FROM actions WHERE action_key=?').get(action_key);
-  if(!task||task.mode!=='active'||['complete','needs_decision'].includes(task.status)||task.contract.retired||task.contract.service_lane)throw new Error('Preserve active original task, decisions and services');
+  if(!task||task.mode!=='active'||task.status==='complete'||task.status==='needs_decision'&&input.resume_authorized_work!==true||task.contract.retired||task.contract.service_lane)throw new Error('Preserve active original task, decisions and services');
   state.assertQueueOwner(task);
   const proof=verifyHumanFollowup(native_proof,{task,action,source_message_id,now:control.now()}),id=`runtime:${task_id}:followup:${action_key}`;
   verifyFollowupAuthority(input.human_authorization,proof.payload);
+  let resolution;
+  if(task.status==='needs_decision'){
+   const decision=control.db.prepare("SELECT id,created_at FROM rt_decisions WHERE task_id=? AND disposition='needs_decision' ORDER BY created_at DESC LIMIT 1").get(task_id),number=task_id.match(/^T-0*(\d+)$/)?.[1];
+   const explicitlyNamed=proof.payload.source_thread_id===task.owner_id||number&&new RegExp(`(?:^|[^0-9])(?:[Tt]-?)?0*${number}(?![0-9])`).test(proof.payload.verbatim_text);
+   const explicitlyDirected=/\b(?:continue|resume|proceed)\b|继续|开始推进|恢复(?:推进|执行|工作)/i.test(proof.payload.verbatim_text);
+   if(!continuationPolicy(control.db)?.enabled||!decision||decision.id!==input.expected_decision_id||action.created_at<=decision.created_at||!explicitlyNamed||!explicitlyDirected||!proof.payload.prompt.includes(task_id))
+    throw new Error('Exact old decision and a newer verified task-specific human continuation required');
+   resolution={decision_id:decision.id,source_message_id,scope:'authorized_remaining_work_only',contract_and_external_holds_preserved:true};
+  }
   const prior=control.db.prepare('SELECT * FROM rt_wakes WHERE id=?').get(id);
   if(prior){if(prior.turn_id!==proof.turn_id)throw new Error('Followup execution identity changed');return {reconciled:false,already_reconciled:true,wake_id:id,original_queue_consumed:false};}
   if(task.context_rev!==expected_context_rev||old&&(old.id!==expected_wake_id||old.queue_id!==expected_queue_id||!expected_queue_id||old.transport!=='native_queue'||old.state!=='queued'||old.turn_id||old.started_at||old.member_ids.length!==1||old.member_ids[0]!==task_id||old.owner_id!==task.owner_id)||!old&&(expected_wake_id||expected_queue_id))
@@ -70,7 +80,7 @@ export function reconcileQueuedFollowup(control,input){
   control.db.prepare('INSERT INTO rt_wakes(id,task_id,context_rev,plan_rev,event_ids,state,prompt,turn_id,created_at,started_at,completed_at,evidence_ref,transport,owner_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
    .run(id,task_id,current.context_rev,current.plan_rev,JSON.stringify(events),running?'running':'ended_unresolved',proof.payload.prompt,proof.turn_id,control.now(),control.now(),running?null:control.now(),evidence_ref,'native_followup',task.owner_id);
   control.db.prepare('INSERT INTO rt_wake_members VALUES (?,?,?)').run(id,task_id,current.context_rev);
-  state.diagnostic(`followup-binding:${id}`,{action_key,source_message_id,evidence_ref,original_queue_consumed:false});
+  state.diagnostic(`followup-binding:${id}`,{action_key,source_message_id,evidence_ref,original_queue_consumed:false,...(resolution?{decision_resolution:resolution}:{})});
   return {reconciled:true,wake_id:id,turn_id:proof.turn_id,state:running?'running':'ended_unresolved',old_wake_state:old?'superseded':null,original_queue_consumed:false,queue_id:old?.queue_id??null,owner_unchanged:true};
  });
 }

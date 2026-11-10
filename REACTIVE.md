@@ -268,3 +268,10 @@ unchanged observations or expired evidence do not wake change-driven owners.
 Future owner windows block native queue submission, automatic recovery and idle
 UI loading while retaining source events. One deadline wake coalesces eligible
 same-owner tasks, with existing pause/decision/uncertain-delivery guards intact.
+
+
+Follow OWNER_CONTINUATION.md: a phase report or negative experiment does not
+complete an authorized unfinished goal. Continue bounded independent work, retain
+actual jobs/waits, and request only a material human-only decision. Conditional
+holds use their original wording and observable release predicate; unconditional
+pauses and all external-action gates remain. Record remaining goal and next step.

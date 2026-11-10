@@ -134,7 +134,7 @@ export function queueOwnerHealth({control,mailbox,now=Date.now}) {
   if(!control.reactive.tasks().some(t=>t.mode==='active'&&t.contract.service_lane==='maintenance'))return;
   for(const wake of control.db.prepare("SELECT * FROM rt_wakes WHERE state IN ('queued','uncertain','running') AND created_at<?").all(now()-900000)) {
     const task=control.reactive.task(wake.task_id);
-    if(!task||task.mode!=='active'||['complete','needs_decision'].includes(task.status)||task.contract.service_lane||task.contract.retired||control.reactive.waitPolicy?.blocked(task.task_id))continue;
+    if(!task||task.mode!=='active'||(task.status==='complete'||task.status==='needs_decision'&&control.reactive.openWake(task.task_id)?.state!=='running')||task.contract.service_lane||task.contract.retired||control.reactive.waitPolicy?.blocked(task.task_id))continue;
     if(wake.state==='running'&&now()-(wake.started_at??wake.created_at)<3600000)continue;
     const prefix=`owner-health:${wake.id}`;
     const prior=mailbox.db.prepare("SELECT state,created_at,payload FROM mail WHERE item_key=? OR item_key LIKE ? ORDER BY seq DESC LIMIT 1").get(prefix,prefix+':recheck:%');

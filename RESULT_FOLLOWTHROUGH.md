@@ -94,3 +94,10 @@ and report protocol above. Existing T208 followups T213/T214 are reconciliation
 cases: preserve their bindings and actual started wakes; do not recreate/resend.
 
 When discovery_owns_creation is enabled, daemon advancement leaves new-owner setup to discovery, using creation_actor proof at prepare/claim/bind/start under OWNER_CREATION.md. Existing canonical owners keep ordinary result routing; no main creation or parallel setup path.
+
+
+Follow OWNER_CONTINUATION.md: a phase report or negative experiment does not
+complete an authorized unfinished goal. Continue bounded independent work, retain
+actual jobs/waits, and request only a material human-only decision. Conditional
+holds use their original wording and observable release predicate; unconditional
+pauses and all external-action gates remain. Record remaining goal and next step.

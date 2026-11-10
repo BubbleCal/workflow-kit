@@ -1,3 +1,4 @@
+import {validateOwnerDecision} from './owner-continuation.mjs';
 import {verifyHumanFollowup} from './human-followup.mjs';
 import {verifyQueuedRecoveryProof} from './queued-resume.mjs';
 import {prWakeProjection,prChangeReasons} from './owner-wake.mjs';
@@ -317,7 +318,7 @@ export class ReactiveState {
     }
   }
   decide({ task_id, expected_context_rev, expected_plan_rev, disposition, reason, evidence_refs, plan, wait,
-    acceptance, wake_id, owner_thread_id, alternatives_considered = [],next_action_at }) {
+    acceptance, wake_id, owner_thread_id, alternatives_considered = [],next_action_at,decision_request,progress }) {
     if (!['continue','revise','wait','needs_decision','complete','cycle_complete'].includes(disposition)) throw new Error('Unknown decision disposition');
     required(reason,'decision reason');
     if (!Array.isArray(evidence_refs) || !evidence_refs.length || evidence_refs.some(r=>typeof r!=='string'||!r.trim())) throw new Error('Decision needs evidence');
@@ -329,6 +330,7 @@ export class ReactiveState {
       const wake = wake_id ? this.openWake(task_id) : null;
       if(wake_id&&wake?.id!==wake_id)throw new Error('Decision must belong to this task and grouped wake');
       if (task.mode === 'active' && (!wake || wake.state !== 'running')) throw new Error('An active task decision needs its acknowledged execution wake');
+      validateOwnerDecision(this.db,task,{disposition,decision_request,progress});
       let revision=task.plan_rev;
       if (plan) {
         this.validatePlan(task,plan);
@@ -352,7 +354,7 @@ export class ReactiveState {
         if (this.db.prepare(`SELECT 1 FROM actions WHERE task_id=? AND kind NOT IN ('task_wake','task_queue') AND ${liveAction}`).get(task_id))
           throw new Error('Uncertain external effects prevent whole-task completion');
       }
-      const id=randomUUID(), data={reason,evidence_refs,alternatives_considered,acceptance,wait};
+      const id=randomUUID(), data={reason,evidence_refs,alternatives_considered,acceptance,wait,...(decision_request?{decision_request}:{}),...(progress?{progress}:{})};
       this.db.prepare('INSERT INTO rt_decisions VALUES (?,?,?,?,?,?,?)').run(id,task_id,task.context_rev,revision,disposition,canonical(data),this.now());
       this.db.prepare("UPDATE rt_events SET disposition='handled',decision_id=? WHERE task_id=? AND disposition IS NULL AND context_rev<=?").run(id,task_id,task.context_rev);
       const status=['wait','cycle_complete'].includes(disposition)?'waiting':disposition==='complete'?'complete':disposition==='needs_decision'?'needs_decision':'ready';

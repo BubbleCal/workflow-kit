@@ -49,7 +49,7 @@ ${lane==='maintenance'?'工作流维护 · ':''}${task.task_id}｜${reason||'有
 根据最新 checkpoint 推进下一步并保存结果。${checkpoint.schedule_runs?.length?'本轮定时结果用 cycle_complete 结束。':''}${task.contract.task_kind==='exploration'?'探索结果按 WORK_TASKS.md 保存 task report。':''}
 ${lane?'':'评估、测试或研究产出实质结果时，按 RESULT_FOLLOWTHROUGH.md 提交 task report 与结构化 followups；无可执行发现也记录明确结论。'}
 ${lane?'':'等待 PR/事件时按 OWNER_WAITS.md 报告结构化阻塞；知道下次行动时间时，在 decide(wait) 中提交带时区的 next_action_at，之前不接收自动唤醒。'}
-${lane?'维护间隔以 daily-review/config.json 为准。':'涉及交付时按 OWNER_DELIVERY.md；需要决策或重要完成时通知工作中心。'}
+${lane?'维护间隔以 daily-review/config.json 为准。':'按 OWNER_CONTINUATION.md 接续；交付遵循 OWNER_DELIVERY.md，仅真实决策或完成通知中心。'}
 入口：node ${shellQuote(join(root,'workflow.mjs'))} runtime op（JSON stdin 或 --file）
 ${JSON.stringify({task_id:task.task_id,wake_id:wake.id})}`;
 }
@@ -323,7 +323,11 @@ export class ReactiveDriver {
     };
     let activity;
     try{activity=await this.readActivity();}catch(error){return {opened:false,reason:'activity_unavailable',error:error.message};}
-    if(!idleNavigationAllowed(activity,policy,this.now()))return {opened:false,reason:'user_active_or_idle_unconfirmed'};
+    if(!idleNavigationAllowed(activity,policy,this.now())){
+      const prior=db.prepare("SELECT updated_at FROM rt_diagnostics WHERE key='desktop-activity'").get();
+      if(!prior||this.now()-prior.updated_at>=60000)this.state.diagnostic('desktop-activity',{reason:'user_active_or_idle_unconfirmed',wake_id:wake.id,queue_id:wake.queue_id,min_idle_ms:policy.min_idle_ms,activity,execution_verified:false});
+      return {opened:false,reason:'user_active_or_idle_unconfirmed'};
+    }
     if(!eligible(current()))return {opened:false,reason:'queued_owner_changed'};
     const previous=db.prepare('SELECT attempts FROM rt_idle_desktop_loads WHERE wake_id=?').get(wake.id),attempts=(previous?.attempts??0)+1;
     const next=this.now()+Math.min(1800000,policy.retry_interval_ms*2**Math.min(attempts-1,3));

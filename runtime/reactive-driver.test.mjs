@@ -290,6 +290,7 @@ test('an active user keeps the existing queue untouched; idle later loads once w
   f.activate();await f.driver.deliver(f.state.task('T-1'));const original=f.state.openWake('T-1'),calls=enableIdleLoader(f);f.advance(30000);
   const idle=f.driver.readActivity;f.driver.readActivity=async()=>({...await idle(),idle_ms:599999});
   assert.equal((await f.driver.loadPendingDesktopChats()).opened,false);assert.equal(calls(),0);
+  assert.equal(JSON.parse(f.control.db.prepare("SELECT data FROM rt_diagnostics WHERE key='desktop-activity'").get().data).reason,'user_active_or_idle_unconfirmed');
   f.advance(15000);f.driver.readActivity=idle;assert.equal((await f.driver.loadPendingDesktopChats()).opened,true);assert.equal(calls(),1);
   assert.equal(f.queue.calls.length,1);assert.equal(f.state.openWake('T-1').queue_id,original.queue_id);assert.equal(f.state.openWake('T-1').state,'queued');
   // Restarting the driver does not erase the exact-wake cooldown.
@@ -335,6 +336,7 @@ test('ten-minute input-idle threshold reloads from runtime.json without restarti
   f.activate();await f.driver.deliver(f.state.task('T-1'));f.advance(30000);const calls=enableIdleLoader(f);
   writeFileSync(join(f.root,'runtime.json'),JSON.stringify({desktop_loader:{...idlePolicy(),min_idle_ms:900000}}));
   assert.equal((await f.driver.loadPendingDesktopChats()).opened,false);assert.equal(calls(),0);
+  assert.equal(JSON.parse(f.control.db.prepare("SELECT data FROM rt_diagnostics WHERE key='desktop-activity'").get().data).reason,'user_active_or_idle_unconfirmed');
   f.advance(15000);writeFileSync(join(f.root,'runtime.json'),JSON.stringify({desktop_loader:idlePolicy()}));
   assert.equal((await f.driver.loadPendingDesktopChats()).opened,true);assert.equal(calls(),1);
  }finally{await f.close();}
