@@ -194,12 +194,10 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         else if(input.op==='classify'){result=control.discovery.classify(input);if(result.shared_service)result={...result,schedule_update:scheduleCalendarPreparation(control,result.task_id)};}
         else if(input.op==='watch_thread')result=control.discovery.watchThread(input);
         else if(input.op==='recover'){
-          result=control.discovery.recover(input);
+          const b=control.discovery.batch(input.batch_id);result=control.discovery.recover(input);
           mailbox=new Mailbox(join(root,'mailbox.sqlite'));
-          const mail=mailbox.db.prepare('SELECT batch_id FROM mail WHERE item_key=?').get(result.mail_key);
-          if(!mail?.batch_id)throw new Error('Discovery recovery requires its original native queue receipt');
-          const batch=mailbox.get(mail.batch_id);
-          if(batch.state!=='finished'){mailbox.begin(batch.id);mailbox.finish(batch.id,{processed_keys:[result.mail_key],note:'verified discovery turn ended; preserve pages and resume in a new generation'});}
+          const delivery=settleDiscoveryDelivery(control,mailbox,b,result);
+          if(delivery)result={...result,delivery};
         }
         else if(input.op==='finish'){
           const b=control.discovery.batch(input.batch_id);result=control.discovery.finish(input);

@@ -101,3 +101,16 @@ test('interactive checkpoint recovery preserves the single-writer invariant and 
   assert.equal(f.c.discovery.batch(f.b.id).state,'checkpointed');assert.equal(f.c.discovery.batch(f.b.id).generation,1);assert.equal(f.c.db.prepare('SELECT snapshot FROM discovery_batches WHERE id=?').get(pending.batch_id).snapshot,snapshot);assert.equal(f.c.discovery.batch(pending.batch_id).state,'pending');
  }finally{f.close();}
 });
+
+test('an interrupted direct-human scan recovers its exact native turn and pages without inventing queue consumption',()=>{
+ const f=setup();try{
+  const text='Find the missed direct requests',proof=nativeProof({thread:DISCOVERY,message:text,turn:'actual-direct-intake',now:f.now()});proof.readback.turns[0].items[0].id='actual:correction';
+  beginDiscoveryInteractive(f.c,{batch_id:f.b.id,generation:1,expected_mail_key:f.b.mail_key,source_message_id:'actual:correction',verbatim_text:text,actual_human_verified:true,evidence_ref:'actual-direct-proof',native_proof:proof});
+  const input={batch_id:f.b.id,generation:1,native_proof:proof,effects_reconciled:true,evidence_ref:'actual-terminal-proof'};
+  assert.throws(()=>f.c.discovery.recover(input),/terminal/);
+  proof.readback.turns[0].status='interrupted';proof.readback.thread.status.type='notLoaded';
+  const wrong=structuredClone(input);wrong.native_proof.readback.turns[0].id='another-turn';assert.throws(()=>f.c.discovery.recover(wrong),/another verified/);
+  const original=f.c.discovery.batch(f.b.id).snapshot,r=f.c.discovery.recover(input);assert.equal(r.recovered,true);assert.equal(f.c.discovery.batch(f.b.id).state,'checkpointed');assert.deepEqual(f.c.discovery.batch(f.b.id).snapshot,original);
+  const db=new DatabaseSync(join(f.dir,'mailbox.sqlite'));try{assert.equal(settleDiscoveryDelivery(f.c,{db},f.b,r).original_queue_consumed,false);}finally{db.close();}
+ }finally{f.close();}
+});

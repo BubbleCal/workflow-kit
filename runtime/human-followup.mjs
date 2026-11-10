@@ -1,8 +1,8 @@
 import {nativeReadback,verifyExecutionProof} from './native-queue.mjs';
 
-export function verifyDirectDiscoveryHuman(proof,{config,source_message_id,verbatim_text,now}){
+export function verifyDirectDiscoveryHuman(proof,{config,source_message_id,verbatim_text,now,terminal=false}){
  if(!source_message_id||!verbatim_text?.trim()||/^\s*(?:\[workflow-|<codex_delegation>)/.test(verbatim_text))throw new Error('Actual direct human discovery instruction required');
- const result=verifyExecutionProof(proof,{thread_id:config.threads.discovery,workspace:config.thread_workspaces?.discovery??config.scope.project_root,prompt:verbatim_text,now});
+ const result=verifyExecutionProof(proof,{thread_id:config.threads.discovery,workspace:config.thread_workspaces?.discovery??config.scope.project_root,prompt:verbatim_text,now,terminal});
  const read=nativeReadback(proof.readback),turn=read.turns[0];
  if(!proof.evidence_ref||(read.thread.status?.activeFlags??[]).length||turn.items.filter(i=>i.type==='userMessage'&&i.id===source_message_id&&(i.content??[]).filter(c=>c.type==='text').map(c=>c.text).join('\n')===verbatim_text).length!==1)
   throw new Error('Exact actual current human message identity required');
@@ -34,12 +34,12 @@ export function verifyFollowupAuthority(human_authorization,payload){
   throw new Error('Original native human message identity and exact text must corroborate the sent followup');
 }
 
-export function verifyDiscoveryExecution(db,config,batch,native_proof,now){
+export function verifyDiscoveryExecution(db,config,batch,native_proof,now,{terminal=false}={}){
  const row=db.prepare('SELECT data FROM rt_diagnostics WHERE key=?').get(`discovery-followup:${batch.id}:${batch.generation}`);
  if(!row)return null;
  const binding=JSON.parse(row.data),action=binding.action_key?db.prepare('SELECT * FROM actions WHERE action_key=?').get(binding.action_key):null;
  if(binding.transport==='direct_human'){
-  const result=verifyDirectDiscoveryHuman(native_proof,{config,source_message_id:binding.source_message_id,verbatim_text:binding.verbatim_text,now});
+  const result=verifyDirectDiscoveryHuman(native_proof,{config,source_message_id:binding.source_message_id,verbatim_text:binding.verbatim_text,now,terminal});
   if(result.turn_id!==binding.turn_id)throw new Error('Discovery batch is bound to another verified native human turn');
   return result;
  }

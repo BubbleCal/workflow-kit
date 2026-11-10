@@ -344,7 +344,7 @@ export class DiscoveryStore {
     required(evidence_ref,'discovery recovery evidence');
     return this.atomic(()=>{
       const b=this.batch(batch_id);if(!b||b.generation!==generation)throw new Error('Stale discovery generation');
-      const proof=verifyExecutionProof(native_proof,{thread_id:this.config.threads.discovery,workspace:this.config.thread_workspaces?.discovery??this.config.scope.project_root,prompt:b.prompt,now:this.now(),terminal:true});
+      const proof=verifyDiscoveryExecution(this.db,this.config,b,native_proof,this.now(),{terminal:true})??verifyExecutionProof(native_proof,{thread_id:this.config.threads.discovery,workspace:this.config.thread_workspaces?.discovery??this.config.scope.project_root,prompt:b.prompt,now:this.now(),terminal:true});
       const native=nativeReadback(native_proof.readback);
       if(!['idle','notLoaded'].includes(native.thread.status?.type)||native.turns[0]?.id!==proof.turn_id||arr(native.thread.status?.activeFlags).length)throw new Error('Discovery owner must be quiescent at the exact ended turn');
       if(effects_reconciled!==true||this.db.prepare("SELECT 1 FROM actions WHERE owner=? AND state IN ('claimed','uncertain') LIMIT 1").get(this.config.threads.discovery))throw new Error('Reconcile discovery effects before recovery');
