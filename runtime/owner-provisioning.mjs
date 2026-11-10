@@ -1,4 +1,5 @@
-import {verifyDiscoveryExecution} from './human-followup.mjs';
+import {verifyDiscoveryExecution,verifyHumanFollowup,verifyFollowupAuthority} from './human-followup.mjs';
+import {createHash} from 'node:crypto';
 import {verifyExecutionProof} from './native-queue.mjs';
 import {readReviewIntake,reviewCreationReasons} from './review-intake.mjs';
 
@@ -11,7 +12,9 @@ export class OwnerProvisioning {
   this.db.exec(`CREATE TABLE IF NOT EXISTS work_creation_triggers (
    trigger_key TEXT PRIMARY KEY,task_id TEXT NOT NULL,source_message_id TEXT NOT NULL,evidence_ref TEXT NOT NULL,state TEXT NOT NULL,created_at INTEGER NOT NULL);
    CREATE TABLE IF NOT EXISTS work_creation_runs (
-   batch_id TEXT,generation INTEGER,thread_id TEXT,turn_id TEXT,PRIMARY KEY(batch_id,generation));`);
+   batch_id TEXT,generation INTEGER,thread_id TEXT,turn_id TEXT,PRIMARY KEY(batch_id,generation));
+   CREATE TABLE IF NOT EXISTS work_manual_creation_runs (
+   trigger_key TEXT PRIMARY KEY,task_id TEXT NOT NULL,thread_id TEXT NOT NULL,turn_id TEXT NOT NULL,action_key TEXT NOT NULL,data TEXT NOT NULL,created_at INTEGER NOT NULL);`);
  }
  policy(){const row=this.db.prepare("SELECT data FROM work_rules WHERE key='discovery_owns_creation'").get();return row?JSON.parse(row.data):null;}
  enabled(){return this.policy()?.enabled===true;}
@@ -22,6 +25,16 @@ export class OwnerProvisioning {
   if(!task||task.state!=='accepted'||task.authorization?.actual_human_verified!==true)throw new Error('owner_creation_accepted_authority_required');
   if(!actor?.thread_id||actor.thread_id===config.threads.main||owner&&owner!==actor.thread_id)throw new Error('owner_creation_discovery_actor_required');
   if(actor.thread_id===config.threads.discovery){
+   if(actor.trigger_key){
+    if(actor.batch_id||actor.generation!==undefined)throw new Error('manual_creation_must_not_rewrite_scan');
+    const run=this.db.prepare('SELECT * FROM work_manual_creation_runs WHERE trigger_key=? AND task_id=?').get(actor.trigger_key,taskId);
+    if(!run)throw new Error('manual_creation_acknowledgement_required');
+    const saved=JSON.parse(run.data);
+    if(saved.scope_digest!==this.manualScope(task))throw new Error('manual_creation_scope_changed');
+    const proof=this.manualProof(task,run.action_key,saved.source_message_id,actor.native_proof);
+    if(proof.turn_id!==run.turn_id)throw new Error('owner_creation_native_turn_changed');
+    return {thread_id:actor.thread_id,turn_id:proof.turn_id,trigger_key:run.trigger_key,action_key:run.action_key};
+   }
    const run=this.db.prepare('SELECT * FROM work_creation_runs WHERE batch_id=? AND generation=?').get(actor.batch_id??'',actor.generation??-1);
    const batch=this.db.prepare('SELECT id,state,generation,prompt FROM discovery_batches WHERE id=?').get(actor.batch_id??'');
    if(!run||run.thread_id!==actor.thread_id||batch?.state!=='running'||batch.generation!==actor.generation)throw new Error('owner_creation_running_discovery_required');
@@ -40,6 +53,42 @@ export class OwnerProvisioning {
   const proof=verifyExecutionProof(actor.native_proof,{thread_id:actor.thread_id,workspace:service.contract.workspace,prompt:wake.prompt,now:this.work.now()});
   if(proof.turn_id!==wake.turn_id)throw new Error('owner_creation_native_turn_changed');
   return {thread_id:actor.thread_id,turn_id:proof.turn_id,review_service:review.task_id};
+ }
+ manualScope(task){
+  const {difficulty_assessment,...data}=task.data;
+  return createHash('sha256').update(JSON.stringify({canonical_key:task.canonical_key,kind:task.kind,data,authorization:task.authorization})).digest('hex');
+ }
+ manualProof(task,actionKey,sourceId,nativeProof){
+  const config=this.work.config,action=this.db.prepare('SELECT * FROM actions WHERE action_key=?').get(actionKey);
+  if(!this.enabled()||!this.policy().allowed_kinds.includes(task?.kind)||task?.state!=='accepted'||task.authorization?.actual_human_verified!==true||
+   task.data.source?.kind!=='user'||task.authorization.source_message_id!==sourceId||action?.owner!==config.threads.main)
+   throw new Error('manual_creation_original_human_task_required');
+  const proof=verifyHumanFollowup(nativeProof,{task:{task_id:'discovery',owner_id:config.threads.discovery,contract:{workspace:config.thread_workspaces?.discovery??config.scope.project_root}},action,source_message_id:sourceId,now:this.work.now()});
+  const p=proof.payload,s=task.data.source;
+  if(proof.status!=='inProgress'||['source_thread_id','source_turn_id','source_message_id','verbatim_text'].some(k=>s[k]!==p[k])||
+   !p.prompt.split(/[^A-Za-z0-9-]+/).includes(task.id)||!p.prompt.includes(task.canonical_key))
+   throw new Error('manual_creation_exact_active_task_relay_required');
+  return proof;
+ }
+ beginManual({task_id,trigger_key,action_key,source_message_id,evidence_ref,native_proof,human_authorization}){
+  return this.work.atomic(()=>{
+   const task=this.work.get(task_id),trigger=this.db.prepare('SELECT * FROM work_creation_triggers WHERE trigger_key=?').get(trigger_key);
+   if(!evidence_ref||!trigger||trigger.task_id!==task_id||trigger.source_message_id!==source_message_id||!['pending','consumed'].includes(trigger.state))
+    throw new Error('manual_creation_exact_human_trigger_required');
+   const proof=this.manualProof(task,action_key,source_message_id,native_proof);
+   verifyFollowupAuthority(human_authorization,proof.payload);
+   const prior=this.db.prepare('SELECT * FROM work_manual_creation_runs WHERE trigger_key=?').get(trigger_key);
+   if(prior){
+    if(prior.task_id!==task_id||prior.turn_id!==proof.turn_id||prior.action_key!==action_key||JSON.parse(prior.data).scope_digest!==this.manualScope(task))
+     throw new Error('manual_creation_preserve_acknowledged_actor_and_scope');
+    return {begun:false,already_begun:true,task_id,trigger_key,turn_id:proof.turn_id,original_queue_consumed:false};
+   }
+   if(task.owner_thread_id||trigger.state!=='pending'||this.db.prepare("SELECT 1 FROM work_creation_runs r JOIN discovery_batches b ON b.id=r.batch_id AND b.generation=r.generation WHERE b.state='running' AND r.turn_id<>?").get(proof.turn_id))
+    throw new Error('manual_creation_preserve_existing_owner_and_writer');
+   this.db.prepare('INSERT INTO work_manual_creation_runs VALUES (?,?,?,?,?,?,?)').run(trigger_key,task_id,this.work.config.threads.discovery,proof.turn_id,action_key,JSON.stringify({source_message_id,evidence_ref,human_evidence_ref:human_authorization.evidence_ref,scope_digest:this.manualScope(task)}),this.work.now());
+   this.db.prepare("UPDATE work_creation_triggers SET state='consumed' WHERE trigger_key=? AND state='pending'").run(trigger_key);
+   return {begun:true,task_id,trigger_key,turn_id:proof.turn_id,original_queue_consumed:false,creation_actor:{thread_id:this.work.config.threads.discovery,trigger_key}};
+  });
  }
  reasons(kind,taskId,payload,evidence,owner){
   if(!['create_thread','assign_project'].includes(kind)||!this.enabled())return [];

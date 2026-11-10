@@ -153,6 +153,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         else if(input.op==='dismiss')result=control.work.dismiss(input);
         else if(input.op==='creation_pending')result={owners:control.work.creation.pending(),triggers:control.work.creation.triggers()};
         else if(input.op==='request_creation')result=control.work.creation.requestStart(input);
+        else if(input.op==='begin_creation')result=control.work.creation.beginManual(input);
         else if(input.op==='prepare_owner')result=await prepareTaskOwner(control,input);
         else if(input.op==='reconcile_runtime_resume')result=reconcileCatalogResume(control,input);
         else if(input.op==='reconcile_artifact')result=reconcileArtifactBinding(control,input);
