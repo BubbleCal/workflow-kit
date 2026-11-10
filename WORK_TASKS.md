@@ -155,3 +155,15 @@ and retain its actual queue receipt. It permits no engineering, permission or
 model change, another move, binding or starting. Read back the real setup turn and
 fresh project membership. A setup/queue ACK is still not membership; normal
 confirm_creation, bind/start and actual engineering begin remain mandatory.
+
+
+Native `list_threads` recent results include a separate `pinnedThreads` collection;
+a genuine entry there is also valid confirm_creation membership evidence. A
+verified maintenance repair found an idle created owner omitted from history but
+returned with its actual project after a temporary native sidebar pin. Under the
+existing scoped repair authority, preserve its prior sidebar state, pin only that
+original owner, retain the actual recent-list envelope and exact membership entry,
+then restore the original sidebar state. This changes no project/owner/permission
+and never navigates to the chat. Use only the actual native project value; local
+SQLite source/title fields are diagnostic context, never membership evidence.
+Do not repeat moves or create a replacement to fix this projection difference.

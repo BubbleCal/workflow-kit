@@ -1,7 +1,7 @@
 {
   "version": "0.9.1",
   "source": "workflow-kit repository source",
-  "upstream_base_commit": "80310113a7f5f6dda17bd1a919f08a22f7b45cdd",
+  "upstream_base_commit": "6e8f793d99354d364a4d0f64cb82ce5dd17b6c3a",
   "source_files": {
     "package.json": "80ba1b31f033e1d5c6727bbf5381196cf7c644b6b90ecedc9ceedd376df42a8d",
     "runtime/calendar-preparation.mjs": "e6c4de5e26b3ecf782cb8143732a58a7ba859ecbf55031e570ddbf78ac6f3113",
