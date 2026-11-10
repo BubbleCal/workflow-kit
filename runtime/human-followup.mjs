@@ -1,4 +1,13 @@
-import {nativeReadback} from './native-queue.mjs';
+import {nativeReadback,verifyExecutionProof} from './native-queue.mjs';
+
+export function verifyDirectDiscoveryHuman(proof,{config,source_message_id,verbatim_text,now}){
+ if(!source_message_id||!verbatim_text?.trim()||/^\s*(?:\[workflow-|<codex_delegation>)/.test(verbatim_text))throw new Error('Actual direct human discovery instruction required');
+ const result=verifyExecutionProof(proof,{thread_id:config.threads.discovery,workspace:config.thread_workspaces?.discovery??config.scope.project_root,prompt:verbatim_text,now});
+ const read=nativeReadback(proof.readback),turn=read.turns[0];
+ if(!proof.evidence_ref||(read.thread.status?.activeFlags??[]).length||turn.items.filter(i=>i.type==='userMessage'&&i.id===source_message_id&&(i.content??[]).filter(c=>c.type==='text').map(c=>c.text).join('\n')===verbatim_text).length!==1)
+  throw new Error('Exact actual current human message identity required');
+ return result;
+}
 
 export function verifyHumanFollowup(proof,{task,action,source_message_id,now=Date.now()}){
  if(!action||action.task_id!==task.task_id||action.kind!=='human_input'||action.state!=='sent'||!action.owner)throw new Error('A sent authorized original-task human followup is required');
@@ -28,7 +37,12 @@ export function verifyFollowupAuthority(human_authorization,payload){
 export function verifyDiscoveryExecution(db,config,batch,native_proof,now){
  const row=db.prepare('SELECT data FROM rt_diagnostics WHERE key=?').get(`discovery-followup:${batch.id}:${batch.generation}`);
  if(!row)return null;
- const binding=JSON.parse(row.data),action=db.prepare('SELECT * FROM actions WHERE action_key=?').get(binding.action_key);
+ const binding=JSON.parse(row.data),action=binding.action_key?db.prepare('SELECT * FROM actions WHERE action_key=?').get(binding.action_key):null;
+ if(binding.transport==='direct_human'){
+  const result=verifyDirectDiscoveryHuman(native_proof,{config,source_message_id:binding.source_message_id,verbatim_text:binding.verbatim_text,now});
+  if(result.turn_id!==binding.turn_id)throw new Error('Discovery batch is bound to another verified native human turn');
+  return result;
+ }
  const task={task_id:'discovery',owner_id:config.threads.discovery,contract:{workspace:config.thread_workspaces?.discovery??config.scope.project_root}};
  const result=verifyHumanFollowup(native_proof,{task,action,source_message_id:binding.source_message_id,now});
  if(result.turn_id!==binding.turn_id)throw new Error('Discovery batch is bound to another verified native followup');

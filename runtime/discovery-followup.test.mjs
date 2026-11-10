@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {DatabaseSync} from 'node:sqlite';
 import {workFixture,MAIN,DISCOVERY} from './test-fixtures/work.mjs';
 import {nativeProof} from './test-fixtures/reactive.mjs';
-import {beginDiscoveryFollowup,settleDiscoveryDelivery} from './discovery-followup.mjs';
+import {beginDiscoveryFollowup,beginDiscoveryInteractive,settleDiscoveryDelivery} from './discovery-followup.mjs';
 import {prepareTaskOwner} from './calendar-preparation.mjs';
 import {bindings} from './instance.mjs';
 
@@ -52,5 +52,52 @@ test('a relay checkpoints the original batch and settles its unsent delivery wit
   try{const receipt=settleDiscoveryDelivery(f.c,mailbox,f.b,result);assert.equal(receipt.original_queue_consumed,false);assert.equal(receipt.state,'checkpointed');assert.equal(db.prepare('SELECT state FROM mail WHERE item_key=?').get(f.b.mail_key).state,'superseded');assert.deepEqual(settleDiscoveryDelivery(f.c,mailbox,f.b,result),receipt);assert.equal(f.c.discovery.finish(input).duplicate,true);
    db.prepare("UPDATE mail SET state='pending'").run();assert.throws(()=>settleDiscoveryDelivery(f.c,mailbox,f.b,result),/authenticated superseded/);
   }finally{db.close();}
+ }finally{f.close();}
+});
+
+test('an actual direct human correction can acknowledge the unchanged pending scan without a fabricated queued message',async()=>{
+ const f=setup();try{
+  const text='Find the missing direct work requests',proof=nativeProof({thread:DISCOVERY,turn:'actual-human-correction',message:text,now:f.now()});proof.readback.turns[0].items[0].id='actual-human-message';
+  const input={batch_id:f.b.id,generation:f.b.generation,expected_mail_key:f.b.mail_key,actual_human_verified:true,source_message_id:'actual-human-message',verbatim_text:text,evidence_ref:'actual-human-correction-proof',native_proof:proof};
+  const original=f.c.discovery.batch(f.b.id).snapshot,ack=beginDiscoveryInteractive(f.c,input);assert.equal(ack.original_queue_consumed,false);assert.equal(ack.turn_id,'actual-human-correction');
+  assert.deepEqual(f.c.discovery.batch(f.b.id).snapshot,original);
+  const actor={thread_id:DISCOVERY,batch_id:f.b.id,generation:f.b.generation,native_proof:proof};
+  assert.equal((await prepareTaskOwner(f.c,{task_id:f.task.id,creation_actor:actor,projects:[{hostId:'local',projectId:f.config.scope.project_id}],project_catalog_ref:'actual-project-catalog',checked_at:new Date(f.now()).toISOString()})).preparation.prepared,true);
+  const result=f.c.discovery.finish({batch_id:f.b.id,generation:f.b.generation,source_results:[],owner_creation_reason:'Preserve actual setup blocker'});assert(result.checkpointed);
+  const db=new DatabaseSync(join(f.dir,'mailbox.sqlite'));try{const settlement=settleDiscoveryDelivery(f.c,{db},f.b,result);assert.equal(settlement.transport,'direct_human');assert.equal(settlement.original_queue_consumed,false);}finally{db.close();}
+ }finally{f.close();}
+});
+
+test('direct discovery acknowledgement rejects machine prompts, wrong identities, stale proofs and another writer',()=>{
+ const changes=[f=>{f.input.actual_human_verified=false;},f=>{f.input.source_message_id='wrong-message';},f=>{f.input.native_proof.readback.thread.cwd='/other';},f=>{f.advance(61000);},f=>{f.input.verbatim_text='[workflow-discovery:machine]';f.input.native_proof.readback.turns[0].items[0].content[0].text=f.input.verbatim_text;},f=>{f.c.db.prepare('INSERT INTO work_creation_runs VALUES (?,?,?,?)').run(f.b.id,f.b.generation,DISCOVERY,'another-writer');}];
+ for(const change of changes){const f=setup();try{const text='Find missing professional work';f.input={batch_id:f.b.id,generation:f.b.generation,expected_mail_key:f.b.mail_key,source_message_id:'human:correction',verbatim_text:text,actual_human_verified:true,evidence_ref:'actual-direct-proof',native_proof:nativeProof({thread:DISCOVERY,message:text,now:f.now()})};f.input.native_proof.readback.turns[0].items[0].id='human:correction';change(f);assert.throws(()=>beginDiscoveryInteractive(f.c,f.input));assert.equal(f.c.discovery.batch(f.b.id).state,'pending');}finally{f.close();}}
+});
+
+
+test('a direct human correction resumes the original checkpoint in a new generation without replacing windows or old delivery evidence',()=>{
+ const f=setup();try{
+  f.c.discovery.begin({batch_id:f.b.id,generation:f.b.generation,native_proof:nativeProof({thread:DISCOVERY,message:f.b.prompt,turn:'old-scan-turn',now:f.now()})});
+  f.c.discovery.finish({batch_id:f.b.id,generation:f.b.generation,source_results:[],owner_creation_reason:'Saved real setup blocker'});
+  const original=f.c.discovery.batch(f.b.id),text='Find missing directed work',proof=nativeProof({thread:DISCOVERY,message:text,turn:'actual-new-human-turn',now:f.now()});proof.readback.turns[0].items[0].id='human:missing';
+  const input={batch_id:f.b.id,generation:f.b.generation,expected_mail_key:f.b.mail_key,source_message_id:'human:missing',verbatim_text:text,actual_human_verified:true,evidence_ref:'actual-current-direct-proof',native_proof:proof};
+  const result=beginDiscoveryInteractive(f.c,input);assert.equal(result.generation,2);assert(result.resumed_checkpoint);assert.equal(result.original_queue_consumed,false);
+  assert.deepEqual(f.c.discovery.batch(f.b.id).snapshot,original.snapshot);assert.equal(f.c.discovery.batch(f.b.id).pages.length,original.pages.length);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) n FROM discovery_batches').get().n,1);
+  assert.throws(()=>beginDiscoveryInteractive(f.c,input),/identity/);
+  const end=f.c.discovery.finish({batch_id:f.b.id,generation:result.generation,source_results:[],owner_creation_reason:'Remaining actual setup blocker'});
+  const db=new DatabaseSync(join(f.dir,'mailbox.sqlite'));try{const receipt=settleDiscoveryDelivery(f.c,{db},f.c.discovery.batch(f.b.id),end);assert.equal(receipt.transport,'direct_human');assert.equal(receipt.original_queue_consumed,false);}finally{db.close();}
+ }finally{f.close();}
+});
+
+
+test('interactive checkpoint recovery preserves the single-writer invariant and reports an actionable earlier-pending-batch prerequisite',()=>{
+ const f=setup();try{
+  f.c.discovery.begin({batch_id:f.b.id,generation:1,native_proof:nativeProof({thread:DISCOVERY,message:f.b.prompt,turn:'old-scan-turn',now:f.now()})});
+  f.c.discovery.finish({batch_id:f.b.id,generation:1,source_results:[],owner_creation_reason:'Real retained setup blocker'});
+  const other=f.work.create({canonical_key:'second-human-work',title:'Second task',objective:'Independent accepted work',requirements:[{id:'done',text:'Existing acceptance'}]}).task;f.work.accept({task_id:other.id,actual_human_verified:true,source_message_id:'human:other',evidence_ref:'actual-other',start_requested:true});
+  const pending=f.c.discovery.enqueueDue({enqueue:()=>({queued:true})},f.dir);assert.notEqual(pending.batch_id,f.b.id);
+  const snapshot=f.c.db.prepare('SELECT snapshot FROM discovery_batches WHERE id=?').get(pending.batch_id).snapshot,text='Find missed work',proof=nativeProof({thread:DISCOVERY,message:text,turn:'actual-correction-turn',now:f.now()});proof.readback.turns[0].items[0].id='human:correction';
+  assert.throws(()=>beginDiscoveryInteractive(f.c,{batch_id:f.b.id,generation:1,expected_mail_key:f.b.mail_key,source_message_id:'human:correction',verbatim_text:text,actual_human_verified:true,evidence_ref:'real-human-proof',native_proof:proof}),/first acknowledging and checkpointing/);
+  assert.equal(f.c.discovery.batch(f.b.id).state,'checkpointed');assert.equal(f.c.discovery.batch(f.b.id).generation,1);assert.equal(f.c.db.prepare('SELECT snapshot FROM discovery_batches WHERE id=?').get(pending.batch_id).snapshot,snapshot);assert.equal(f.c.discovery.batch(pending.batch_id).state,'pending');
  }finally{f.close();}
 });

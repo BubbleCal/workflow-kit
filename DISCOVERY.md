@@ -177,3 +177,31 @@ does not prove zero comments or complete followups: retain the coverage gap and
 checkpoint the provider limitation after recording/classifying available rows.
 
 Under the enabled discovery_owns_creation policy, process fixed owner_creation entries before external reads using OWNER_CREATION.md. All accepted authorized ownerless tasks enter this flow, including direct human tasks, even when sources are disabled. Main only registers them. Checkpoint actual setup/execution blockers with owner_creation_reason; never finish from a candidate or queue acknowledgment.
+
+
+Direct human corrections may use `discovery begin_interactive` with the exact
+batch_id/generation/expected_mail_key, actual_human_verified, source_message_id,
+verbatim_text, evidence_ref and fresh native_proof. Only the current actual user
+message in the discovery chat is accepted; queued workflow markers and relays
+are excluded. This acknowledges actual interactive execution, never original
+queue consumption. A checkpoint resumes as the next generation with its original
+windows/pages/cursors preserved. Another acknowledged active writer, changed
+source scope and stale proof fail closed. A late original queue quietly skips.
+An unrelated pending batch is retained. Normal automatic starts retain cadence.
+
+Private own-user Slack discovery requires with-user, explicit @mention and
+incoming DM/group-DM streams. The DM stream is present only for explicitly
+permitted broad private scope; it does not widen exact-channel or public scopes.
+Every returned cursor and relevant thread must complete before coverage advances.
+`append_catchup` can accept `window:{from,to}` matching saved actual query evidence:
+it must overlap retained coverage, start no earlier than the original authorized
+window, and end no later than actual observation time. This appends independent
+requests without altering original request/page evidence. Preserve the saved
+query's real cursors and cutoff; do not relabel an uncollected range complete.
+
+Invalidated source batches also retire their matching mailbox obligations. Their
+original queue receipt, input, prompt and pages remain; retirement grants no
+source coverage. Native consumption is verified only from the actual recorded
+begin, never inferred from an ACK. Blocked in-flight delivery is exposed in
+`rt_diagnostics` under `discovery-delivery` so a live process cannot be mistaken
+for progressing source intake.

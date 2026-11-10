@@ -367,16 +367,24 @@ export class ReactiveDriver {
       if(due.reason==='discovery_role_not_bound'){this.state.diagnostic('discovery',{reason:due.reason});return;}
       if(!this.control.discovery.config.threads?.discovery)return;
       for(const item of m.db.prepare("SELECT item_key,payload FROM mail WHERE lane='discovery' AND state='pending'").all()){
-        if(this.control.discovery.batch(JSON.parse(item.payload).batch_id)?.state==='invalidated')
+        if((()=>{const scan=this.control.discovery.batch(JSON.parse(item.payload).batch_id);return scan?.state==='invalidated'||scan&&scan.mail_key!==item.item_key;})())
           m.db.prepare("UPDATE mail SET state='superseded' WHERE item_key=? AND state='pending'").run(item.item_key);
       }
-      const reserved=m.reserveQueuedInbox(null,'discovery');if(!reserved.reserved)return;
+      const reserved=m.reserveQueuedInbox(null,'discovery');if(!reserved.reserved){
+        if(reserved.reason==='batch_in_flight'){
+          const prior=this.control.db.prepare("SELECT data,updated_at FROM rt_diagnostics WHERE key='discovery-delivery'").get();
+          if(!prior||this.now()-prior.updated_at>=60000||JSON.parse(prior.data).state!=='blocked'||JSON.parse(prior.data).mailbox_batch_id!==reserved.batch.id)
+            this.state.diagnostic('discovery-delivery',{state:'blocked',reason:reserved.reason,mailbox_batch_id:reserved.batch.id,mailbox_state:reserved.batch.state});
+        }
+        return;
+      }
       const b=reserved.batch,scan=this.control.discovery.batch(b.snapshot.items[0].payload.batch_id);
       if(!scan||scan.state!=='pending'){m.releaseReservation(b.id);return;}
       const prompt=scan.prompt;m.setPrompt(b.id,prompt);this.queue.validate(this.control.discovery.config.threads.discovery,prompt);
       if(!m.authorizeQueueSend(b.id).send)return;
       try{const receipt=await this.queue.enqueue(this.control.discovery.config.threads.discovery,prompt);
         m.delivery(b.id,{outcome:'sent',receipt:{queue_receipt:receipt,execution_verified:false}});
+        this.state.diagnostic('discovery-delivery',{state:'queue_accepted',mailbox_batch_id:b.id,scan_id:scan.id,queue_id:receipt.queue_id,execution_verified:false});
       }catch(error){m.delivery(b.id,{outcome:error.not_sent?'not_sent':'uncertain',receipt:{error:error.message,verified_not_sent:error.not_sent===true}});}
     }catch(error){this.state.diagnostic('discovery',{error:error.message});}
     finally{m.close();}

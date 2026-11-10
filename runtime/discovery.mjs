@@ -50,8 +50,11 @@ export function sourceReadPlan(source,window) {
     for(const channel of arr(s.channel_ids).length?s.channel_ids:[null])for(const mention of s.with_user_id?[false,true]:[false])requests.push({tool:s.access==='private'?'slack_search_public_and_private':'slack_search_public',arguments:{
       filters:[channel?`in:<#${channel}>`:null,s.with_user_id&&!mention?`with:<@${s.with_user_id}>`:null].filter(Boolean).join(' '),keywords:mention?[`<@${s.with_user_id}>`]:[],natural_language_query:'',after:String(Date.parse(window.from)/1000),before:String(Date.parse(window.to)/1000),
       content_types:'messages',sort:'timestamp',sort_dir:'asc',limit:20,include_context:true}});
+    if(s.with_user_id&&s.access==='private'&&s.private_access_authorized===true&&!arr(s.channel_ids).length)requests.push({tool:'slack_search_public_and_private',arguments:{
+      filters:`is:dm -from:<@${s.with_user_id}>`,channel_types:'im,mpim',keywords:[],natural_language_query:'',after:String(Date.parse(window.from)/1000),before:String(Date.parse(window.to)/1000),
+      content_types:'messages',sort:'timestamp',sort_dir:'asc',limit:20,include_context:true}});
     return {requests,observation_fields:{required:['entity_key','item_key','version','scope_key','summary','url','channel_id','thread_ts',...(s.with_user_id?['relevant_user_id','professional_relevance']:[])],relevant_user_id:s.with_user_id,professional_relevance:true},
-      followups:'Collect both the with-user conversation query and the explicit-mention query; with:user alone does not cover channel mentions. Follow all result cursors and read relevant full threads with slack_read_thread. Preserve completed search pages; ingest thread reads with followup={parent_page_key,channel_id,thread_ts} and a separate cursor chain. Preserve root thread identity and reply/edit versions. Use relevant_user_id and professional_relevance for the verified user-directed scope. A field-schema error is repairable from the saved actual evidence; do not repeat the unchanged malformed payload indefinitely. Register watch_thread for an unfinished task with a verified source thread so later replies without @mentions are read independently. Private access must match the recorded explicit user grant.'};
+      followups:'Collect every planned stream: with-user conversations, explicit mentions, and incoming DMs/group DMs when explicitly authorized; with:user alone does not cover channel mentions. Follow all result cursors and read relevant full threads with slack_read_thread. Preserve completed search pages; ingest thread reads with followup={parent_page_key,channel_id,thread_ts} and a separate cursor chain. Preserve root thread identity and reply/edit versions. Use relevant_user_id and professional_relevance for the verified user-directed scope. A field-schema error is repairable from the saved actual evidence; do not repeat the unchanged malformed payload indefinitely. Register watch_thread for an unfinished task with a verified source thread so later replies without @mentions are read independently. Private access must match the recorded explicit user grant.'};
   }
   if(source.kind==='calendar')return {requests:[{tool:'google_calendar_search_events',arguments:{calendar_id:s.calendar_id,time_min:window.to,
     time_max:new Date(Date.parse(window.to)+(s.lookahead_days??7)*86400000).toISOString(),timezone_str:s.timezone??'Asia/Shanghai',max_results:100}}],
@@ -232,16 +235,40 @@ export class DiscoveryStore {
       if(!current?.enabled||current.revision!==source.revision)throw new Error('Discovery source was disabled or changed');}
     return b;
   }
+  retireMailboxDelivery(mailbox,scan,retirement){
+    return mailbox.atomic(()=>{
+      const mail=mailbox.db.prepare('SELECT batch_id FROM mail WHERE item_key=?').get(scan.mail_key);if(!mail?.batch_id)return;
+      const batch=mailbox.get(mail.batch_id);if(batch?.state==='finished')return;
+      if(batch?.lane!=='discovery'||batch.prompt!==scan.prompt||batch.snapshot.items.length!==1||batch.snapshot.items[0].key!==scan.mail_key||
+        batch.snapshot.items[0].payload.batch_id!==scan.id||!['reserved','sending','sent','uncertain','running'].includes(batch.state))
+        throw new Error('Terminal scan disagrees with its original delivery');
+      mailbox.db.prepare("UPDATE mail SET state='superseded',completed_at=? WHERE item_key=? AND batch_id=? AND state='in_batch'").run(this.now(),scan.mail_key,batch.id);
+      const key=retirement.reason==='source_scope_changed'?'discovery_invalidation':'discovery_alternate_execution';
+      mailbox.db.prepare("UPDATE batches SET state='finished',finished_at=?,receipt=? WHERE id=?").run(this.now(),JSON.stringify({...batch.receipt,[key]:retirement}),batch.id);
+    });
+  }
   reconcileMailbox(mailbox){
+    // Invalidating a scan also ends its delivery obligation. Otherwise an old
+    // running mailbox batch blocks every later window after scope changes.
+    for(const scan of this.db.prepare("SELECT id,generation,mail_key,prompt,started_at FROM discovery_batches WHERE state='invalidated'").all()){
+      const mail=mailbox.db.prepare('SELECT batch_id FROM mail WHERE item_key=?').get(scan.mail_key);
+      if(!mail?.batch_id)continue;
+      const run=this.db.prepare('SELECT thread_id,turn_id FROM work_creation_runs WHERE batch_id=? AND generation=?').get(scan.id,scan.generation);
+      const retirement={scan_id:scan.id,generation:scan.generation,mail_key:scan.mail_key,reason:'source_scope_changed',
+        queue_consumption_verified:scan.started_at!==null&&run?.thread_id===this.config.threads.discovery,turn_id:run?.turn_id??null,source_coverage_advanced:false};
+      this.retireMailboxDelivery(mailbox,scan,retirement);
+    }
     // A scan's durable finish can precede its mailbox ACK if the process exits.
     // Reconcile that receipt before incrementing a checkpoint generation.
-    for(const row of this.db.prepare("SELECT id FROM discovery_batches WHERE state IN ('finished','checkpointed')").all()){
-      const scan=this.batch(row.id),mail=mailbox.db.prepare('SELECT batch_id FROM mail WHERE item_key=?').get(scan.mail_key);
+    for(const scan of this.db.prepare("SELECT id,generation,mail_key,prompt FROM discovery_batches WHERE state IN ('finished','checkpointed')").all()){
+      const mail=mailbox.db.prepare('SELECT batch_id FROM mail WHERE item_key=?').get(scan.mail_key);
       if(!mail?.batch_id)continue;
       const batch=mailbox.get(mail.batch_id);
       if(batch?.state==='finished')continue;
       if(batch?.prompt!==scan.prompt||!['sending','sent','uncertain','running'].includes(batch?.state))throw new Error('Discovery finish receipt disagrees with its native queue batch');
-      mailbox.begin(batch.id);mailbox.finish(batch.id,{processed_keys:[scan.mail_key],note:'reconciled durable source scan finish'});
+      const binding=this.db.prepare('SELECT data FROM rt_diagnostics WHERE key=?').get(`discovery-followup:${scan.id}:${scan.generation}`);
+      if(binding){const value=JSON.parse(binding.data);this.retireMailboxDelivery(mailbox,scan,{reason:'authenticated_alternate_execution',queue_consumption_verified:false,turn_id:value.turn_id});}
+      else {mailbox.begin(batch.id);mailbox.finish(batch.id,{processed_keys:[scan.mail_key],note:'reconciled durable source scan finish'});}
     }
   }
   enqueueDue(mailbox,root){
@@ -307,7 +334,7 @@ export class DiscoveryStore {
         return {...b,begun:false,skipped:true,quiet:true,reason:'batch_bound_to_verified_followup'};
       }
       const proof=verifyDiscoveryExecution(this.db,this.config,b,native_proof,this.now())??verifyExecutionProof(native_proof,{thread_id:this.config.threads.discovery,workspace:this.config.thread_workspaces?.discovery??this.config.scope.project_root,prompt:b.prompt,now:this.now()});
-      if(b.state==='invalidated')return {...b,invalidated:true};
+      if(b.state==='invalidated')return {...b,invalidated:true,skipped:true,quiet:true,reason:'source_scope_changed'};
       this.checkBatch(batch_id);this.selectHealth(b);this.work.creation.recordRun(b,proof);
       this.db.prepare("UPDATE discovery_batches SET state='running',started_at=? WHERE id=?").run(b.state==='pending'?this.now():b.started_at,batch_id);
       return compactDiscoveryBatch(this.checkBatch(batch_id),this.sources());
@@ -327,7 +354,7 @@ export class DiscoveryStore {
       return {recovered:true,batch_id,mail_key:b.mail_key,previous_turn_id:proof.turn_id,evidence_ref,pages_preserved:b.pages.length};
     });
   }
-  appendCatchup({batch_id,generation,source_id,evidence_ref}){
+  appendCatchup({batch_id,generation,source_id,evidence_ref,window:savedWindow}){
     required(evidence_ref,'actual catchup reason/evidence');
     return this.atomic(()=>{
       const b=this.checkBatch(batch_id);if(b.state!=='running'||b.generation!==generation)throw new Error('Actual running discovery generation required');
@@ -339,7 +366,8 @@ export class DiscoveryStore {
       const original=sourceReadPlan(source,source.window).requests,request_indices=[];
       for(const request of original)if(!source.plan.requests.some(r=>hash(r)===hash(request))){request_indices.push(source.plan.requests.length);source.plan.requests.push(request);}
       const from=Math.max(Date.parse(source.window.to),...windows.map(w=>Date.parse(w.window.to)))-120000;
-      const window={from:new Date(from).toISOString(),to:new Date(this.now()).toISOString()};
+      const window=savedWindow??{from:new Date(from).toISOString(),to:new Date(this.now()).toISOString()};
+      if(!Number.isFinite(Date.parse(window.from))||!Number.isFinite(Date.parse(window.to))||Date.parse(window.from)<Date.parse(source.window.from)||Date.parse(window.from)>from+120000||Date.parse(window.to)>this.now()+5000||Date.parse(window.to)<=Date.parse(window.from))throw new Error('Saved catchup window must overlap retained coverage within the original authorized range and actual observation time');
       if(Date.parse(window.to)<=Date.parse(source.window.to))throw new Error('No later source window to catch up');
       for(const request of sourceReadPlan(source,window).requests){request_indices.push(source.plan.requests.length);source.plan.requests.push(request);}
       const entry={generation,window,request_indices,evidence_ref};source.catchup_windows=[...windows,entry];

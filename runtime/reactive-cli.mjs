@@ -1,5 +1,5 @@
 import {reconcileCreationWorkspace} from './creation-workspace-repair.mjs';
-import {beginDiscoveryFollowup,settleDiscoveryDelivery} from './discovery-followup.mjs';
+import {beginDiscoveryFollowup,beginDiscoveryInteractive,settleDiscoveryDelivery} from './discovery-followup.mjs';
 import {reconcileArtifactBinding} from './registration-repair.mjs';
 import {reconcileQueuedFollowup} from './human-followup.mjs';
 import {verifyQueuedRecoveryProof} from './queued-resume.mjs';
@@ -188,6 +188,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
           if(result.invalidated)mailbox.finish(mail.batch_id,{processed_keys:[result.mail_key],note:'source scope changed; no source reads'});
         }else if(input.op==='ingest')result=control.discovery.ingest(input);
         else if(input.op==='begin_followup')result=beginDiscoveryFollowup(control,input);
+        else if(input.op==='begin_interactive')result=beginDiscoveryInteractive(control,input);
         else if(input.op==='append_catchup')result=control.discovery.appendCatchup(input);
         else if(input.op==='retry_checkpoint')result=control.discovery.recovery.requestRetry(input);
         else if(input.op==='classify'){result=control.discovery.classify(input);if(result.shared_service)result={...result,schedule_update:scheduleCalendarPreparation(control,result.task_id)};}

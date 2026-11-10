@@ -43,14 +43,14 @@ test('Notion row details use a separate scoped stream after terminal database di
 });
 
 test('mention search is independent of with-user search and both remain required within the original scope',()=>{
- const plan=sourceReadPlan({kind:'slack',scope:{with_user_id:'U123',access:'private'}},{from:'2026-11-06T07:00:00Z',to:'2026-11-07T07:00:00Z'});
- assert.equal(plan.requests.length,2);assert.equal(plan.requests[0].arguments.filters,'with:<@U123>');
+ const plan=sourceReadPlan({kind:'slack',scope:{with_user_id:'U123',access:'private',private_access_authorized:true}},{from:'2026-11-06T07:00:00Z',to:'2026-11-07T07:00:00Z'});
+ assert.equal(plan.requests.length,3);assert.equal(plan.requests[0].arguments.filters,'with:<@U123>');
  assert.equal(plan.requests[1].arguments.filters,'');assert.deepEqual(plan.requests[1].arguments.keywords,['<@U123>']);
- const f=setup();try{const b=f.scan();f.ingest(b);assert.throws(()=>f.finish(b),/all request streams/);f.ingest(b,1);assert.equal(f.finish(b).finished,true);}finally{f.c.close();}
+ const f=setup();try{const b=f.scan();f.ingest(b);assert.throws(()=>f.finish(b),/all request streams/);f.ingest(b,1);f.ingest(b,2);assert.equal(f.finish(b).finished,true);}finally{f.c.close();}
 });
 
 test('completed search evidence stays immutable while a linked thread has its own resumable cursor and classification',()=>{
- const f=setup();try{const b=f.scan();f.ingest(b);f.ingest(b,1);const first=f.d.batch(b.id).pages[0];
+ const f=setup();try{const b=f.scan();f.ingest(b);f.ingest(b,1);f.ingest(b,2);const first=f.d.batch(b.id).pages[0];
   const base={entity_key:'slack:D123:1793949007.352439',item_key:'1793949007.352439',version:'actual-content',scope_key:'U123',summary:'A professional request addressed to Yang; issue already Done',url:'https://slack.com/archives/D123/p1793949007352439',channel_id:'D123',thread_ts:'1793949007.352439',relevant_user_id:'U123',professional_relevance:true};
   assert.throws(()=>f.ingest(b,0,{page_key:'late-thread',observations:[base]}),/completed search page is immutable/);
   const followup={parent_page_key:first.page_key,channel_id:'D123',thread_ts:base.thread_ts};
@@ -68,10 +68,10 @@ test('completed search evidence stays immutable while a linked thread has its ow
 });
 
 test('same actual run can catch up later coverage without changing its original cutoff or bypassing incomplete streams',()=>{
- const f=setup();try{const b=f.scan(),original=structuredClone(b.snapshot.sources[0].window);f.ingest(b);f.ingest(b,1);
+ const f=setup();try{const b=f.scan(),original=structuredClone(b.snapshot.sources[0].window);f.ingest(b);f.ingest(b,1);f.ingest(b,2);
   f.advance(86400000);const added=f.d.appendCatchup({batch_id:b.id,generation:b.generation,source_id:'slack',evidence_ref:'verified-stale-watermark'});
   assert.deepEqual(f.d.appendCatchup({batch_id:b.id,generation:b.generation,source_id:'slack',evidence_ref:'same-run'}),added);
-  assert.deepEqual(f.d.batch(b.id).snapshot.sources[0].window,original);assert.equal(added.request_indices.length,2);
+  assert.deepEqual(f.d.batch(b.id).snapshot.sources[0].window,original);assert.equal(added.request_indices.length,3);
   assert.throws(()=>f.finish(b),/all request streams/);
   for(const i of added.request_indices)f.ingest(b,i);
   assert.equal(f.finish(b).finished,true);assert.equal(f.d.sources().find(s=>s.source_id==='slack').last_success_at,Date.parse(added.window.to));
@@ -125,7 +125,7 @@ test('a saved with-only legacy window returns the missing original mention reque
   f.c.db.prepare('UPDATE discovery_batches SET snapshot=? WHERE id=?').run(JSON.stringify(snapshot),b.id);
   f.ingest(b);const original=f.d.batch(b.id).pages[0];f.advance(86400000);
   const added=f.d.appendCatchup({batch_id:b.id,generation:b.generation,source_id:'slack',evidence_ref:'real-with-only-migration'});
-  assert.deepEqual(added.request_indices,[1,2,3]);
+  assert.deepEqual(added.request_indices,[1,2,3,4,5]);
   const requests=f.d.batch(b.id).snapshot.sources[0].plan.requests;assert.equal(requests[1].arguments.before,String(Date.parse(snapshot.sources[0].window.to)/1000));
   assert.deepEqual(requests[1].arguments.keywords,['<@U123>']);
   for(const index of added.request_indices)f.ingest(b,index);
@@ -148,5 +148,21 @@ test('real page progress resumes the original checkpoint automatically, while cy
   const continuation=f.scan();assert.equal(continuation.id,old.id);
   f.ingest(continuation,0,{page_key:'last-actual-page',cursor:'page-B'});f.finish(continuation);
   const source=f.d.sources().find(s=>s.source_id==='linear');assert.equal(source.health,null);assert.equal(source.last_success_at,Date.parse(fresh.snapshot.sources[0].window.to));assert.equal(source.next_at,source.last_success_at+source.interval_ms);
+ }finally{f.c.close();}
+});
+
+
+test('saved Slack catchup uses its actual overlapping evidence window and requires all authorized incoming DM pages',()=>{
+ const f=setup();try{
+  const b=f.scan();f.ingest(b);f.ingest(b,1);f.ingest(b,2);const original=structuredClone(b.snapshot.sources[0].window);f.advance(3600000);
+  const saved={from:original.from,to:new Date(f.now()-30000).toISOString()};
+  assert.throws(()=>f.d.appendCatchup({batch_id:b.id,generation:b.generation,source_id:'slack',window:{...saved,from:new Date(Date.parse(original.from)-1).toISOString()},evidence_ref:'out-of-window'}),/Saved catchup window/);
+  const added=f.d.appendCatchup({batch_id:b.id,generation:b.generation,source_id:'slack',window:saved,evidence_ref:'actual-saved-tool-queries'});assert.deepEqual(added.window,saved);
+  assert.deepEqual(f.d.batch(b.id).snapshot.sources[0].window,original);
+  for(const i of added.request_indices.slice(0,2))f.ingest(b,i);assert.throws(()=>f.finish(b),/all request streams/);
+  const index=added.request_indices.at(-1),query=f.d.batch(b.id).snapshot.sources[0].plan.requests[index];assert.equal(query.arguments.channel_types,'im,mpim');assert.equal(query.arguments.filters,'is:dm -from:<@U123>');
+  f.ingest(b,index);assert(f.finish(b).finished);assert.equal(f.d.sources().find(s=>s.source_id==='slack').last_success_at,Date.parse(saved.to));
+  assert.equal(sourceReadPlan({kind:'slack',scope:{with_user_id:'U123',access:'private'}},saved).requests.length,2);
+  assert.equal(sourceReadPlan({kind:'slack',scope:{with_user_id:'U123',access:'private',private_access_authorized:true,channel_ids:['C123']}},saved).requests.length,2);
  }finally{f.c.close();}
 });

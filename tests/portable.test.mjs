@@ -197,6 +197,46 @@ test('source-only native discovery recovers a durable finish before mailbox ackn
  }finally{db?.close();rmSync(root,{recursive:true,force:true});}
 });
 
+test('a scope-invalidated consumed discovery scan releases its old delivery without losing pages, queue receipts or coverage',()=>{
+ const root=setup();let db,mailbox;try{
+  const {dir,workspace}=nativeSetup(root,{discovery:true});
+  const configure=()=>op(dir,'sources',{op:'configure',source_id:'linear',enabled:true,scope:{project:'project'},source_message_id:'user:source',actual_human_verified:true,evidence_ref:'source-scope'});
+  configure();once(dir);db=new DatabaseSync(join(dir,'control.sqlite'));mailbox=new DatabaseSync(join(dir,'mailbox.sqlite'));
+  const scan=db.prepare("SELECT * FROM discovery_batches WHERE state='pending'").get();
+  op(dir,'discovery',{op:'begin',batch_id:scan.id,generation:scan.generation,native_proof:nativeProof({thread:DISCOVERY,workspace,message:scan.prompt,now:Date.now()})});
+  op(dir,'discovery',{op:'ingest',batch_id:scan.id,generation:scan.generation,source_id:'linear',page_key:'original-partial',observations:[],complete:false,next_cursor:'saved-cursor',evidence_ref:'original-source-page'});
+  const mail=mailbox.prepare('SELECT * FROM mail WHERE item_key=?').get(scan.mail_key),delivery=mailbox.prepare('SELECT * FROM batches WHERE id=?').get(mail.batch_id),page=db.prepare('SELECT * FROM discovery_pages WHERE batch_id=?').get(scan.id),sourcesBefore=db.prepare("SELECT last_success_at FROM discovery_sources WHERE source_id='linear'").get();
+  assert.equal(delivery.state,'running');once(dir);assert.equal(JSON.parse(db.prepare("SELECT data FROM rt_diagnostics WHERE key='discovery-delivery'").get().data).reason,'batch_in_flight');assert.equal(mailbox.prepare('SELECT state FROM batches WHERE id=?').get(delivery.id).state,'running');configure();assert.equal(db.prepare('SELECT state FROM discovery_batches WHERE id=?').get(scan.id).state,'invalidated');
+  once(dir);
+  const after=mailbox.prepare('SELECT * FROM batches WHERE id=?').get(delivery.id);
+  assert.equal(after.state,'finished');assert.deepEqual(JSON.parse(after.receipt).queue_receipt,JSON.parse(delivery.receipt).queue_receipt);
+  assert.equal(JSON.parse(after.receipt).discovery_invalidation.queue_consumption_verified,true);
+  assert.equal(mailbox.prepare('SELECT state FROM mail WHERE item_key=?').get(scan.mail_key).state,'superseded');
+  assert.deepEqual(db.prepare('SELECT * FROM discovery_pages WHERE batch_id=?').get(scan.id),page);
+  assert.deepEqual(db.prepare("SELECT last_success_at FROM discovery_sources WHERE source_id='linear'").get(),sourcesBefore);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM discovery_batches WHERE state='pending'").get().n,1);
+  assert.equal(mailbox.prepare("SELECT COUNT(*) n FROM batches WHERE lane='discovery' AND state='sent'").get().n,1);
+  const late=op(dir,'discovery',{op:'begin',batch_id:scan.id,generation:scan.generation,native_proof:nativeProof({thread:DISCOVERY,workspace,turn:'late-original-queued-turn',message:scan.prompt,now:Date.now()})});assert.equal(late.skipped,true);assert.equal(late.invalidated,true);
+ }finally{db?.close();mailbox?.close();rmSync(root,{recursive:true,force:true});}
+});
+
+test('a direct human discovery correction reuses the same queued scan and preserves its unconsumed receipt',()=>{
+ const root=setup();let db,mailbox;try{
+  const {dir,workspace}=nativeSetup(root,{discovery:true});
+  op(dir,'sources',{op:'configure',source_id:'linear',enabled:true,scope:{project:'project'},source_message_id:'user:source',actual_human_verified:true,evidence_ref:'source-scope'});once(dir);
+  db=new DatabaseSync(join(dir,'control.sqlite'));mailbox=new DatabaseSync(join(dir,'mailbox.sqlite'));
+  const scan=db.prepare("SELECT * FROM discovery_batches WHERE state='pending'").get(),mail=mailbox.prepare('SELECT * FROM mail WHERE item_key=?').get(scan.mail_key),delivery=mailbox.prepare('SELECT * FROM batches WHERE id=?').get(mail.batch_id);
+  const text='Find the professional requests missed by intake',proof=nativeProof({thread:DISCOVERY,workspace,message:text,now:Date.now()});proof.readback.turns[0].items[0].id='actual-user-correction';
+  const result=op(dir,'discovery',{op:'begin_interactive',batch_id:scan.id,generation:scan.generation,expected_mail_key:scan.mail_key,source_message_id:'actual-user-correction',verbatim_text:text,actual_human_verified:true,evidence_ref:'actual-user-proof',native_proof:proof});assert.equal(result.original_queue_consumed,false);
+  assert.equal(db.prepare('SELECT snapshot FROM discovery_batches WHERE id=?').get(scan.id).snapshot,scan.snapshot);
+  op(dir,'discovery',{op:'ingest',batch_id:scan.id,generation:scan.generation,source_id:'linear',page_key:'real-correction-page',observations:[],complete:true,evidence_ref:'actual-source-results'});
+  const finish=op(dir,'discovery',{op:'finish',batch_id:scan.id,generation:scan.generation,source_results:[{source_id:'linear',complete:true,followups_complete:true}]});assert(finish.finished);assert.equal(finish.delivery.original_queue_consumed,false);
+  const after=mailbox.prepare('SELECT * FROM batches WHERE id=?').get(delivery.id);assert.equal(after.state,'finished');assert.deepEqual(JSON.parse(after.receipt).queue_receipt,JSON.parse(delivery.receipt).queue_receipt);assert.equal(JSON.parse(after.receipt).discovery_alternate_execution.queue_consumption_verified,false);
+  assert.equal(mailbox.prepare('SELECT state FROM mail WHERE item_key=?').get(scan.mail_key).state,'superseded');
+  const late=op(dir,'discovery',{op:'begin',batch_id:scan.id,generation:scan.generation,native_proof:nativeProof({thread:DISCOVERY,workspace,turn:'late-original-queued-turn',message:scan.prompt,now:Date.now()})});assert.equal(late.skipped,true);
+ }finally{db?.close();mailbox?.close();rmSync(root,{recursive:true,force:true});}
+});
+
 test('native layout migration preserves legacy records and imports existing task ownership without creating roles',()=>{
  const root=setup();let db;try{const dir=init(root,'one'),old=bind(dir,'one'),workspace=realpathSync(join(root,'project one'));
   assert.equal(run(dir,'workflow.mjs',['runtime','init']).status,0);
