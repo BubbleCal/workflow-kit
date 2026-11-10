@@ -4,17 +4,18 @@ The authoritative policy is `instance.json.models.roles.execution`. Read it at
 creation time; do not copy model names into individual task-role prompts.
 Existing conversations and immutable creation actions retain their configuration.
 
-Under the user's repository-specific policy, the configured PR-work routes are:
+Under Yang's 2026-11-11 policy, use the same two routes for every repository
+and task type:
 
-| Target repository | Simple | Difficult | Extremely difficult |
-| --- | --- | --- | --- |
-| lance-format/lance | GPT-6.1 Sol / high | GPT-6.1 Sol / xhigh | GPT-6 Astra / xhigh |
-| lancedb/lancedb | GPT-6.1 Sol / high | GPT-6.1 Sol / xhigh | GPT-6 Astra / xhigh |
-| lancedb/sophon | GPT-6.1 Sol / high | GPT-6 Astra / xhigh | GPT-6 Astra / xhigh |
+| Task difficulty | Model | Reasoning effort |
+| --- | --- | --- |
+| Simple | GPT-6.1 Sol | high |
+| All other tasks | GPT-6 Astra | xhigh |
 
-Other tasks retain the existing simple/other routes. Unknown repository or
-difficulty uses that existing fallback, not a guess from the sidebar project.
-For mixed-repository scope, use the highest-priority applicable route.
+This supersedes the earlier repository-specific simple/difficult/extreme mapping.
+Unknown difficulty uses the other route. Repository and complexity metadata may
+still describe scope, but do not select an additional model tier. Keep the mapping
+only in `instance.json.models.roles.execution`; do not duplicate it in owner prompts.
 
 Main may record a whole-task assessment at registration. Under discovery-owned creation, discovery verifies that assessment before requesting its owner; model choices remain centralized.
 Do not judge by the short setup prompt, title, file count or the word "docs".
@@ -30,10 +31,8 @@ A task is simple only when all three dimensions qualify:
 Use `scope="broad"`, `uncertainty="material"`, `validation="specialist"` as
 applicable. Unknown dimensions use `"unknown"`. Include a short, task-specific
 `reason`. The runtime derives simple/other; a simple label alone is insufficient.
-For non-simple PR work, use complexity="difficult" or "extreme". Ordinary
-nontrivial fixes/features are difficult. Extreme requires a concrete reason, such
-as complex low-level optimization with interacting algorithm, memory-layout and
-concurrency constraints; specialist validation alone does not imply extreme.
+Optional complexity="difficult" or "extreme" records descriptive context only;
+both use the other route. Do not introduce a Sol xhigh middle tier.
 Record target_repositories as exact owner/repo names and repository_evidence_ref
 from the actual task/source scope inside difficulty_assessment. Do this before
 requesting the owner even if no PR exists yet. The shared LanceDB sidebar project
