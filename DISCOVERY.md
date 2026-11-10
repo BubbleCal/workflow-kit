@@ -205,3 +205,11 @@ source coverage. Native consumption is verified only from the actual recorded
 begin, never inferred from an ACK. Blocked in-flight delivery is exposed in
 `rt_diagnostics` under `discovery-delivery` so a live process cannot be mistaken
 for progressing source intake.
+
+
+An already-created owner with project_pending setup is not a new creation.
+Resume its existing creation batch/actor and follow WORK_TASKS.md. If a complete
+fresh native listing omits a readable idle setup owner, use the narrowly guarded
+repair_created_project action to reassert the original project once. Do not fake
+actual_project_id, repeat create_thread, or treat a move ACK as membership. Only
+genuine post-move list_threads confirmation permits ordinary bind/start.

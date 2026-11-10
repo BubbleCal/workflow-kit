@@ -116,3 +116,28 @@ permissions remain unchanged. The original discovery actor still binds/starts
 the same owner. This does not change App directories, grant filesystem access,
 replace an owner, or repair running task contracts. Run product commands in
 product_workspace (or the task's authorized worktree), not the launch directory.
+
+
+For an accepted user task whose original source omitted human attribution, use
+`task op reconcile_source` with expected_revision, original source thread/turn/
+message/verbatim fields and the actual native human_authorization. This adds only
+missing attribution matching the existing acceptance; it cannot replace conflicting
+attribution, change scope/requirements, or bind an owner.
+
+A checkpointed creation scan must resume through its existing normal discovery
+batch/actor; retain the original create receipt. If an unbound, unstarted created
+owner is readable and idle but absent from a complete native listing, discovery
+may prepare control kind `repair_created_project` with stable key
+`project-repair:<original-creation-key>`. Payload contains creation_key, thread_id,
+host_id=local and the original project_id. Evidence includes the current lawful
+creation_actor, original human_authorization, fresh created_owner_proof with the
+exact completed creation setup, complete_thread_listing (source, checked_at,
+evidence_ref, request mode=history/archived=false/no cursor, readback ending with
+nextCursor=null), and a fresh project_listing matching the original destination
+and workspace. The operation reasserts only the originally requested project;
+absence is not converted to actual_project_id=null. Prepare and claim both
+recheck authority, sole owner, native proof, pending setup and unknown effects.
+Invoke the supported native move once, retain its real receipt, and keep unknown
+outcomes uncertain. A move ACK does not bind or start work: confirm_creation still
+requires genuine list_threads membership. If that remains unavailable, save the
+native limitation without recreating the owner or repeating the move.

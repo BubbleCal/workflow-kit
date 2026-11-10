@@ -1,3 +1,4 @@
+import {createdProjectRepairReasons} from './created-project-repair.mjs';
 import {recordPrReviewAuthorization} from './pr-authorization.mjs';
 import {reviewClosureArchiveActor} from './review-closure.mjs';
 import {readReviewReportPolicy,reviewReportTaskReasons} from './review-report.mjs';
@@ -43,12 +44,12 @@ export function resolveCapacity(value = {}) {
   return { ...value, max_new_heavy_concurrency: value.automatic_limit,
     max_dispatches_per_run: value.automatic_limit };
 }
-const KINDS = new Set(['task_queue', 'task_wake', 'dispatch', 'create_thread', 'assign_project', 'human_input', 'notify', 'review_report', 'completion_report', 'slack_pr', 'review_decision', 'pr_ready', 'merge', 'archive', 'unarchive', 'auth', 'notion_sync', 'automation_update']);
+const KINDS = new Set(['task_queue', 'task_wake', 'dispatch', 'create_thread', 'assign_project', 'repair_created_project', 'human_input', 'notify', 'review_report', 'completion_report', 'slack_pr', 'review_decision', 'pr_ready', 'merge', 'archive', 'unarchive', 'auth', 'notion_sync', 'automation_update']);
 const PROTECTED_THREADS = new Set(Object.values(bindings.threads));
 const prUrl = value => typeof value === 'string' && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*$/.test(value);
 function scopeKey(kind, payload) {
   if (kind === 'create_thread') return `new-thread:${required(payload?.canonical_task_key, 'payload.canonical_task_key')}`;
-  if (kind === 'assign_project') return `project-membership:${required(payload?.host_id, 'host_id')}:${required(payload?.thread_id, 'thread_id')}`;
+  if (['assign_project','repair_created_project'].includes(kind)) return `project-membership:${required(payload?.host_id, 'host_id')}:${required(payload?.thread_id, 'thread_id')}`;
   if (['task_queue', 'task_wake', 'dispatch', 'human_input', 'archive', 'unarchive'].includes(kind)) return `thread:${required(payload?.thread_id, 'payload.thread_id')}`;
   if (['notify','review_report','completion_report'].includes(kind)) return `inbox:${INBOX}`;
   if (kind === 'notion_sync') return `notion:${payload?.data_source_id ?? required(payload?.page_id, 'payload.page_id')}`;
@@ -457,6 +458,8 @@ export class ControlStore {
   recordCompletionNotice(input) { return recordPresentedCompletion(this,input); }
   prepare(input) {
     const key = required(input.key, 'action key');
+    const repairReasons=createdProjectRepairReasons(this,input.kind,input.task_id,input.payload,input.evidence,key);
+    if(repairReasons.length)return {prepared:false,allowed:false,reasons:repairReasons};
     const creationActorReasons=this.work.creation.reasons(input.kind,input.task_id,input.payload,input.evidence);
     if(creationActorReasons.length)return {prepared:false,allowed:false,reasons:creationActorReasons};
     const reportReasons=reviewReportTaskReasons(this,input.kind,input.task_id,input.payload,input.evidence,null,key);
@@ -612,6 +615,8 @@ export class ControlStore {
       const blocked = this.db.prepare("SELECT action_key FROM actions WHERE scope_key=? AND state IN ('claimed','uncertain') AND action_key<>? LIMIT 1").get(row.scope_key, key);
       if (blocked) return { claimed: false, reason: 'scope_in_use', blocking_key: blocked.action_key };
       const payload = JSON.parse(row.payload);
+      const repairReasons=createdProjectRepairReasons(this,row.kind,row.task_id,payload,evidence,key);
+      if(repairReasons.length)return {claimed:false,reasons:repairReasons};
       const creationActorReasons=this.work.creation.reasons(row.kind,row.task_id,payload,evidence,owner);
       if(creationActorReasons.length)return {claimed:false,reasons:creationActorReasons};
       const reportReasons=reviewReportTaskReasons(this,row.kind,row.task_id,payload,evidence,owner,key);

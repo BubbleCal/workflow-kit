@@ -1,3 +1,4 @@
+import {reconcileAcceptedSource} from './created-project-repair.mjs';
 import {reconcileCompletedProjection,reconcileReviewWorkspace} from './closure-reconciliation.mjs';
 import {reconcileCreationWorkspace} from './creation-workspace-repair.mjs';
 import {beginDiscoveryFollowup,beginDiscoveryInteractive,settleDiscoveryDelivery} from './discovery-followup.mjs';
@@ -160,6 +161,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         else if(input.op==='reconcile_artifact')result=reconcileArtifactBinding(control,input);
         else if(input.op==='reconcile_completed_projection')result=reconcileCompletedProjection(control,input);
         else if(input.op==='reconcile_review_workspace')result=reconcileReviewWorkspace(control,input);
+        else if(input.op==='reconcile_source')result=reconcileAcceptedSource(control,input);
         else if(input.op==='reconcile_creation_workspace')result=reconcileCreationWorkspace(control,input);
         else if(input.op==='reconcile_history')result=control.work.reconcileHistory(input);
         else if(input.op==='assess_difficulty')result=control.work.assessDifficulty(input);

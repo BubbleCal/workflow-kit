@@ -91,7 +91,7 @@ export class OwnerProvisioning {
   });
  }
  reasons(kind,taskId,payload,evidence,owner){
-  if(!['create_thread','assign_project'].includes(kind)||!this.enabled())return [];
+  if(!['create_thread','assign_project','repair_created_project'].includes(kind)||!this.enabled())return [];
   try{this.actor(taskId,evidence?.creation_actor,{owner,payload});return [];}catch(e){return [e.message];}
  }
  pending(){
