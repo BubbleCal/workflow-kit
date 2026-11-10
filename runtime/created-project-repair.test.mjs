@@ -4,7 +4,7 @@ import {workFixture,MAIN,DISCOVERY} from './test-fixtures/work.mjs';
 import {nativeProof,OWNER} from './test-fixtures/reactive.mjs';
 import {bindings} from './instance.mjs';
 import {prepareTaskOwner} from './calendar-preparation.mjs';
-import {reconcileAcceptedSource} from './created-project-repair.mjs';
+import {reconcileAcceptedSource,createdOwnerSetupPrompt} from './created-project-repair.mjs';
 
 async function setup(){
  const f=workFixture();f.config.scope.project_id=bindings.scope.project_id??'project';
@@ -32,6 +32,11 @@ test('a genuinely created missing owner can reassert only its original project, 
   assert.equal(f.c.claim({key:f.repair.key,owner:MAIN,evidence:f.repair.evidence}).claimed,false);
   const claim=f.c.claim({key:f.repair.key,owner:DISCOVERY,evidence:f.repair.evidence});assert(claim.claimed,JSON.stringify(claim));
   f.c.settle({key:f.repair.key,attempt_id:claim.attempt_id,outcome:'sent',evidence_ref:'single-native-move',native_result:{threadId:OWNER}});
+  const bootstrap={...f.repair,key:`setup-created-owner:${f.p.key}`,kind:'setup_created_owner',payload:{...f.repair.payload,prompt:createdOwnerSetupPrompt(f.t.id,f.p.key)}};
+  assert.equal(f.c.prepare({...bootstrap,payload:{...bootstrap.payload,prompt:'Start engineering now'}}).prepared,false);
+  assert.equal(f.c.prepare(bootstrap).prepared,true);
+  const setupClaim=f.c.claim({key:bootstrap.key,owner:DISCOVERY,evidence:bootstrap.evidence});assert(setupClaim.claimed);
+  f.c.settle({key:bootstrap.key,attempt_id:setupClaim.attempt_id,outcome:'sent',evidence_ref:'actual-setup-queue',native_result:{queued:true,queue_id:'original-setup-only-queue'}});
   const binding={task_id:f.t.id,owner_thread_id:OWNER,creation_action_key:f.p.key,creation_actor:f.actor,evidence_ref:'actual-owner',native_binding:nativeProof({status:'completed',now:f.now()})};
   assert.throws(()=>f.work.bindOwner(binding),/project readback/);
   assert(f.c.confirmCreation({key:f.p.key,snapshot:{id:OWNER,hostId:'local',projectId:f.config.scope.project_id},source:'list_threads',verified_at:new Date(f.now()).toISOString(),evidence_ref:'actual-after-move-list'}).setup_complete);
@@ -39,6 +44,7 @@ test('a genuinely created missing owner can reassert only its original project, 
   assert.equal(f.c.db.prepare("SELECT COUNT(*) n FROM actions WHERE kind='create_thread'").get().n,1);
   assert.equal(f.c.db.prepare('SELECT receipt FROM actions WHERE action_key=?').get(f.p.key).receipt,original);
   assert.equal(f.c.prepare({...f.repair,key:'another-project-repair'}).prepared,false);
+  assert.equal(f.c.prepare({...bootstrap,key:'another-setup-key'}).prepared,false);
  }finally{f.c.close();}
 });
 
@@ -46,6 +52,7 @@ test('missing-membership repair rejects fabricated sources, foreign projects, pa
  const changes=[f=>{f.c.db.prepare("DELETE FROM work_rules WHERE key='discovery_owns_creation'").run();},f=>{f.repair.payload.project_id='foreign';},f=>{f.repair.key='repeat-key';},f=>{f.repair.evidence.complete_thread_listing.readback.nextCursor='more';},f=>{f.repair.evidence.complete_thread_listing.readback.threads=[{id:OWNER,projectId:'other'}];},f=>{f.repair.evidence.created_owner_proof.readback.thread.status.type='active';},f=>{f.repair.evidence.created_owner_proof.readback.turns[0].items[0].content[0].text='different setup';},f=>{f.repair.evidence.human_authorization.readback.turns[0].items[0].id='agent-not-human';},f=>{f.repair.evidence.creation_actor.native_proof.readback.turns[0].id='different-native-actor';},f=>{f.c.db.prepare("UPDATE actions SET state='uncertain' WHERE action_key=?").run(f.p.key);},f=>{f.advance(61000);}];
  for(const change of changes){const f=await setup();try{change(f);assert.equal(f.c.prepare(f.repair).prepared,false);assert.equal(f.work.get(f.t.id).owner_thread_id,null);}finally{f.c.close();}}
  const f=await setup();try{assert(f.c.prepare(f.repair).prepared);f.advance(61000);assert.equal(f.c.claim({key:f.repair.key,owner:DISCOVERY,evidence:f.repair.evidence}).claimed,false);assert.equal(f.c.db.prepare('SELECT state FROM actions WHERE action_key=?').get(f.repair.key).state,'prepared');}finally{f.c.close();}
+ const pending=await setup();try{const bootstrap={...pending.repair,key:`setup-created-owner:${pending.p.key}`,kind:'setup_created_owner',payload:{...pending.repair.payload,prompt:createdOwnerSetupPrompt(pending.t.id,pending.p.key)}};assert.equal(pending.c.prepare(bootstrap).prepared,false);}finally{pending.c.close();}
 });
 
 test('source-only repair uses the original accepted human proof and CAS, preserves issue/scope, and rejects conflicting attribution',()=>{

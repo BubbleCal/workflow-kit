@@ -44,12 +44,12 @@ export function resolveCapacity(value = {}) {
   return { ...value, max_new_heavy_concurrency: value.automatic_limit,
     max_dispatches_per_run: value.automatic_limit };
 }
-const KINDS = new Set(['task_queue', 'task_wake', 'dispatch', 'create_thread', 'assign_project', 'repair_created_project', 'human_input', 'notify', 'review_report', 'completion_report', 'slack_pr', 'review_decision', 'pr_ready', 'merge', 'archive', 'unarchive', 'auth', 'notion_sync', 'automation_update']);
+const KINDS = new Set(['task_queue', 'task_wake', 'dispatch', 'create_thread', 'assign_project', 'repair_created_project', 'setup_created_owner', 'human_input', 'notify', 'review_report', 'completion_report', 'slack_pr', 'review_decision', 'pr_ready', 'merge', 'archive', 'unarchive', 'auth', 'notion_sync', 'automation_update']);
 const PROTECTED_THREADS = new Set(Object.values(bindings.threads));
 const prUrl = value => typeof value === 'string' && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*$/.test(value);
 function scopeKey(kind, payload) {
   if (kind === 'create_thread') return `new-thread:${required(payload?.canonical_task_key, 'payload.canonical_task_key')}`;
-  if (['assign_project','repair_created_project'].includes(kind)) return `project-membership:${required(payload?.host_id, 'host_id')}:${required(payload?.thread_id, 'thread_id')}`;
+  if (['assign_project','repair_created_project','setup_created_owner'].includes(kind)) return `project-membership:${required(payload?.host_id, 'host_id')}:${required(payload?.thread_id, 'thread_id')}`;
   if (['task_queue', 'task_wake', 'dispatch', 'human_input', 'archive', 'unarchive'].includes(kind)) return `thread:${required(payload?.thread_id, 'payload.thread_id')}`;
   if (['notify','review_report','completion_report'].includes(kind)) return `inbox:${INBOX}`;
   if (kind === 'notion_sync') return `notion:${payload?.data_source_id ?? required(payload?.page_id, 'payload.page_id')}`;

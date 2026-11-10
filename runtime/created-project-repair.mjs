@@ -1,6 +1,9 @@
 import {nativeReadback} from './native-queue.mjs';
 import {verifyFollowupAuthority} from './human-followup.mjs';
 
+
+export function createdOwnerSetupPrompt(taskId,creationKey){return `[workflow-created-owner-setup:${creationKey}]\nThis is the single authorized setup-only continuation for ${taskId}, using the original created owner. Read WORK_TASKS.md in the existing workflow instance and confirm this existing chat can receive a native message. Do not implement, test, build, change product files, create branches/chats/resources, send external messages, change permissions/models, move projects, bind or start the task. Project membership is still unverified; preserve that uncertainty. End with exactly CREATED_OWNER_SETUP_OK and await normal guarded engineering execution.`;}
+
 const sourceFields=['source_thread_id','source_turn_id','source_message_id','verbatim_text'];
 function exportValue(value){
  if(value?.content)for(const c of value.content)if(c.type==='text'){try{return JSON.parse(c.text);}catch{}}
@@ -28,7 +31,8 @@ export function reconcileAcceptedSource(control,input){return control.atomic(()=
 // unstarted owner missing from a complete native listing. It asserts no observed
 // membership; only a later real list_threads readback can complete setup.
 export function createdProjectRepairReasons(control,kind,taskId,payload,evidence,key){
- if(kind!=='repair_created_project')return [];
+ if(!['repair_created_project','setup_created_owner'].includes(kind))return [];
+ const setupOnly=kind==='setup_created_owner';
  try{
   if(!control.work.creation.enabled())throw Error('Existing discovery-owned creation policy required');
   control.work.creation.actor(taskId,evidence.creation_actor);
@@ -41,8 +45,12 @@ export function createdProjectRepairReasons(control,kind,taskId,payload,evidence
   const request=db.prepare('SELECT action_key FROM work_owner_requests WHERE task_id=?').get(taskId);
   const p=JSON.parse(creation?.payload??'{}'),receipt=JSON.parse(creation?.receipt??'{}'),native=exportValue(receipt.native_result?.structuredContent??receipt.native_result);
   const project=control.work.config.scope.project_id,placement=JSON.parse(setup?.placement??'{}');
-  if(key!==`project-repair:${payload.creation_key}`||payload.creation_key!==`owner-create:${t.canonical_key}`||creation?.task_id!==taskId||request?.action_key!==payload.creation_key||receipt.outcome!=='sent'||receipt.native_result?.isError===true||native?.threadId!==payload.thread_id||setup?.task_id!==taskId||setup.thread_id!==payload.thread_id||setup.host_id!=='local'||setup.state!=='project_pending'||payload.host_id!=='local'||payload.project_id!==project||placement.project_id!==project||p.native?.target?.type!=='project'||p.native.target.projectId!==project||p.canonical_task_key!==t.canonical_key)
+  if(key!==`${setupOnly?'setup-created-owner':'project-repair'}:${payload.creation_key}`||payload.creation_key!==`owner-create:${t.canonical_key}`||creation?.task_id!==taskId||request?.action_key!==payload.creation_key||receipt.outcome!=='sent'||receipt.native_result?.isError===true||native?.threadId!==payload.thread_id||setup?.task_id!==taskId||setup.thread_id!==payload.thread_id||setup.host_id!=='local'||setup.state!=='project_pending'||payload.host_id!=='local'||payload.project_id!==project||placement.project_id!==project||p.native?.target?.type!=='project'||p.native.target.projectId!==project||p.canonical_task_key!==t.canonical_key)
    throw Error('Exact sent creation and original pending project identity required');
+  if(setupOnly){
+   const moved=db.prepare("SELECT kind,state,receipt FROM actions WHERE action_key=? AND task_id=?").get(`project-repair:${payload.creation_key}`,taskId),moveReceipt=JSON.parse(moved?.receipt??'{}');
+   if(moved?.kind!=='repair_created_project'||moved.state!=='sent'||moveReceipt.outcome!=='sent'||moveReceipt.native_result?.isError===true||payload.prompt!==createdOwnerSetupPrompt(taskId,payload.creation_key))throw Error('A successful original project repair and exact setup-only prompt required');
+  }
   const proof=evidence.created_owner_proof,read=nativeReadback(proof?.readback),turn=read.turns?.[0];
   if(!fresh(proof,'codex_app.read_thread',now)||read.thread?.id!==payload.thread_id||read.thread.kind!=='codex'||read.thread.hostId!=='local'||read.thread.cwd!==t.data.workspace||read.thread.status?.type!=='idle'||read.thread.status.activeFlags?.length||turn?.status!=='completed'||turn.error)
    throw Error('Fresh quiescent original created owner proof required');

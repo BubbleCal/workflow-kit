@@ -141,3 +141,17 @@ Invoke the supported native move once, retain its real receipt, and keep unknown
 outcomes uncertain. A move ACK does not bind or start work: confirm_creation still
 requires genuine list_threads membership. If that remains unavailable, save the
 native limitation without recreating the owner or repeating the move.
+
+
+If the single project move succeeded but a fresh complete list still omits the
+original owner, a single `setup_created_owner` action may materialize the native
+chat registration. It uses key `setup-created-owner:<creation-key>`, the same
+payload identity/project fields and fresh evidence as repair_created_project,
+plus the exact prompt from `createdOwnerSetupPrompt(task_id, creation_key)` in
+runtime/created-project-repair.mjs. All creation actor, original user, native
+setup, listing and effect guards apply; the original project repair must be sent.
+Claim once as discovery, submit only that setup-only prompt through NativeQueue,
+and retain its actual queue receipt. It permits no engineering, permission or
+model change, another move, binding or starting. Read back the real setup turn and
+fresh project membership. A setup/queue ACK is still not membership; normal
+confirm_creation, bind/start and actual engineering begin remain mandatory.
