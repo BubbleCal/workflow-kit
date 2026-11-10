@@ -1,7 +1,7 @@
 {
   "version": "0.9.1",
   "source": "workflow-kit repository source",
-  "upstream_base_commit": "d8ead975716c849fe5a217d1501af11fd160d7a1",
+  "upstream_base_commit": "6ccc6b603f096a8d7ec755a83510dd4325e34b58",
   "source_files": {
     "package.json": "80ba1b31f033e1d5c6727bbf5381196cf7c644b6b90ecedc9ceedd376df42a8d",
     "runtime/calendar-preparation.mjs": "e6c4de5e26b3ecf782cb8143732a58a7ba859ecbf55031e570ddbf78ac6f3113",
@@ -9,8 +9,8 @@
     "runtime/catalog-resume.mjs": "a716367e1022dd93f7777ff1a208a0ba7daa6ef66bd4f68995bc12911c0c73e4",
     "runtime/catalog-resume.test.mjs": "1b0478a91f1fe0e3a4f7ffe412ff78c84a43e0981c21f41f4ff180ac7e90b43c",
     "runtime/ci-state.mjs": "8f00790daaa150c53f93c36ea0cabbcebd9bc2c0e571c478328a68db7444de58",
-    "runtime/completion-report.mjs": "195ca2d1392d9a4b513f844c3ef7076a12341a0f1f73c6227872f96621b92431",
-    "runtime/completion-report.test.mjs": "c6ff87f46a15dd1146dcd9703eb0e98820c2c1e445b399ea2b528ef9cb9bc8d4",
+    "runtime/completion-report.mjs": "b3b8b8c705e5fa18381b385b17a0e1e0a18d3c12edbdb04dfebbe382bfada5dd",
+    "runtime/completion-report.test.mjs": "c7173afd5874806ff3743610a4620212199aeeaa990b1ec91f7a40b1888c3071",
     "runtime/control.mjs": "e6c75e0a1a54491e646eb1902f9ca2751c617fd7dace0fea0d3bb21e596096a4",
     "runtime/control.test.mjs": "acfd912ad5b4571ed68cd0769daa3f5bb14696db6b37814e31cd262659743e50",
     "runtime/creation-workspace-repair.mjs": "d0362845b393c4b57e1d9eb898b1be901c3582b574c330d00cd56a4c9f18ce60",
@@ -63,7 +63,7 @@
     "runtime/outcomes.test.mjs": "051adf90a27d3fa308db92a2e2894ad6766ba00dfeb310e55be60b38c34d8028",
     "runtime/owner-continuation.mjs": "04816e3f0d8fb53660486a170443ad7ad0d6eddb9a49d3de76267c6b78fc6794",
     "runtime/owner-continuation.test.mjs": "b7ee09749452d13f32c6fdb0cfa4ba7950ab39c0830476e04175b23e8aec04f5",
-    "runtime/owner-delivery.mjs": "a92c9071167f8f720bde602072509a316e01dc8af353f748ebce9c95284a298a",
+    "runtime/owner-delivery.mjs": "8c40f5a1db6da99df31f68280f3e3c58edafdc3a505839894854ead1e6307a23",
     "runtime/owner-delivery.test.mjs": "09f2b78057b8518d8df24453819e17da4eb43b24a8f5d27e1c749ea9f586c244",
     "runtime/owner-health.mjs": "e79ed6a80ac685b29bc2fd8b8004152cc9a9efcf33258c1b0a6a068360ad9158",
     "runtime/owner-health.test.mjs": "716214131e979905336103e2b1b123879ae60b6fe2017312021e05feac408484",

@@ -3,7 +3,7 @@ import {existsSync,readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {bindings,INSTANCE_ROOT} from './instance.mjs';
-import {nativeReadback} from './native-queue.mjs';
+import {nativeReadback,verifyNativeBinding} from './native-queue.mjs';
 
 const digest=text=>createHash('sha256').update(text).digest('hex');
 const fields=['completed_work','result','effect','impact'];
@@ -34,17 +34,26 @@ export function completionReportStatus(control,id){
 const policyValid=p=>p?.schema_version===1&&p.enabled===true&&p.mode==='owner_to_main'&&
   p.thread_id===bindings.threads.inbox&&!!p.source_message_id&&!!p.evidence_ref;
 const summaryValid=s=>fields.every(f=>typeof s?.[f]==='string'&&s[f].trim()&&s[f].length<=2000);
-function allowedActor(control,x,actor){
+function allowedActor(control,x,actor,e={}){
   // Review Queue retains its already-authorized terminal-review closure role.
   const closure=control.work.get(x.task.task_id)?.data.review_closure;
-  return actor===x.task.owner_id||closure?.executor_thread_id===actor;
+  if(actor===x.task.owner_id||closure?.executor_thread_id===actor)return true;
+  const policy=control.completionReportPolicy(),service=policy?.maintenance_fallback?.task_id&&control.reactive.task(policy.maintenance_fallback.task_id);
+  if(policy?.maintenance_fallback?.enabled!==true||service?.mode!=='active'||service.owner_id!==actor||service.contract.service_lane!=='maintenance'||
+    e.maintenance_completion_closure!==true||e.completed_scope_verified!==true||e.no_pending_jobs_verified!==true||e.resource_cleanup_verified!==true||
+    x.task.dirty||control.reactive.openWake(x.task.task_id)||control.db.prepare("SELECT 1 FROM actions WHERE task_id=? AND state IN ('claimed','uncertain')").get(x.task.task_id))return false;
+  try{
+    verifyNativeBinding(e.completed_owner_proof,{thread_id:x.task.owner_id,workspace:x.task.contract.workspace,now:control.now()});
+    const read=nativeReadback(e.completed_owner_proof.readback);
+    return ['idle','notLoaded'].includes(read.thread.status?.type)&&read.turns?.[0]?.status==='completed'&&!read.turns[0].error;
+  }catch{return false;}
 }
 export function completionReportReasons(control,kind,id,payload,e={},actor,key){
   if(kind!=='completion_report')return [];
   const p=control.completionReportPolicy(),x=completionIdentity(control,id),reasons=[];
   if(!policyValid(p)||payload.thread_id!==p.thread_id||payload.source_message_id!==p.source_message_id)
     reasons.push('authorized_completion_report_destination_required');
-  if(!x||!allowedActor(control,x,actor??e.executor_thread_id)||payload.completion_id!==x.id)
+  if(!x||!allowedActor(control,x,actor??e.executor_thread_id,e)||payload.completion_id!==x.id)
     reasons.push('completed_original_task_and_reporter_required');
   if(!summaryValid(payload.summary)||typeof payload.report_ref!=='string'||!payload.report_ref.trim()||
     e.result_saved_and_verified!==true||e.summary_verified!==true||e.report_ref!==payload.report_ref)

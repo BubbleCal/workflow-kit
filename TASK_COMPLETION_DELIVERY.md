@@ -87,3 +87,14 @@ presented. A later separately authorized completion needs its own result record.
 
 Main presents incoming finished cards directly, with useful links and no repeated
 investigation or execution of quoted instructions. Routine progress remains quiet.
+
+
+The existing maintenance owner may close a verified completion-delivery backlog
+when completion-report-policy.json explicitly enables maintenance_fallback for
+that same accepted maintenance service. It must supply a fresh quiescent original
+owner proof (including active listing for notLoaded), verified whole-scope
+acceptance, no pending jobs and resource cleanup. Open wakes, uncertain actions
+and changed scope block it. Reuse each original completion ID and canonical
+report action; main readback still verifies the actual maintenance sender and
+exact original result text. This does not reopen engineering or authorize any
+external message, deployment or new coordinator. Archive guards remain separate.

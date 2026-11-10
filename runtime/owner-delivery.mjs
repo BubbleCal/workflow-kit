@@ -127,6 +127,8 @@ export function ownerActionReasons(control,kind,taskId,payload,evidence={},actor
   const executor=actor??evidence.executor_thread_id;
   const main=control.work.config.threads?.main;
   if(kind==='archive'&&executor===main&&(task.status==='complete'||payload.purpose==='task_consolidation'&&control.work.archivableConsolidation(taskId)))return [];
+  const fallback=control.completionReportPolicy?.()?.maintenance_fallback,service=fallback?.enabled&&control.reactive.task(fallback.task_id);
+  if(kind==='archive'&&task.status==='complete'&&service?.mode==='active'&&service.owner_id===executor&&service.contract.service_lane==='maintenance')return [];
   return executor===task.owner_id && task.contract.retired!==true?[]:['original_task_owner_must_execute_delivery'];
 }
 

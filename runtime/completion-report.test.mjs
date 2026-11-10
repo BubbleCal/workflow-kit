@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fixture,OWNER,contract} from './test-fixtures/reactive.mjs';
+import {fixture,OWNER,contract,nativeProof} from './test-fixtures/reactive.mjs';
 import {INBOX} from './control.mjs';
 import {completionIdentity,completionReportStatus} from './completion-report.mjs';
 
@@ -137,4 +137,33 @@ test('a preserved uncertain send/readback can confirm its historical completion 
   assert.equal(f.s.task('T-1').status,'needs_decision');assert.equal(completionReportStatus(f.c,'T-1').delivered,false);assert.equal(f.c.prepare(f.archive).allowed,false);
   assert.equal(f.c.db.prepare('SELECT completion_id FROM task_completion_notices').get().completion_id,f.completion.id);
  }finally{f.c.close();}
+});
+
+test('authorized existing maintenance can deliver a quiescent completed owner result once without reopening engineering',()=>{
+ const f=setup();try{
+  const actor='66666666-6666-4666-8666-666666666666';
+  f.s.adopt({task_id:'T-maint',owner_thread_id:actor,contract:{...contract(),service_lane:'maintenance'},source_message_id:'human:maintenance',actual_human_verified:true});
+  f.c.db.prepare("UPDATE rt_tasks SET mode='active' WHERE task_id='T-maint'").run();f.policy.maintenance_fallback={enabled:true,task_id:'T-maint',authorization_ref:'actual-completed-result-and-archive-request'};
+  const evidence={...f.evidence,executor_thread_id:actor,maintenance_completion_closure:true,completed_scope_verified:true,no_pending_jobs_verified:true,resource_cleanup_verified:true,completed_owner_proof:nativeProof({thread:OWNER,status:'completed',now:f.now()})};
+  const action={...f.action,evidence};assert.equal(f.c.prepare(action).prepared,true);
+  const claim=f.c.claim({key:f.action.key,owner:actor,evidence});assert(claim.claimed,JSON.stringify(claim));
+  f.c.settle({key:f.action.key,attempt_id:claim.attempt_id,outcome:'sent',evidence_ref:'actual-maintenance-result-readback',native_result:{main_readback:f.proof(f.payload.prompt,actor)}});
+  assert(completionReportStatus(f.c,'T-1').delivered);assert.equal(f.s.task('T-1').status,'complete');assert.equal(f.s.openWake('T-1'),null);assert.equal(f.c.prepare(action).allowed,false);
+  assert.equal(f.c.prepare({...f.archive,evidence:{...f.archive.evidence,executor_thread_id:actor}}).prepared,true);
+ }finally{f.c.close();}
+});
+
+test('maintenance result fallback rejects active owners, missing cleanup, wrong service, stale proof and an unclosed original queue',()=>{
+ for(const variant of ['active','cleanup','service','stale','queue']){
+  const f=setup();try{
+   const actor='66666666-6666-4666-8666-666666666666';f.s.adopt({task_id:'T-maint',owner_thread_id:actor,contract:{...contract(),service_lane:'maintenance'},source_message_id:'human:maintenance',actual_human_verified:true});f.c.db.prepare("UPDATE rt_tasks SET mode='active' WHERE task_id='T-maint'").run();f.policy.maintenance_fallback={enabled:true,task_id:'T-maint'};
+   const evidence={...f.evidence,executor_thread_id:actor,maintenance_completion_closure:true,completed_scope_verified:true,no_pending_jobs_verified:true,resource_cleanup_verified:true,completed_owner_proof:nativeProof({thread:OWNER,status:'completed',now:f.now()})};
+   if(variant==='active')evidence.completed_owner_proof=nativeProof({thread:OWNER,now:f.now()});
+   if(variant==='cleanup')evidence.resource_cleanup_verified=false;
+   if(variant==='service')f.policy.maintenance_fallback.task_id='not-the-maintenance-task';
+   if(variant==='stale')evidence.completed_owner_proof.checked_at=new Date(f.now()-61000).toISOString();
+   if(variant==='queue')f.c.db.prepare("UPDATE rt_wakes SET state='queued' WHERE task_id='T-1'").run();
+   assert.equal(f.c.prepare({...f.action,evidence}).allowed,false,variant);assert.equal(completionReportStatus(f.c,'T-1').delivered,false);
+  }finally{f.c.close();}
+ }
 });
