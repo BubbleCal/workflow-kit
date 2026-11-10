@@ -2,6 +2,23 @@ import {readFileSync,existsSync,mkdirSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {nativeReadback} from './native-queue.mjs';
+import {verifyFollowupAuthority} from './human-followup.mjs';
+
+export function recoverScheduledOccurrence(root,state,input,now=Date.now()){
+ if(input.actual_human_verified!==true||!input.evidence_ref)throw new Error('Actual scoped schedule repair authority required');
+ verifyFollowupAuthority(input.human_authorization,input);
+ const request=JSON.parse(readFileSync(input.original_request_file,'utf8')),failure=JSON.parse(readFileSync(input.original_failure_file,'utf8'));
+ if(request.op!=='schedule_event'||request.schedule_id!==input.schedule_id||(!Number.isInteger(failure.exit_code)||failure.exit_code<=0)||JSON.parse(failure.stdout??'{}').error!=='Original schedule scope changed; reconcile its binding')throw new Error('Exact original failed scope-binding occurrence required');
+ const at=Date.parse(request.native_proof?.checked_at);
+ if(!Number.isFinite(at)||at>now+5000)throw new Error('Original native capture time required');
+ const source=JSON.parse(readFileSync(join(root,'runtime-schedules.json'),'utf8')).sources.find(s=>s.id===input.schedule_id);
+ if(source?.original_prompt_sha256!==input.expected_prompt_sha256)throw new Error('Reconciled schedule scope changed');
+ // Replay the immutable failed invocation at its actual capture time, not a
+ // fabricated fresh producer turn. Publication retains its original timestamp.
+ const result=publishScheduledOccurrence(root,state,request,at);
+ state.diagnostic(`schedule-repair:${result.event_id}`,{mode:'verified_original_occurrence_replay',source_message_id:input.source_message_id,evidence_ref:input.evidence_ref,original_request_file:input.original_request_file,original_failure_file:input.original_failure_file,original_checked_at:request.native_proof.checked_at,repaired_at:now,producer_identity_unchanged:true});
+ return {...result,historical_occurrence_repaired:true,original_native_capture_preserved:true};
+}
 
 // Native schedules retain their times. Their short producer turns publish one
 // occurrence; only the normal owner queue performs the original scheduled work.

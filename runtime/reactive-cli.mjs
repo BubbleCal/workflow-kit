@@ -1,3 +1,4 @@
+import {reconcileCompletedProjection,reconcileReviewWorkspace} from './closure-reconciliation.mjs';
 import {reconcileCreationWorkspace} from './creation-workspace-repair.mjs';
 import {beginDiscoveryFollowup,beginDiscoveryInteractive,settleDiscoveryDelivery} from './discovery-followup.mjs';
 import {reconcileArtifactBinding} from './registration-repair.mjs';
@@ -18,7 +19,7 @@ import {completionReportStatus} from './completion-report.mjs';
 import {Mailbox} from './mailbox.mjs';
 import {NativeQueue,validateQueueCompatibility,verifyExecutionProof,verifyNativeBinding,nativeReadback} from './native-queue.mjs';
 import {ReactiveDriver} from './reactive-driver.mjs';
-import {publishScheduledOccurrence} from './schedule-source.mjs';
+import {publishScheduledOccurrence,recoverScheduledOccurrence} from './schedule-source.mjs';
 import {verifyDesktopLoader} from './desktop-loader.mjs';
 import {validateIdleNavigationPolicy} from './mac-activity.mjs';
 import {publishWaitObservations} from './wait-observation.mjs';
@@ -157,6 +158,8 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         else if(input.op==='prepare_owner')result=await prepareTaskOwner(control,input);
         else if(input.op==='reconcile_runtime_resume')result=reconcileCatalogResume(control,input);
         else if(input.op==='reconcile_artifact')result=reconcileArtifactBinding(control,input);
+        else if(input.op==='reconcile_completed_projection')result=reconcileCompletedProjection(control,input);
+        else if(input.op==='reconcile_review_workspace')result=reconcileReviewWorkspace(control,input);
         else if(input.op==='reconcile_creation_workspace')result=reconcileCreationWorkspace(control,input);
         else if(input.op==='reconcile_history')result=control.work.reconcileHistory(input);
         else if(input.op==='assess_difficulty')result=control.work.assessDifficulty(input);
@@ -275,6 +278,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
       else if(input.op==='clear_next_action')result=state.waitPolicy.clear(input);
       else if(input.op==='publish')result=state.ingest(input);
       else if(input.op==='schedule_event')result=publishScheduledOccurrence(root,state,input);
+      else if(input.op==='recover_schedule_event')result=recoverScheduledOccurrence(root,state,input);
       else if(input.op==='begin')result=state.begin(input);
       else if(input.op==='decide'){
         mailbox=new Mailbox(join(root,'mailbox.sqlite'));state.checkWait=c=>['pr','review_request'].includes(c?.kind)?control.checkReactiveWait(c):mailbox.waits.check(c);

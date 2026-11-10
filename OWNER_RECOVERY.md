@@ -120,3 +120,30 @@ complete an authorized unfinished goal. Continue bounded independent work, retai
 actual jobs/waits, and request only a material human-only decision. Conditional
 holds use their original wording and observable release predicate; unconditional
 pauses and all external-action gates remain. Record remaining goal and next step.
+
+
+Scoped state reconciliation uses `task op reconcile_completed_projection` only
+when the latest actual decision is the original whole-scope completion and every
+later pending event is an evidenced source-only update. Supply the exact context
+revision, completion ID, original wake/queue IDs, fresh quiescent owner proof,
+cleanup evidence and one explicit disposition per source event. New human
+commands, material decisions, changed acceptance, pauses, uncertain effects and
+shared-owner queues are protected. Supersession retains the original unconsumed
+queue receipt; a late delivery skips without replaying work. Result delivery and
+archival still require their existing independent guards.
+
+`task op reconcile_review_workspace` corrects only an accepted original read-only
+review's catalog/contract workspace to its verified native project placement.
+Supply both revisions, original owner, actual maintenance authority and fresh
+quiescent native proof. It changes no PR scope or permissions and does not
+re-run or complete the review on its owner's behalf.
+
+For a proven schedule registration failure caused by an outdated prompt hash,
+first reconcile the binding to the actually authorized instruction. Then
+`runtime op recover_schedule_event` takes `schedule_id`, `expected_prompt_sha256`,
+`original_request_file`, `original_failure_file`, `evidence_ref` and verified
+`human_authorization` with matching source thread/turn/message/verbatim fields.
+It validates the original captured producer turn at its original capture time;
+it never refreshes proof timestamps or fabricates a producer. The normal dated
+occurrence key deduplicates replay and preserves original trigger time, owner,
+schedule, pauses and execution guards.

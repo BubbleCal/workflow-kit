@@ -427,6 +427,10 @@ export class ReactiveState {
       if(task?.contract.retired===true)return {begun:false,skipped:true,quiet:true,reason:'service_retired',instruction:'End immediately. Responsibilities were transferred to original owners; do not process or resend this historical wake.'};
       const retired=this.db.prepare("SELECT task_id,state FROM rt_wakes WHERE id=?").get(wake_id);
       if(retired?.task_id===task_id&&retired.state==='superseded'&&this.db.prepare('SELECT 1 FROM rt_diagnostics WHERE key=?').get(`followup-superseded:${wake_id}`))return {begun:false,skipped:true,quiet:true,reason:'superseded_by_verified_followup',instruction:'Preserve the old unconsumed receipt; do not replay obsolete work or disturb the current original-owner execution.'};
+      const completedProjection=retired?.task_id===task_id&&retired.state==='superseded'&&this.db.prepare('SELECT data FROM rt_diagnostics WHERE key LIKE ?').all(`completion-projection:${task_id}:%`).some(row=>{
+        const data=parse(row.data);return data?.original_completion_preserved===true&&data.source_message_id&&data.evidence_ref&&data.original_queue_id===this.db.prepare('SELECT queue_id FROM rt_wakes WHERE id=?').get(wake_id)?.queue_id;
+      });
+      if(completedProjection)return {begun:false,skipped:true,quiet:true,reason:'completion_projection_reconciled',instruction:'The original completion and all later source events were reconciled. Preserve this unconsumed queue receipt; end without replaying work or changing the current task.'};
       if(retired?.task_id===task_id&&['finished','ended_unresolved'].includes(retired.state))
         return {begun:false,skipped:true,quiet:true,reason:'wake_already_terminal',instruction:'This wake was already handled or recovered. End this duplicate delivery immediately without work, retry or finish; preserve the original receipt and current owner.'};
       const deferred=parse(this.db.prepare('SELECT data FROM rt_diagnostics WHERE key=?').get(`maintenance-deferred:${wake_id}`)?.data);
