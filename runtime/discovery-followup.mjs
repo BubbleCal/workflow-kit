@@ -35,17 +35,28 @@ export function beginDiscoveryFollowup(control,input){
  if(actual_human_verified!==true||!source_message_id||!evidence_ref)throw new Error('Actual scoped human recovery authorization required');
  const discovery=control.discovery,config=control.work.config;
  const result=control.atomic(()=>{
-  const b=discovery.checkBatch(batch_id);
+  let b=discovery.batch(batch_id);
+  if(!b||!['pending','running','checkpointed'].includes(b.state))throw new Error('Original pending or checkpointed discovery batch required');
   if(b.generation!==generation||b.mail_key!==expected_mail_key)throw new Error('Exact existing discovery batch/generation/delivery identity required');
   const action=control.db.prepare('SELECT * FROM actions WHERE action_key=?').get(action_key),task={task_id:'discovery',owner_id:config.threads.discovery,contract:{workspace:config.thread_workspaces?.discovery??config.scope.project_root}};
   const proof=verifyHumanFollowup(native_proof,{task,action,source_message_id,now:control.now()});verifyFollowupAuthority(human_authorization,proof.payload);
   if(proof.status!=='inProgress')throw new Error('Only the actual active discovery followup can begin setup');
-  const previous=control.db.prepare('SELECT * FROM work_creation_runs WHERE batch_id=? AND generation=?').get(batch_id,generation);
+  if(control.db.prepare("SELECT 1 FROM work_creation_runs r JOIN discovery_batches b ON b.id=r.batch_id AND b.generation=r.generation WHERE b.state='running' AND r.turn_id<>?").get(proof.turn_id))throw new Error('Preserve another acknowledged discovery writer');
+  const resumed=b.state==='checkpointed';
+  if(resumed){
+   for(const source of b.snapshot.sources){const current=discovery.sources().find(s=>s.source_id===source.source_id);if(!current?.enabled||current.revision!==source.revision)throw new Error('Discovery source scope changed');}
+   if(control.db.prepare("SELECT 1 FROM discovery_batches WHERE id<>? AND state='pending'").get(batch_id))throw new Error('Checkpoint resume requires first acknowledging and checkpointing the existing pending batch with its original scope and real blockers');
+   const next=b.generation+1,prompt=b.prompt.replace(`[workflow-discovery:${b.id}:${b.generation}]`,`[workflow-discovery:${b.id}:${next}]`).replace(`generation=${b.generation}`,`generation=${next}`);
+   control.db.prepare("UPDATE discovery_batches SET state='pending',generation=?,mail_key=?,prompt=?,started_at=NULL WHERE id=?").run(next,`discovery:${b.id}:${next}`,prompt,b.id);
+   b=discovery.batch(b.id);
+  }
+  discovery.checkBatch(batch_id);
+  const previous=control.db.prepare('SELECT * FROM work_creation_runs WHERE batch_id=? AND generation=?').get(batch_id,b.generation);
   if(previous&&previous.turn_id!==proof.turn_id)throw new Error('Preserve an already acknowledged discovery writer');
-  control.reactive.diagnostic(`discovery-followup:${batch_id}:${generation}`,{action_key,source_message_id,evidence_ref,turn_id:proof.turn_id,original_queue_consumed:false,mail_key:b.mail_key});
+  control.reactive.diagnostic(`discovery-followup:${batch_id}:${b.generation}`,{action_key,source_message_id,evidence_ref,turn_id:proof.turn_id,original_queue_consumed:false,mail_key:b.mail_key});
   discovery.selectHealth(b);control.work.creation.recordRun(b,proof);
   control.db.prepare("UPDATE discovery_batches SET state='running',started_at=COALESCE(started_at,?) WHERE id=?").run(control.now(),batch_id);
-  return {batch_id,generation,turn_id:proof.turn_id,original_queue_consumed:false,owner_unchanged:true,mail_key:b.mail_key};
+  return {batch_id,generation:b.generation,resumed_checkpoint:resumed,turn_id:proof.turn_id,original_queue_consumed:false,owner_unchanged:true,mail_key:b.mail_key};
  });
  // A human relay may arrive before the normal queue sends the pending batch.
  // Retire only a still-unsent delivery, retaining its immutable input. If the
@@ -66,8 +77,8 @@ export function settleDiscoveryDelivery(control,mailbox,batch,result){
  const native=receipt.native_result?.structuredContent??receipt.native_result?.content?.flatMap(c=>{try{return [JSON.parse(c.text)];}catch{return [];}}).find(c=>c.threadId);
  const run=control.db.prepare('SELECT thread_id,turn_id FROM work_creation_runs WHERE batch_id=? AND generation=?').get(batch.id,batch.generation);
  const direct=binding?.transport==='direct_human'&&binding.source_message_id&&binding.verbatim_text&&run?.thread_id===control.work.config.threads.discovery&&run.turn_id===binding.turn_id;
- const relay=action?.kind==='human_input'&&action.task_id==='discovery'&&action.state==='sent'&&payload.thread_id===control.work.config.threads.discovery&&receipt.outcome==='sent'&&receipt.native_result?.isError!==true&&native?.threadId===payload.thread_id;
- if(!mail&&!direct||mail&&!mail.batch_id&&mail.state!=='superseded'||!current||current.generation!==batch.generation||!['finished','checkpointed'].includes(current.state)||
+ const relay=action?.kind==='human_input'&&action.task_id==='discovery'&&action.state==='sent'&&payload.thread_id===control.work.config.threads.discovery&&receipt.outcome==='sent'&&receipt.native_result?.isError!==true&&native?.threadId===payload.thread_id&&run?.thread_id===control.work.config.threads.discovery&&run.turn_id===binding?.turn_id;
+ if(!mail&&!direct&&!relay||mail&&!mail.batch_id&&mail.state!=='superseded'||!current||current.generation!==batch.generation||!['finished','checkpointed'].includes(current.state)||
   !binding?.turn_id||binding.mail_key!==batch.mail_key||binding.original_queue_consumed!==false||!direct&&!relay)
   throw new Error('Discovery queue receipt or exact authenticated superseded unsent relay required');
  if(mail?.batch_id)control.discovery.retireMailboxDelivery(mailbox,current,{reason:'authenticated_alternate_execution',queue_consumption_verified:false,turn_id:binding.turn_id});

@@ -23,6 +23,22 @@ function setup(){
  return {...f,dir,b,task,input:{batch_id:b.id,generation:b.generation,expected_mail_key:b.mail_key,action_key:key,source_message_id:p.source_message_id,actual_human_verified:true,evidence_ref:'actual-relay-proof',native_proof:proof,human_authorization:human},close(){f.c.close();rmSync(dir,{recursive:true,force:true});}};
 }
 
+test('an authenticated active relay resumes the same checkpoint with a new generation and truthful no-queue settlement',()=>{
+ const f=setup();try{
+  f.c.discovery.begin({batch_id:f.b.id,generation:1,native_proof:nativeProof({thread:DISCOVERY,message:f.b.prompt,turn:'old-creation-turn',now:f.now()})});
+  f.c.discovery.finish({batch_id:f.b.id,generation:1,source_results:[],owner_creation_reason:'Original owner project setup retained'});
+  const before=f.c.discovery.batch(f.b.id),oldRun=f.c.db.prepare('SELECT * FROM work_creation_runs WHERE batch_id=? AND generation=1').get(f.b.id);
+  const result=beginDiscoveryFollowup(f.c,f.input);assert.equal(result.generation,2);assert(result.resumed_checkpoint);assert.equal(result.original_queue_consumed,false);
+  const current=f.c.discovery.batch(f.b.id);assert.deepEqual(current.snapshot,before.snapshot);assert.deepEqual(current.pages,before.pages);assert.deepEqual(f.c.db.prepare('SELECT * FROM work_creation_runs WHERE batch_id=? AND generation=1').get(f.b.id),oldRun);
+  assert.equal(f.work.creation.actor(f.task.id,{thread_id:DISCOVERY,batch_id:f.b.id,generation:2,native_proof:f.input.native_proof}).turn_id,'actual-relay-turn');
+  assert.throws(()=>beginDiscoveryFollowup(f.c,f.input),/identity/);
+  const finish=f.c.discovery.finish({batch_id:f.b.id,generation:2,source_results:[],owner_creation_reason:'Real native listing still required'});
+  const db=new DatabaseSync(join(f.dir,'mailbox.sqlite'));try{assert.equal(db.prepare('SELECT 1 FROM mail WHERE item_key=?').get(current.mail_key),undefined);const receipt=settleDiscoveryDelivery(f.c,{db},current,finish);assert.equal(receipt.original_queue_consumed,false);assert.equal(receipt.transport,'native_followup');assert.equal(db.prepare('SELECT state FROM mail WHERE item_key=?').get(f.b.mail_key).state,'pending');
+   f.c.db.prepare("UPDATE work_creation_runs SET turn_id='other-turn' WHERE batch_id=? AND generation=2").run(f.b.id);assert.throws(()=>settleDiscoveryDelivery(f.c,{db},current,finish),/authenticated/);
+  }finally{db.close();}
+ }finally{f.close();}
+});
+
 test('an actual authorized discovery relay begins the same unsent batch and retains all owner creation guards',async()=>{
  const f=setup();try{
   assert.throws(()=>f.c.discovery.begin({batch_id:f.b.id,generation:f.b.generation,native_proof:f.input.native_proof}),/exact queued prompt/);
