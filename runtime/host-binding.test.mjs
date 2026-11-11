@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,writeFileSync,readFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,writeFileSync,readFileSync,rmSync,existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join,dirname} from 'node:path';
 import {createHash} from 'node:crypto';
 import {fixture,nativeProof,compatibilityFixture,OWNER} from './test-fixtures/reactive.mjs';
 import {macHostFingerprint,verifyMigratedHostBinding} from './host-identity.mjs';
@@ -41,4 +41,48 @@ test('acknowledged maintenance migrates exact native evidence without refreshing
 test('wrong human, actor, turn, stale proof, legacy host, CLI and concurrent config all fail closed',async()=>{
  const changes=[f=>f.input.actual_human_verified=false,f=>f.input.verbatim_text='invented',f=>f.input.native_proof.readback.thread.id='foreign',f=>f.input.native_proof.readback.turns[0].id='wrong',f=>f.advance(61000),f=>f.options.identity=()=>({legacy:'other-machine',stable:'stable-machine-home'}),f=>f.options.probeQueue=async()=>({cli_version:'another-cli',host_fingerprint:'stable-machine-home'}),f=>f.input.expected_runtime_digest='stale',f=>f.options.probeQueue=async()=>{writeFileSync(join(f.root,'runtime.json'),'{"concurrent":true}');return{cli_version:'codex-cli fixture',host_fingerprint:'stable-machine-home'};}];
  for(const change of changes){const f=setup();try{change(f);await assert.rejects(()=>migrateRuntimeHostBinding(f.c,f.input,f.options));const after=JSON.parse(readFileSync(join(f.root,'runtime.json')));assert(!after.desktop_loader?.enabled);assert.notEqual(after.queue_validation?.file,join(f.root,'queue-stable.json'));}finally{f.close();}}
+});
+function manualSupport(f){
+ const owner='01900000-0000-7000-8000-000000000003';
+ Object.assign(f.c.work.config,{layout:'native',threads:{main:'main',discovery:'discovery'},scope:{project_root:'/manual'},
+  support:{maintenance_thread_id:owner,mode:'manual_only',automatic_control_lane:false,archive:false,source_message_id:'keep-support',evidence_ref:'preservation-receipt'}});
+ const {service_tasks,...config}=f.config,path=join(f.root,'runtime.json');
+ writeFileSync(path,JSON.stringify(config));
+ delete f.input.task_id;
+ f.input.actor_mode='manual_support';f.input.native_proof=nativeProof({thread:owner,workspace:'/manual',turn:'manual-current',now:f.now()});
+ f.input.expected_runtime_digest=digest(readFileSync(path));
+ return path;
+}
+test('bound manual support can rebind host proof without a maintenance task, wake, or schedule',async()=>{
+ const f=setup();try{
+  const path=manualSupport(f),wakes=()=>f.c.db.prepare('SELECT * FROM rt_wakes').all();
+  const prior=wakes(),result=await migrateRuntimeHostBinding(f.c,f.input,f.options);
+  const config=JSON.parse(readFileSync(path));
+  assert.equal(result.actor_mode,'manual_support');assert.equal(result.actor_turn_id,'manual-current');
+  assert.equal(result.previous_runtime_digest,f.input.expected_runtime_digest);
+  assert.equal(existsSync(join(dirname(config.queue_validation.file),'runtime-before.json')),false);
+  assert.equal(config.service_tasks,undefined);assert.equal(config.desktop_loader.min_idle_ms,600000);
+  assert.deepEqual(wakes(),prior);
+  for(const file of [config.queue_validation.file,config.desktop_loader.evidence_file])verifyMigratedHostBinding(JSON.parse(readFileSync(file)));
+ }finally{f.close();}
+});
+test('manual support cannot use an ordinary chat, paused turn, stale proof or an automatic service binding',async()=>{
+ const changes=[
+  f=>{f.input.native_proof.readback.thread.id='other-owner';},
+  f=>{f.input.native_proof.readback.thread.cwd='/wrong-project';},
+  f=>{f.input.native_proof.readback.thread.status.activeFlags=['waitingOnApproval'];},
+  f=>{f.input.native_proof.readback.turns[0].status='completed';},
+  f=>{f.c.work.config.support.archive=true;},
+  f=>{f.c.work.config.threads.main=f.c.work.config.support.maintenance_thread_id;},
+  f=>{f.c.work.config.support.automatic_control_lane=true;},
+  f=>{f.input.task_id='T-1';},
+  f=>{f.input.verbatim_text='different human authority';},
+  f=>{f.advance(61000);},
+  (f,path)=>{const c=JSON.parse(readFileSync(path));c.service_tasks={maintenance:'T-1'};writeFileSync(path,JSON.stringify(c));f.input.expected_runtime_digest=digest(readFileSync(path));},
+ ];
+ for(const change of changes){const f=setup();try{
+  const path=manualSupport(f);change(f,path);const before=readFileSync(path);
+  await assert.rejects(()=>migrateRuntimeHostBinding(f.c,f.input,f.options));
+  assert.deepEqual(readFileSync(path),before);
+ }finally{f.close();}}
 });

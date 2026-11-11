@@ -6,6 +6,15 @@ Mac is idle. This can change the selected chat and foreground application. It is
 allowed only under the explicit idle-only policy; ordinary agents do not gain
 permission to navigate the UI themselves.
 
+When migrating saved queue and desktop evidence to the stable macOS host
+fingerprint, use `runtime migrate-host-binding` with the original native human
+authorization, saved same-host evidence and the current runtime digest.
+An active scheduled maintenance owner supplies its acknowledged maintenance
+wake. An instance that explicitly preserves a separate `support` chat in
+`manual_only` mode may instead supply `actor_mode: "manual_support"` (no
+`task_id`) and a fresh native readback of that chat's active turn. This does
+not create a maintenance task, wake, or schedule.
+
 ## Configuration
 
 `runtime.json` contains the instance configuration. Example:
