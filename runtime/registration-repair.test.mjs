@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,nativeProof,OWNER,QUEUE_ID} from './test-fixtures/reactive.mjs';
 import {reconcileArtifactBinding} from './registration-repair.mjs';
-import {reconcileQueuedFollowup} from './human-followup.mjs';
+import {reconcileQueuedFollowup,recordedReviewResolvesDecision} from './human-followup.mjs';
 import {reviewDecisionTaskReasons} from './review-decision.mjs';
 
 function artifact(){
@@ -47,6 +47,20 @@ function followup(status='inProgress'){
  const human=nativeProof({thread:'main',message:p.verbatim_text,turn:p.source_turn_id,now:f.now()});human.readback.turns[0].items[0].id=p.source_message_id;
  return {...f,w,key,input:{task_id:'T-1',expected_context_rev:f.s.task('T-1').context_rev,expected_wake_id:w.id,expected_queue_id:QUEUE_ID,action_key:key,source_message_id:p.source_message_id,evidence_ref:'actual-repair',actual_human_verified:true,native_proof:proof,human_authorization:human}};
 }
+
+test('a recorded exact-PR review grant answers only its matching delivery decision',()=>{
+ const pr='https://github.com/example/service/pull/9',head='a'.repeat(40),source={source_thread_id:'main',source_turn_id:'turn',source_message_id:'human',verbatim_text:'t1送审'};
+ const task={task_id:'T-1',contract:{pull_requests:[{repository:'example/service',pr_number:9}]}};
+ const decision={created_at:1,data:{decision_request:{kind:'authority',scope:'task',blocked_requirements:['delivery']},progress:{dependencies:[{kind:'human',pr_url:pr,head_sha:head}]}}};
+ const grant={...source,task_id:'T-1',pr_url:pr,head_sha:head,record_protocol:'native_pr_authorization_v1',decision:'allow_external_review',reviewed_personally:true,explicit_external_review_permission_verified:true,scope_verified:true,actual_human_verified:true,source_actor_verified:true,recorded_by_thread_id:'fixture-inbox',evidence_ref:'native-human',source_at:new Date(2).toISOString()};
+ const policy={personal_review:{authorizations:[grant]}};
+ assert.equal(recordedReviewResolvesDecision(task,decision,source,policy),true);
+ for(const patch of [{revoked:true},{head_sha:'b'.repeat(40)},{pr_url:pr+'0'},{task_id:'T-2'},{source_message_id:'other'},{source_at:new Date(0).toISOString()},{reviewed_personally:false},{record_protocol:'notification'}])
+  assert.equal(recordedReviewResolvesDecision(task,decision,source,{personal_review:{authorizations:[{...grant,...patch}]}}),false);
+ assert.equal(recordedReviewResolvesDecision(task,decision,source,{}),false);
+ const unrelated=structuredClone(decision);unrelated.data.decision_request.blocked_requirements.push('implementation');assert.equal(recordedReviewResolvesDecision(task,unrelated,source,policy),false);
+ const multiple=structuredClone(decision);multiple.data.progress.dependencies.push({kind:'human',pr_url:pr+'0',head_sha:head});assert.equal(recordedReviewResolvesDecision(task,multiple,source,policy),false);
+});
 
 test('sent real human followup supersedes execution without claiming the old queue was consumed or replaying deployment',()=>{
  const f=followup();try{const contract=f.s.task('T-1').contract,old=f.c.db.prepare('SELECT * FROM rt_wakes WHERE id=?').get(f.w.id);

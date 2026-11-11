@@ -1,5 +1,24 @@
 import {continuationPolicy} from './owner-continuation.mjs';
 import {nativeReadback,verifyExecutionProof} from './native-queue.mjs';
+import {readFileSync} from 'node:fs';
+import {resolve} from 'node:path';
+import {bindings} from './instance.mjs';
+import {humanAuthorizationSource} from './pr-authorization.mjs';
+
+// A recorded exact-PR human grant can answer its matching delivery question
+// without requiring the human to also say "continue". Execution and delivery
+// still use their original independent guards.
+export function recordedReviewResolvesDecision(task,decision,payload,policy){
+ const request=decision?.data?.decision_request,deps=decision?.data?.progress?.dependencies?.filter(d=>d.kind==='human')??[];
+ if(request?.kind!=='authority'||request.scope!=='task'||!request.blocked_requirements?.length||
+  request.blocked_requirements.some(r=>r!=='delivery')||!deps.length)return false;
+ return deps.every(d=>task.contract.pull_requests?.some(p=>d.pr_url===`https://github.com/${p.repository}/pull/${p.pr_number}`)&&
+  policy?.personal_review?.authorizations?.some(g=>g.task_id===task.task_id&&g.pr_url===d.pr_url&&g.head_sha===d.head_sha&&
+   g.record_protocol==='native_pr_authorization_v1'&&g.decision==='allow_external_review'&&g.reviewed_personally===true&&
+   g.explicit_external_review_permission_verified===true&&g.scope_verified===true&&g.revoked!==true&&humanAuthorizationSource(g)&&
+   g.source_message_id===payload.source_message_id&&g.source_thread_id===payload.source_thread_id&&g.source_turn_id===payload.source_turn_id&&
+   g.verbatim_text===payload.verbatim_text&&Date.parse(g.source_at)>=decision.created_at));
+}
 
 export function verifyDirectDiscoveryHuman(proof,{config,source_message_id,verbatim_text,now,terminal=false}){
  if(!source_message_id||!verbatim_text?.trim()||/^\s*(?:\[workflow-|<codex_delegation>)/.test(verbatim_text))throw new Error('Actual direct human discovery instruction required');
@@ -61,9 +80,13 @@ export function reconcileQueuedFollowup(control,input){
   verifyFollowupAuthority(input.human_authorization,proof.payload);
   let resolution;
   if(task.status==='needs_decision'){
-   const decision=control.db.prepare("SELECT id,created_at FROM rt_decisions WHERE task_id=? AND disposition='needs_decision' ORDER BY created_at DESC LIMIT 1").get(task_id),number=task_id.match(/^T-0*(\d+)$/)?.[1];
+   const decision=control.db.prepare("SELECT id,created_at,data FROM rt_decisions WHERE task_id=? AND disposition='needs_decision' ORDER BY created_at DESC LIMIT 1").get(task_id),number=task_id.match(/^T-0*(\d+)$/)?.[1];
    const explicitlyNamed=proof.payload.source_thread_id===task.owner_id||number&&new RegExp(`(?:^|[^0-9])(?:[Tt]-?)?0*${number}(?![0-9])`).test(proof.payload.verbatim_text);
-   const explicitlyDirected=/\b(?:continue|resume|proceed)\b|继续|开始推进|恢复(?:推进|执行|工作)/i.test(proof.payload.verbatim_text);
+   let explicitlyDirected=/\b(?:continue|resume|proceed)\b|继续|开始推进|恢复(?:推进|执行|工作)/i.test(proof.payload.verbatim_text);
+   if(!explicitlyDirected&&decision){
+    let policy;try{policy=JSON.parse(readFileSync(resolve(control.work.config.instance_root,bindings.delivery.slack_routing_file??'PR_REVIEW_CHANNELS.json'),'utf8'));}catch{}
+    explicitlyDirected=recordedReviewResolvesDecision(task,{...decision,data:JSON.parse(decision.data)},proof.payload,policy);
+   }
    if(!continuationPolicy(control.db)?.enabled||!decision||decision.id!==input.expected_decision_id||action.created_at<=decision.created_at||!explicitlyNamed||!explicitlyDirected||!proof.payload.prompt.includes(task_id))
     throw new Error('Exact old decision and a newer verified task-specific human continuation required');
    resolution={decision_id:decision.id,source_message_id,scope:'authorized_remaining_work_only',contract_and_external_holds_preserved:true};
