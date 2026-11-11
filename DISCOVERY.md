@@ -216,3 +216,6 @@ genuine post-move list_threads confirmation permits ordinary bind/start.
 
 
 Dedicated runtime message trigger delivery follows MESSAGE_TRIGGER.md. Preserve the original batch/generation and use includeOutputs:true for the actual self proof, retaining the full incoming delegation. Existing source, cadence, coverage and owner-creation guards still apply. No new coordinator is introduced.
+
+
+Overdue source checkpoints receive a bounded opportunity ahead of newly arriving result reviews after one configured start interval. Preserve their immutable source windows, pages and cursors, all original scope/cadence guards and explicit human owner-creation trigger priority. Pending or inconclusive result reviews remain visible and cannot hold every older source window indefinitely.

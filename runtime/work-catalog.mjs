@@ -375,14 +375,23 @@ export class WorkCatalog {
       const content={outcome,summary,evidence_refs,proposals,...(followups.length?{followups}:{}),...(scheduled?{run_id:scheduled.id}:{})};
       const digest=keyHash(json(content));
       const old=this.db.prepare('SELECT * FROM work_reports WHERE report_key=?').get(report_key);
-      if(old){if(old.task_id!==t.id||old.digest!==digest)throw new Error('Immutable research report changed');return {recorded:false,duplicate:true};}
+      if(old){
+        if(old.task_id!==t.id||old.digest!==digest)throw new Error('Immutable research report changed');
+        if(review_key){
+          this.followthrough.verifyReview({review_key,native_proof},t);
+          if(JSON.parse(old.data).review_key===review_key){this.db.prepare("UPDATE work_result_reviews SET state='reviewed' WHERE review_key=?").run(review_key);return{recorded:false,duplicate:true,review_recorded:true};}
+          return{recorded:false,duplicate:true,review_pending:true,requires_new_review_report:true,instruction:'This immutable report predates this review. Submit a new review-specific report key with the original result assessment and explicit followup dispositions (existing/no_action/blocked/decision), or no_actionable_findings when supported. Do not replay the old report as review completion.'};
+        }
+        return {recorded:false,duplicate:true};
+      }
       const review=review_key?this.followthrough.verifyReview({review_key,native_proof},t):null;
+      if(review&&outcome==='findings'&&!followups.length)throw Error('A findings review needs explicit structured followup dispositions; do not create another review of the review');
       if(!wake&&!review)throw new Error('Research requires actual ordinary task execution or a verified named result review');
       const data={...content,...(wake?{wake_id:wake.id}:{}),...(review?{review_key}:{})};
       this.db.prepare('INSERT INTO work_reports VALUES (?,?,?,?,?)').run(report_key,t.id,digest,json(data),this.now());
       const created=proposals.map(p=>this.createInside({...p,state:'candidate',source:{kind:'exploration_result',key:`${report_key}:${p.canonical_key}`,origin_task_id:t.id,evidence_refs}}));
       const result_followups=this.followthrough.recordInside(t,report_key,followups);
-      if(outcome==='findings'&&!followups.length)this.followthrough.reviewInside(t.id,{key:wake?.id??report_key,turn_id:wake?this.db.prepare('SELECT turn_id FROM rt_wakes WHERE id=?').get(wake.id)?.turn_id:null,evidence_ref:report_key,force:true});
+      if(outcome==='findings'&&!followups.length&&!review)this.followthrough.reviewInside(t.id,{key:wake?.id??report_key,turn_id:wake?this.db.prepare('SELECT turn_id FROM rt_wakes WHERE id=?').get(wake.id)?.turn_id:null,evidence_ref:report_key,force:true});
       if(review)this.db.prepare("UPDATE work_result_reviews SET state='reviewed' WHERE review_key=?").run(review_key);
       this.onReportInside?.(t.id,{key:report_key,type:'research_report',payload:{report_key,outcome,summary,evidence_refs},evidence_ref:report_key});
       return {...continuationAfterReport(this,t),recorded:true,report_key,proposals:created.map(x=>x.task.id),followups:result_followups,task_complete:false,discovery_wake_required:result_followups.some(r=>r.state==='needs_owner')};

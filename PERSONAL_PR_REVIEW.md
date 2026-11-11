@@ -168,3 +168,6 @@ at a new head or convert a skipped Gatekeeper check into approval. If the curren
 app skipped review and the required current-head automated review is absent,
 keep merge blocked and report the app's exact documented manual trigger. Agent
 comments and reviewer requests remain prohibited without actual authorization.
+
+
+A canonical review_decision rejected before native send may refresh context once after its first attempt: pass expected_attempt_id and not_sent_proof_ref to refresh_review_decision_context. The stored original receipt must say not_sent/rejected_before_send, the matching immutable proof must show native_send_invoked=false and operation_not_started=true, its original authorize response must deny reactive_plan_or_evidence_changed, and no send permit may ever have existed for that action. Prior payload, attempt, outcome and evidence remain in review_delivery_attempts; do not reset attempts, invent a new key or edit the card. The original owner must be acknowledged and refresh all existing gates, then claim and authorize again. Sent, uncertain or possibly sent actions never use this recovery.

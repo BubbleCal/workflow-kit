@@ -73,6 +73,6 @@ export class OwnerHealth {
       state==='unbound_turn_failed'?'inspect_and_bind_actual_failed_turn':['turn_failed','unfinished_terminal_turn'].includes(state)?'inspect_and_recover_exact_turn':
       state==='queued_unconsumed'?'reconcile_unconsumed_queue':state==='native_recovery_blocked'?'report_verified_client_blocker':state==='continuation_needed'?'continue_authorized_work':state==='active_unbound'?'reconcile_actual_native_execution':'preserve';
     return {task_id,state,next_action:action,context_failures:failures,next_check_at:next,task_complete:task.status==='complete',
-      queue_consumed:wake?.state==='running'&&wake.turn_id===snapshot.latestTurn.id&&!this.db.prepare('SELECT 1 FROM rt_diagnostics WHERE key=?').get(`recovery-execution:${wake.id}`),execution_started:wake?.state==='running'&&wake.turn_id===snapshot.latestTurn.id,original_queue_id:wake?.queue_id??null};
+      queue_consumed:wake?.transport==='native_queue'&&wake?.state==='running'&&wake.turn_id===snapshot.latestTurn.id&&!this.db.prepare('SELECT 1 FROM rt_diagnostics WHERE key=?').get(`recovery-execution:${wake.id}`),execution_started:wake?.state==='running'&&wake.turn_id===snapshot.latestTurn.id,original_queue_id:wake?.queue_id??null};
   }
 }

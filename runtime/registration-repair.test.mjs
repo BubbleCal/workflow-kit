@@ -124,3 +124,16 @@ test('a relay-bound accepted original owner can submit its result through the un
   assert.equal(f.c.work.recordReport(report).duplicate,true);
  }finally{f.c.close();}
 });
+
+test('projection-only binding observes an already-active authorized correction without clearing a decision or touching the task',()=>{
+ for(const variant of ['valid','ended','wrong-decision','old-instruction','paused']){const f=followup(variant==='ended'?'completed':'inProgress');try{
+  f.c.work.setPolicy({key:'continuous_authorized_work',enabled:true,allowed_kinds:['work'],actual_human_verified:true,source_message_id:'human:continuous',verbatim_text:'Continue authorized work without routine pause questions',evidence_ref:'actual-rule'});
+  f.c.db.prepare("UPDATE rt_wakes SET state='finished' WHERE id=?").run(f.w.id);
+  f.c.db.prepare("INSERT INTO rt_decisions VALUES ('old-decision','T-1',0,0,'needs_decision','{}',?)").run(f.now()-1);
+  f.c.db.prepare("UPDATE rt_tasks SET status='needs_decision' WHERE task_id='T-1'").run();
+  Object.assign(f.input,{projection_only:true,expected_wake_id:null,expected_queue_id:null,expected_decision_id:variant==='wrong-decision'?'wrong':'old-decision'});
+  if(variant==='old-instruction')f.c.db.prepare('UPDATE actions SET created_at=? WHERE action_key=?').run(f.now()-2,f.key);if(variant==='paused')f.mode('paused');
+  const before=f.s.task('T-1');if(variant!=='valid'){assert.throws(()=>reconcileQueuedFollowup(f.c,f.input));assert.deepEqual(f.s.task('T-1'),before);continue;}
+  const result=reconcileQueuedFollowup(f.c,f.input);assert(result.projection_only);assert.equal(result.decision_preserved,'old-decision');assert.deepEqual(f.s.task('T-1'),before);assert.equal(f.s.openWake('T-1').turn_id,'new-native-turn');assert.equal(f.s.openWake('T-1').state,'running');assert(reconcileQueuedFollowup(f.c,f.input).already_reconciled);
+ }finally{f.c.close();}}
+});

@@ -1,3 +1,4 @@
+import {Mailbox} from './mailbox.mjs';
 import {settleTriggerDiscovery} from './trigger-proof.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {join} from 'node:path';
@@ -88,4 +89,28 @@ export function settleDiscoveryDelivery(control,mailbox,batch,result){
  if(prior)return JSON.parse(prior.data);
  const settlement={settled:true,transport:direct?'direct_human':'native_followup',batch_id:batch.id,generation:batch.generation,mail_key:batch.mail_key,action_key:binding.action_key,turn_id:binding.turn_id,state:current.state,original_queue_consumed:false,original_delivery_preserved:true};
  control.reactive.diagnostic(key,settlement);return settlement;
+}
+
+// A delivered setup hint can end before begin. Preserve its receipt and recover
+// only that unstarted generation; never pretend the old queue was consumed.
+export function recoverUnstartedDiscoveryFollowup(control,input){
+ const {batch_id,generation,action_key,source_message_id,native_proof,human_authorization,evidence_ref}=input;
+ if(input.actual_human_verified!==true||input.effects_reconciled!==true||!evidence_ref)throw Error('Verified authorized unstarted discovery recovery required');
+ const result=control.atomic(()=>{
+  const d=control.discovery,b=d.batch(batch_id),config=control.work.config;
+  if(!b||b.state!=='pending'||b.generation!==generation||b.mail_key!==input.expected_mail_key)throw Error('Same pending discovery generation required');
+  if(control.db.prepare('SELECT 1 FROM work_creation_runs WHERE batch_id=? AND generation=?').get(batch_id,generation)||control.db.prepare("SELECT 1 FROM actions WHERE owner=? AND state IN ('claimed','uncertain')").get(config.threads.discovery))throw Error('Preserve acknowledged source execution and unresolved effects');
+  const action=control.db.prepare('SELECT * FROM actions WHERE action_key=?').get(action_key),task={task_id:'discovery',owner_id:config.threads.discovery,contract:{workspace:config.thread_workspaces?.discovery??config.scope.project_root}};
+  const proof=verifyHumanFollowup(native_proof,{task,action,source_message_id,now:control.now()});verifyFollowupAuthority(human_authorization,proof.payload);
+  if(proof.status!=='completed'||proof.payload.intent!=='resume_discovery_batch'||proof.payload.batch_id!==batch_id||proof.payload.generation!==generation)throw Error('Exact completed original setup hint required');
+  const outcome={reason:'authenticated_setup_ended_before_begin',queue_consumption_verified:false,turn_id:proof.turn_id,action_key,evidence_ref,source_coverage_advanced:false};
+  control.reactive.diagnostic(`discovery-unstarted-recovery:${batch_id}:${generation}`,outcome);
+  control.reactive.diagnostic(`discovery-followup:${batch_id}:${generation}`,{...outcome,source_message_id,mail_key:b.mail_key,original_queue_consumed:false,setup_ended_before_begin:true});
+  d.checkBatch(batch_id);
+  control.db.prepare("UPDATE discovery_batches SET state='checkpointed',next_at=? WHERE id=?").run(control.now(),batch_id);
+  return{batch:b,proof,outcome};
+ });
+ const mailbox=new Mailbox(join(control.work.config.instance_root,'mailbox.sqlite'));
+ try{control.discovery.retireMailboxDelivery(mailbox,result.batch,{...result.outcome,reason:'authenticated_alternate_execution'});}finally{mailbox.close();}
+ return{recovered:true,batch_id,generation,state:'checkpointed',actual_setup_turn_id:result.proof.turn_id,original_queue_consumed:false,source_coverage_advanced:false};
 }

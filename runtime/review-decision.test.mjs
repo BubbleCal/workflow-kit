@@ -104,3 +104,39 @@ test('refresh cannot change intent or reuse stale gates, an old contract, paused
   assert.equal(f.c.refreshReviewDecisionContext(input).refreshed,false);assert.deepEqual(f.c.db.prepare('SELECT * FROM actions WHERE action_key=?').get(f.action.key),before);
  }finally{f.c.close();}}
 });
+
+async function rejectedBeforeSendFixture(){
+ const{mkdtempSync,writeFileSync,rmSync}=await import('node:fs'),{tmpdir}=await import('node:os'),{join}=await import('node:path');
+ const f=setup(),dir=mkdtempSync(join(tmpdir(),'review-unsent-'));f.c.prepare(f.action);const first=f.c.claim({key:f.action.key,owner:OWNER,evidence:f.evidence});
+ const context=moveContext(f),denial=f.c.authorizeReviewSend({key:f.action.key,attempt_id:first.attempt_id,owner:OWNER,evidence:f.evidence,operation_not_started:true});assert.equal(denial.send,false);assert(denial.reasons.includes('reactive_plan_or_evidence_changed'));
+ const denyFile=join(dir,'authorize.json'),proofFile=join(dir,'not-sent.json');writeFileSync(denyFile,JSON.stringify(denial));
+ writeFileSync(proofFile,JSON.stringify({checked_at:new Date(f.now()).toISOString(),task_id:'T-1',action_key:f.action.key,attempt_id:first.attempt_id,native_send_invoked:false,operation_not_started:true,authorize_ref:denyFile}));
+ f.c.settle({key:f.action.key,attempt_id:first.attempt_id,outcome:'not_sent',error_class:'rejected_before_send',evidence_ref:proofFile});
+ const input={key:f.action.key,owner:OWNER,expected_context:context,evidence:f.evidence,expected_attempt_id:first.attempt_id,not_sent_proof_ref:proofFile};
+ return{...f,first,input,proofFile,denyFile,close(){f.c.close();rmSync(dir,{recursive:true,force:true});}};
+}
+
+test('a proven unsent claimed decision refreshes the same key while preserving prior attempt and all reauthorization gates',async()=>{
+ const f=await rejectedBeforeSendFixture();try{
+ const before=f.c.db.prepare('SELECT * FROM actions WHERE action_key=?').get(f.action.key);assert(f.c.refreshReviewDecisionContext(f.input).refreshed);
+ const after=f.c.db.prepare('SELECT * FROM actions WHERE action_key=?').get(f.action.key);for(const k of ['attempt_id','attempts','owner','receipt','created_at'])assert.equal(after[k],before[k]);
+ const prior=f.c.db.prepare('SELECT * FROM review_delivery_attempts WHERE attempt_id=?').get(f.first.attempt_id);assert.equal(prior.outcome,'not_sent');assert.equal(JSON.parse(prior.payload).runtime_context.context_rev,JSON.parse(before.payload).runtime_context.context_rev);
+ f.advance(5001);const second=f.c.claim({key:f.action.key,owner:OWNER,evidence:f.evidence});assert(second.claimed);assert.notEqual(second.attempt_id,f.first.attempt_id);
+ assert.equal(f.c.authorizeReviewSend({key:f.action.key,attempt_id:second.attempt_id,owner:OWNER,evidence:f.evidence,operation_not_started:true}).send,true);
+ f.c.settle({key:f.action.key,attempt_id:second.attempt_id,outcome:'sent',evidence_ref:'actual-native-send'});
+ assert.equal(f.c.refreshReviewDecisionContext(f.input).refreshed,false);assert.equal(f.c.db.prepare('SELECT count(*) n FROM review_delivery_attempts WHERE action_key=?').get(f.action.key).n,2);
+ assert.deepEqual(f.c.db.prepare('SELECT outcome FROM review_delivery_attempts WHERE action_key=? ORDER BY claimed_at').all(f.action.key).map(r=>r.outcome),['not_sent','sent']);
+ }finally{f.close();}
+});
+
+test('attempted review refresh rejects permits, uncertainty, unverifiable non-delivery and any changed identity',async()=>{
+ const{readFileSync,writeFileSync}=await import('node:fs');
+ for(const change of ['permit','uncertain','sent','wrong-attempt','called','wrong-key','denial','receipt','head','owner']){const f=await rejectedBeforeSendFixture();try{
+  if(change==='permit')f.c.db.prepare('INSERT INTO review_send_permits VALUES (?,?,?,?)').run(f.first.attempt_id,f.action.key,f.now(),f.now()+60000);
+  if(['uncertain','sent'].includes(change))f.c.db.prepare('UPDATE actions SET state=? WHERE action_key=?').run(change,f.action.key);
+  if(change==='wrong-attempt')f.input.expected_attempt_id='another-attempt';if(change==='owner')f.input.owner='another-owner';if(change==='head')f.input.evidence={...f.evidence,current_head_sha:'b'.repeat(40)};
+  if(['called','wrong-key'].includes(change)){const p=JSON.parse(readFileSync(f.proofFile));if(change==='called')p.native_send_invoked=true;else p.action_key='another-key';writeFileSync(f.proofFile,JSON.stringify(p));}
+  if(change==='denial')writeFileSync(f.denyFile,JSON.stringify({send:true}));if(change==='receipt')f.c.db.prepare("UPDATE actions SET receipt=? WHERE action_key=?").run(JSON.stringify({outcome:'not_sent',evidence_ref:f.proofFile,native_result:{threadId:INBOX}}),f.action.key);
+  const before=f.c.db.prepare('SELECT * FROM actions WHERE action_key=?').get(f.action.key);assert.equal(f.c.refreshReviewDecisionContext(f.input).refreshed,false,change);assert.deepEqual(f.c.db.prepare('SELECT * FROM actions WHERE action_key=?').get(f.action.key),before);
+ }finally{f.close();}}
+});

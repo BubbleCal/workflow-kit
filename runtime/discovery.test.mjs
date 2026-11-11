@@ -308,3 +308,10 @@ test('blocked source history cannot skip due owner recovery or turn it into repe
   assert.equal(finish(d,resumed,failed).checkpointed,true);
  }finally{f.c.close();}
 });
+
+test('fresh result work cannot starve an overdue immutable source checkpoint',()=>{
+ const f=workFixture();try{f.config.discovery={min_start_interval_ms:900000};const d=f.c.discovery;configure(d);const b=scan(f);page(d,b,{observations:[],complete:false,next_cursor:'saved-real-cursor'});finish(d,b,{source_results:[{source_id:'linear',complete:false,reason:'bounded source page'}]});const before=d.batch(b.id);
+ f.work.setPolicy({key:'accept_result_followups',enabled:true,allowed_kinds:['work'],source_message_id:'human:results',verbatim_text:'Review substantive task results',actual_human_verified:true,evidence_ref:'actual-rule'});const t=f.work.create({canonical_key:'existing-result',title:'Existing result',objective:'Original accepted work',workspace:'/task',requirements:[{id:'done',text:'Evidence'}]}).task;f.accept(t.id);f.bind(t.id);f.work.followthrough.reviewInside(t.id,{key:'actual-terminal-result',turn_id:'original-result-turn',evidence_ref:'original-result'});
+ f.advance(1800000);const next=d.enqueueDue({enqueue:()=>({queued:true})},'/instance'),resumed=d.batch(next.batch_id);assert.equal(resumed.id,b.id);assert.equal(resumed.generation,b.generation+1);assert.deepEqual(resumed.snapshot.sources,before.snapshot.sources);assert.deepEqual(resumed.pages,before.pages);assert.equal(f.work.followthrough.pending().reviews.length,1);
+ }finally{f.c.close();}
+});

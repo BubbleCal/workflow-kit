@@ -101,3 +101,6 @@ complete an authorized unfinished goal. Continue bounded independent work, retai
 actual jobs/waits, and request only a material human-only decision. Conditional
 holds use their original wording and observable release predicate; unconditional
 pauses and all external-action gates remain. Record remaining goal and next step.
+
+
+A duplicate immutable report is not automatically a completed result review. If the existing report belongs to a different review or an original owner wake, use a new review-specific report key after reading the actual original terminal result. Findings reviews must include explicit structured dispositions (existing/no_action/blocked/decision/implement) with evidence and scope limits. A review does not queue a review of itself. Replaying a report already recorded for that exact review is idempotent; it creates no duplicate owner or followup.

@@ -306,6 +306,12 @@ export class DiscoveryStore {
     const forced=checkpoints.find(c=>this.recovery.requested(c));
     const resume=forced??checkpoints.find(c=>c.next_at<=this.now()&&(c.snapshot.sources.some(s=>unfinished(s)&&!this.recovery.isolated(c.id,s)&&sources.some(d=>d.source_id===s.source_id))||
       c.snapshot.result_work?.review_keys.some(k=>reviewKeys.includes(k))||c.snapshot.result_work?.followup_keys.some(k=>followupKeys.includes(k))||c.snapshot.creation_work?.task_ids.some(id=>creation.some(t=>t.task_id===id))));
+    // Fresh result reviews must not indefinitely starve already-due source
+    // checkpoints. Keep explicit human owner-creation triggers first.
+    const fairSource=!triggers.length&&checkpoints.find(c=>this.now()-c.next_at>=Math.max(60000,this.config.discovery?.min_start_interval_ms??0)&&
+      c.snapshot.sources.some(s=>unfinished(s)&&!this.recovery.isolated(c.id,s)&&sources.some(d=>d.source_id===s.source_id)));
+    if(!b&&!triggers.length&&forced)b=forced;
+    if(!b&&fairSource)b=fairSource;
     if(!b&&resume&&(!triggers.length&&forced||!newResults&&(!fresh.length||resume.next_at<Math.min(...fresh.map(s=>s.next_at)))))b=resume;
     if(!b&&!fresh.length&&!newResults)return {queued:false,reason:'discovery_checkpoint_backoff'};
     if(!b)b=this.atomic(()=>{

@@ -313,3 +313,19 @@ test('runtime wait_observe refreshes a running job quietly and publishes its ter
   }finally{db.close();}
  }finally{rmSync(root,{recursive:true,force:true});}
 });
+
+test('public CLI discovery begin and finish accept actual trigger execution without inventing a native queue receipt',()=>{
+ const root=setup();let db,mail;try{
+  const {dir,workspace}=nativeSetup(root,{discovery:true}),TRIGGER='66666666-6666-4666-8666-666666666666',cfg=JSON.parse(readFileSync(join(dir,'runtime.json')));cfg.message_trigger={enabled:true,thread_id:TRIGGER,workspace,interval_ms:60000,authorization_ref:'actual-trigger-authority',source_message_id:'human:trigger'};writeFileSync(join(dir,'runtime.json'),JSON.stringify(cfg));
+  op(dir,'sources',{op:'configure',source_id:'linear',enabled:true,scope:{project:'project'},source_message_id:'user:source',actual_human_verified:true,evidence_ref:'original-source-scope'});once(dir);db=new DatabaseSync(join(dir,'control.sqlite'));mail=new DatabaseSync(join(dir,'mailbox.sqlite'));
+  const b=db.prepare("SELECT * FROM discovery_batches WHERE state='pending'").get(),actor=()=>nativeProof({thread:TRIGGER,workspace,turn:'actual-trigger-turn',now:Date.now()}),owner=()=>nativeProof({thread:DISCOVERY,workspace,turn:'prior-discovery',status:'completed',now:Date.now()});
+  const trigger=input=>{const file=join(dir,`trigger-${input.op}.json`);writeFileSync(file,JSON.stringify(input));const r=run(dir,'workflow.mjs',['runtime','trigger','--file',file]);assert.equal(r.status,0,r.stderr+JSON.stringify(r.json));return r.json;};
+  assert(trigger({op:'run',native_proof:actor()}).allowed);const pending=trigger({op:'pending',limit:4});assert.equal(pending.messages.length,1);const id=pending.messages[0].id,p=trigger({op:'prepare',id,actor_proof:actor(),native_proof:owner()}),claim=trigger({op:'claim',id,digest:p.digest,actor_proof:actor(),native_proof:owner()});assert(claim.send);
+  const proof=nativeProof({thread:DISCOVERY,workspace,turn:'actual-triggered-source-turn',now:Date.now()});proof.readback.turns[0].items=[{type:'functionCallOutput',namespace:'codex_app',name:'send_message_to_thread',output:{truncated:false,text:`<codex_delegation>\n  <source_thread_id>${TRIGGER}</source_thread_id>\n  <input>${claim.arguments.prompt}</input>\n</codex_delegation>`}}];
+  const begun=op(dir,'discovery',{op:'begin',batch_id:b.id,generation:b.generation,native_proof:proof});assert.equal(begun.delivery.transport,'native_trigger');assert.equal(begun.delivery.queue_consumed,false);
+  trigger({op:'settle',id,attempt_id:claim.attempt_id,actor_proof:actor(),native_result:{structuredContent:{threadId:DISCOVERY}},evidence_ref:'actual-send-fixture'});
+  op(dir,'discovery',{op:'ingest',batch_id:b.id,generation:b.generation,source_id:'linear',page_key:'complete',observations:[],complete:true,evidence_ref:'actual-scoped-source-page'});
+  const finished=op(dir,'discovery',{op:'finish',batch_id:b.id,generation:b.generation,source_results:[{source_id:'linear',complete:true,followups_complete:true}]});assert(finished.finished);assert.equal(finished.delivery.transport,'native_trigger');assert.equal(mail.prepare('SELECT state FROM mail WHERE item_key=?').get(b.mail_key).state,'acknowledged');assert.equal(mail.prepare("SELECT count(*) n FROM batches WHERE lane='discovery'").get().n,0);assert.equal(db.prepare('SELECT state FROM rt_trigger_messages WHERE id=?').get(id).state,'finished');
+  const calls=readFileSync(join(dir,'native-queue-calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse).filter(a=>a[0]==='queue'&&a[1]==='--thread');assert.equal(calls.length,0);
+ }finally{db?.close();mail?.close();rmSync(root,{recursive:true,force:true});}
+});

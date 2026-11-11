@@ -1,10 +1,10 @@
 import {MessageTrigger,validateMessageTrigger} from './message-trigger.mjs';
-import {verifyTriggerExecution} from './trigger-proof.mjs';
+import {verifyTriggerExecution,triggerMessage} from './trigger-proof.mjs';
 import {migrateRuntimeHostBinding} from './host-binding.mjs';
 import {reconcileAcceptedSource} from './created-project-repair.mjs';
 import {reconcileCompletedProjection,reconcileReviewWorkspace} from './closure-reconciliation.mjs';
 import {reconcileCreationWorkspace} from './creation-workspace-repair.mjs';
-import {beginDiscoveryFollowup,beginDiscoveryInteractive,settleDiscoveryDelivery} from './discovery-followup.mjs';
+import {beginDiscoveryFollowup,beginDiscoveryInteractive,settleDiscoveryDelivery,recoverUnstartedDiscoveryFollowup} from './discovery-followup.mjs';
 import {reconcileArtifactBinding} from './registration-repair.mjs';
 import {reconcileQueuedFollowup} from './human-followup.mjs';
 import {verifyQueuedRecoveryProof} from './queued-resume.mjs';
@@ -192,11 +192,19 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         else if(input.op==='begin'){
           result=control.discovery.begin(input);if(result.skipped){output(result);return;}mailbox=new Mailbox(join(root,'mailbox.sqlite'));
           const mail=mailbox.db.prepare('SELECT batch_id FROM mail WHERE item_key=?').get(result.mail_key);
-          if(!mail?.batch_id)throw new Error('Discovery has no native queue batch receipt');
-          mailbox.begin(mail.batch_id);
-          if(result.invalidated)mailbox.finish(mail.batch_id,{processed_keys:[result.mail_key],note:'source scope changed; no source reads'});
+          const trigger=triggerMessage(control.db,result.mail_key),run=control.db.prepare('SELECT turn_id FROM work_creation_runs WHERE batch_id=? AND generation=?').get(input.batch_id,input.generation);
+          if(trigger){
+            const delivery=mailbox.db.prepare('SELECT state,batch_id FROM mail WHERE item_key=?').get(result.mail_key);
+            if(trigger.state!=='started'||!trigger.execution_turn||trigger.execution_turn!==run?.turn_id||delivery?.batch_id||!['pending','trigger_pending'].includes(delivery?.state))throw Error('Discovery trigger execution or original source receipt changed');
+            result={...result,delivery:{transport:'native_trigger',execution_verified:true,turn_id:run.turn_id,queue_consumed:false}};
+          }else{
+            if(!mail?.batch_id)throw new Error('Discovery has no native queue batch receipt');
+            mailbox.begin(mail.batch_id);
+            if(result.invalidated)mailbox.finish(mail.batch_id,{processed_keys:[result.mail_key],note:'source scope changed; no source reads'});
+          }
         }else if(input.op==='ingest')result=control.discovery.ingest(input);
         else if(input.op==='begin_followup')result=beginDiscoveryFollowup(control,input);
+        else if(input.op==='recover_unstarted_followup')result=recoverUnstartedDiscoveryFollowup(control,input);
         else if(input.op==='begin_interactive')result=beginDiscoveryInteractive(control,input);
         else if(input.op==='append_catchup')result=control.discovery.appendCatchup(input);
         else if(input.op==='retry_checkpoint')result=control.discovery.recovery.requestRetry(input);

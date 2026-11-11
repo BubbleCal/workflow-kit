@@ -33,7 +33,7 @@ export function verifyHumanFollowup(proof,{task,action,source_message_id,now=Dat
  if(!action||action.task_id!==task.task_id||action.kind!=='human_input'||action.state!=='sent'||!action.owner)throw new Error('A sent authorized original-task human followup is required');
  const p=JSON.parse(action.payload),receipt=JSON.parse(action.receipt??'{}'),read=nativeReadback(proof?.readback),at=Date.parse(proof?.checked_at),turn=read.turns?.[0];
  const native=receipt.native_result?.structuredContent??receipt.native_result?.content?.flatMap(c=>{try{return [JSON.parse(c.text)];}catch{return [];}}).find(c=>c.threadId);
- if(!['steering','correction'].includes(p.intent)||p.source_message_id!==source_message_id||!p.verbatim_text||!p.source_thread_id||!p.source_turn_id||
+ if(!(['steering','correction'].includes(p.intent)||task.task_id==='discovery'&&p.intent==='resume_discovery_batch')||p.source_message_id!==source_message_id||!p.verbatim_text||!p.source_thread_id||!p.source_turn_id||
   p.thread_id!==task.owner_id||receipt.outcome!=='sent'||receipt.native_result?.isError===true||native?.threadId!==task.owner_id)
   throw new Error('Followup must retain the actual human source and exact original owner receipt');
  if(proof?.source!=='codex_app.read_thread'||!Number.isFinite(at)||at>now+5000||now-at>60000||!proof.evidence_ref||
@@ -74,12 +74,18 @@ export function reconcileQueuedFollowup(control,input){
  if(actual_human_verified!==true||!source_message_id||!evidence_ref)throw new Error('Actual human workflow-repair authority and evidence required');
  return control.atomic(()=>{
   const state=control.reactive,task=state.task(task_id),old=state.openWake(task_id),action=control.db.prepare('SELECT * FROM actions WHERE action_key=?').get(action_key);
-  if(!task||task.mode!=='active'||task.status==='complete'||task.status==='needs_decision'&&input.resume_authorized_work!==true||task.contract.retired||task.contract.service_lane)throw new Error('Preserve active original task, decisions and services');
+  if(!task||task.mode!=='active'||task.status==='complete'||task.status==='needs_decision'&&input.resume_authorized_work!==true&&input.projection_only!==true||task.contract.retired||task.contract.service_lane)throw new Error('Preserve active original task, decisions and services');
   state.assertQueueOwner(task);
   const proof=verifyHumanFollowup(native_proof,{task,action,source_message_id,now:control.now()}),id=`runtime:${task_id}:followup:${action_key}`;
   verifyFollowupAuthority(input.human_authorization,proof.payload);
   let resolution;
-  if(task.status==='needs_decision'){
+  if(input.projection_only===true){
+   const decision=control.db.prepare("SELECT id,created_at FROM rt_decisions WHERE task_id=? AND disposition='needs_decision' ORDER BY created_at DESC LIMIT 1").get(task_id);
+   if(task.status!=='needs_decision'||proof.status!=='inProgress'||old&&old.id!==id||input.expected_wake_id||input.expected_queue_id||
+    !continuationPolicy(control.db)?.enabled||!decision||decision.id!==input.expected_decision_id||action.created_at<=decision.created_at)
+    throw Error('Projection-only binding requires actual active original execution, exact prior decision and no competing wake');
+   resolution={decision_preserved:decision.id,scope:'actual_execution_projection_only',contract_and_external_holds_preserved:true};
+  }else if(task.status==='needs_decision'){
    const decision=control.db.prepare("SELECT id,created_at,data FROM rt_decisions WHERE task_id=? AND disposition='needs_decision' ORDER BY created_at DESC LIMIT 1").get(task_id),number=task_id.match(/^T-0*(\d+)$/)?.[1];
    const explicitlyNamed=proof.payload.source_thread_id===task.owner_id||number&&new RegExp(`(?:^|[^0-9])(?:[Tt]-?)?0*${number}(?![0-9])`).test(proof.payload.verbatim_text);
    let explicitlyDirected=/\b(?:continue|resume|proceed)\b|继续|开始推进|恢复(?:推进|执行|工作)/i.test(proof.payload.verbatim_text);
@@ -98,12 +104,12 @@ export function reconcileQueuedFollowup(control,input){
   if(control.db.prepare("SELECT 1 FROM actions WHERE task_id=? AND state IN ('claimed','uncertain')").get(task_id))throw new Error('Reconcile in-flight effects first');
   if(old){control.db.prepare("UPDATE rt_wakes SET state='superseded',completed_at=? WHERE id=?").run(control.now(),old.id);
    state.diagnostic(`followup-superseded:${old.id}`,{task_id,source_message_id,successor_wake_id:id,turn_id:proof.turn_id,queue_id:old.queue_id,queue_consumed:false,evidence_ref});}
-  state.ingestInside({event_id:`followup-execution:${task_id}:${action_key}`,task_id,source:'verified_human_followup',subject:`human-followup:${source_message_id}`,type:'authorized_followup_bound',observed_at:control.now(),payload:{source_message_id,source_thread_id:proof.payload.source_thread_id,verbatim_text:proof.payload.verbatim_text,previous_wake_id:old?.id??null,original_queue_consumed:false},evidence_ref,debounce_ms:0});
+  if(input.projection_only!==true)state.ingestInside({event_id:`followup-execution:${task_id}:${action_key}`,task_id,source:'verified_human_followup',subject:`human-followup:${source_message_id}`,type:'authorized_followup_bound',observed_at:control.now(),payload:{source_message_id,source_thread_id:proof.payload.source_thread_id,verbatim_text:proof.payload.verbatim_text,previous_wake_id:old?.id??null,original_queue_consumed:false},evidence_ref,debounce_ms:0});
   const current=state.task(task_id),events=state.checkpoint(task_id).events.map(e=>e.event_id),running=proof.status==='inProgress';
   control.db.prepare('INSERT INTO rt_wakes(id,task_id,context_rev,plan_rev,event_ids,state,prompt,turn_id,created_at,started_at,completed_at,evidence_ref,transport,owner_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
    .run(id,task_id,current.context_rev,current.plan_rev,JSON.stringify(events),running?'running':'ended_unresolved',proof.payload.prompt,proof.turn_id,control.now(),control.now(),running?null:control.now(),evidence_ref,'native_followup',task.owner_id);
   control.db.prepare('INSERT INTO rt_wake_members VALUES (?,?,?)').run(id,task_id,current.context_rev);
   state.diagnostic(`followup-binding:${id}`,{action_key,source_message_id,evidence_ref,original_queue_consumed:false,...(resolution?{decision_resolution:resolution}:{})});
-  return {reconciled:true,wake_id:id,turn_id:proof.turn_id,state:running?'running':'ended_unresolved',old_wake_state:old?'superseded':null,original_queue_consumed:false,queue_id:old?.queue_id??null,owner_unchanged:true};
+  return {reconciled:true,wake_id:id,turn_id:proof.turn_id,state:running?'running':'ended_unresolved',old_wake_state:old?'superseded':null,original_queue_consumed:false,queue_id:old?.queue_id??null,owner_unchanged:true,...(input.projection_only===true?{decision_preserved:resolution.decision_preserved,projection_only:true}:{})};
  });
 }

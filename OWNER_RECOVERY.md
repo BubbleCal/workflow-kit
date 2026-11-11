@@ -175,3 +175,11 @@ configured input-idle threshold, exclusions and all task holds remain intact.
 
 
 Runtime-authored direct messages are tracked by rt_trigger_messages under MESSAGE_TRIGGER.md. Do not resend a pending native receipt or an uncertain trigger attempt. A distinct native turn with the exact original trigger delegation is required for begin/recovery; old Codex queue receipts are retained and never silently converted.
+
+
+Discovery may use a single guarded human_input intent resume_discovery_batch for the exact original sent native queue/batch/generation when its actual owner is quiescent. Include fresh native identity/unarchived proof and genuine human_authorization. Stable key: resume-discovery:<batch_id>:<generation>:<queue_id>. This is a distinct setup hint, never a queue replay or a consumption claim. The receiver uses begin_followup with the exact incoming delegation. If that hint actually ended before begin, discovery op recover_unstarted_followup requires its real completed native proof, original human source, effects_reconciled:true and no acknowledged run for that generation; it checkpoints the same source batch and retires only the original delivery with the queue receipt preserved. Coverage never advances from this administrative recovery. Normal discovery/trigger processing performs the next generation under the existing cadence.
+
+For an already-running authorized original-owner correction with a stale needs_decision projection, runtime reconcile_followup may use projection_only:true, the exact expected_decision_id, fresh full incoming native proof and original human_authorization. It requires no competing wake and a newer sent original-task instruction. This binds only actual execution: the existing task row, decision, contract, waits and external holds remain unchanged; it grants no delivery permission and sends no message to the active owner.
+
+
+Native trigger discovery begin is acknowledged from its exact registered sender/input and recorded native creation run; it does not require an old Codex queue receipt. Its unbatched source input remains trigger_pending until actual source finish/checkpoint settlement. Health reports execution_started for genuine followup/trigger turns while queue_consumed is reserved for actual native_queue consumption.

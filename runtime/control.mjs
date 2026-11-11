@@ -1,3 +1,5 @@
+import {isDiscoveryResume,discoveryResumeReasons} from './discovery-queued-recovery.mjs';
+import {initReviewAttempts,archiveReviewAttempt,verifiedUnsentReviewRetry} from './review-context-retry.mjs';
 import {createdProjectRepairReasons} from './created-project-repair.mjs';
 import {recordPrReviewAuthorization} from './pr-authorization.mjs';
 import {reviewClosureArchiveActor} from './review-closure.mjs';
@@ -244,7 +246,7 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
     const restoredQuiescentOwner = e.thread_status === 'notLoaded' &&
       e.explicit_resume_request_verified === true && e.thread_archived === false &&
       e.latest_turn_quiescent === true && (e.pending_dispatch === false || isQueuedResume(kind,payload)&&e.queued_resume_verified===true) && e.overlapping_owner === false;
-    need(['idle', 'active', 'awaiting_input'].includes(e.thread_status) || restoredQuiescentOwner, 'human_input_target_state_unknown');
+    need(['idle', 'active', 'awaiting_input'].includes(e.thread_status) || restoredQuiescentOwner || isDiscoveryResume(kind,payload)&&e.discovery_resume_verified===true, 'human_input_target_state_unknown');
     if (payload?.intent === 'question' && payload.thread_id !== COORDINATOR) {
       need(e.thread_status === 'idle' || restoredQuiescentOwner, 'technical_question_waits_for_idle_owner');
       need(e.queued_input === false && e.pending_dispatch === false && e.underlying_job_running === false,
@@ -381,6 +383,7 @@ export class ControlStore {
         updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       INSERT OR IGNORE INTO settings VALUES ('processing', 'on');`);
+    initReviewAttempts(this.db);
     this.feedback = new ReviewFeedback(this.db,this.now);
     initCompletionNotices(this.db);
     this.reactive = new ReactiveState(this.db, { now:this.now, registry:this.taskRegistry });
@@ -458,6 +461,10 @@ export class ControlStore {
   recordCompletionNotice(input) { return recordPresentedCompletion(this,input); }
   prepare(input) {
     const key = required(input.key, 'action key');
+    if(isDiscoveryResume(input.kind,input.payload)){
+      const reasons=discoveryResumeReasons(this,input.payload,input.evidence,input.key);if(reasons.length)return{prepared:false,allowed:false,reasons};
+      input={...input,evidence:{...input.evidence,discovery_resume_verified:true}};
+    }
     const repairReasons=createdProjectRepairReasons(this,input.kind,input.task_id,input.payload,input.evidence,key);
     if(repairReasons.length)return {prepared:false,allowed:false,reasons:repairReasons};
     const creationActorReasons=this.work.creation.reasons(input.kind,input.task_id,input.payload,input.evidence);
@@ -564,12 +571,13 @@ export class ControlStore {
     const pr=pullRequestIdentity(payload);
     return pr?this.feedback.gate(pr.repository,pr.pr_number,payload.expected_head_sha):{allowed:false,reasons:['valid_PR_feedback_identity_required']};
   }
-  refreshReviewDecisionContext({key,owner,expected_context,evidence={}}) {
+  refreshReviewDecisionContext({key,owner,expected_context,evidence={},expected_attempt_id,not_sent_proof_ref}) {
     return this.atomic(()=>{
       const row=this.db.prepare('SELECT * FROM actions WHERE action_key=?').get(key);
-      if(!row||row.kind!=='review_decision'||row.imported||!['prepared','deferred'].includes(row.state)||
-        row.attempts!==0||row.attempt_id||row.owner||row.receipt)
-        return {refreshed:false,reasons:['only_unclaimed_unsent_review_decision_can_refresh']};
+      if(!row||row.kind!=='review_decision'||row.imported||!['prepared','deferred'].includes(row.state))return {refreshed:false,reasons:['only_unclaimed_unsent_review_decision_can_refresh']};
+      const untouched=row.attempts===0&&!row.attempt_id&&!row.owner&&!row.receipt;
+      const retry=untouched?null:verifiedUnsentReviewRetry(this,row,{owner,expected_attempt_id,not_sent_proof_ref});
+      if(!untouched&&!retry)return {refreshed:false,reasons:['only_unclaimed_or_proven_rejected_before_send_review_decision_can_refresh']};
       const task=this.reactive.task(row.task_id),wake=this.reactive.openWake(row.task_id);
       if(!task||task.owner_id!==owner||evidence.executor_thread_id!==owner||task.mode!=='active'||task.status!=='ready'||task.dirty||
         wake?.state!=='running'||wake.owner_id!==owner||this.reactive.waitPolicy.blocked(row.task_id))
@@ -592,8 +600,9 @@ export class ControlStore {
       this.db.exec(`CREATE TABLE IF NOT EXISTS action_context_refreshes (
         action_key TEXT,from_digest TEXT,to_digest TEXT,previous_payload TEXT,payload TEXT,
         owner_id TEXT,evidence TEXT,recorded_at INTEGER,PRIMARY KEY(action_key,from_digest,to_digest));`);
+      if(retry)archiveReviewAttempt(this.db,row,{legacy_evidence:retry});
       this.db.prepare('INSERT INTO action_context_refreshes VALUES (?,?,?,?,?,?,?,?)')
-        .run(key,row.digest,digest,row.payload,canonical(payload),owner,canonical(evidence),this.now());
+        .run(key,row.digest,digest,row.payload,canonical(payload),owner,canonical({...evidence,...(retry?{verified_unsent_attempt:retry}:{})}),this.now());
       this.db.prepare('UPDATE actions SET digest=?,payload=?,updated_at=? WHERE action_key=?').run(digest,canonical(payload),this.now(),key);
       return {refreshed:true,key,state:row.state,runtime_context:context,requires_claim:true,sent:false};
     });
@@ -615,6 +624,10 @@ export class ControlStore {
       const blocked = this.db.prepare("SELECT action_key FROM actions WHERE scope_key=? AND state IN ('claimed','uncertain') AND action_key<>? LIMIT 1").get(row.scope_key, key);
       if (blocked) return { claimed: false, reason: 'scope_in_use', blocking_key: blocked.action_key };
       const payload = JSON.parse(row.payload);
+      if(isDiscoveryResume(row.kind,payload)){
+        const reasons=discoveryResumeReasons(this,payload,evidence,key);if(reasons.length)return{claimed:false,reasons};
+        evidence={...evidence,discovery_resume_verified:true};
+      }
       const repairReasons=createdProjectRepairReasons(this,row.kind,row.task_id,payload,evidence,key);
       if(repairReasons.length)return {claimed:false,reasons:repairReasons};
       const creationActorReasons=this.work.creation.reasons(row.kind,row.task_id,payload,evidence,owner);
@@ -683,8 +696,10 @@ export class ControlStore {
       if (!result.allowed) return { claimed: false, ...result };
       const feedback = this.feedbackGate(row.kind,payload);
       if (!feedback.allowed) return {claimed:false,...feedback};
+      archiveReviewAttempt(this.db,row);
       const attempt = randomUUID();
       this.db.prepare("UPDATE actions SET state='claimed',attempt_id=?,owner=?,attempts=attempts+1,last_error=NULL,updated_at=? WHERE action_key=?").run(attempt, owner, this.now(), key);
+      archiveReviewAttempt(this.db,{...row,attempt_id:attempt,owner,receipt:null,last_error:null},{outcome:'claimed',claimed_at:this.now()});
       if (row.kind === 'task_queue') this.db.prepare("UPDATE rt_wakes SET state='claimed' WHERE id=? AND state='reserved'").run(payload.wake_id);
       return { claimed: true, key, attempt_id: attempt, payload: JSON.parse(row.payload),
         ...(['review_report','completion_report'].includes(row.kind)?{native_arguments:{threadId:payload.thread_id,prompt:payload.prompt}}:{}),
@@ -743,6 +758,7 @@ export class ControlStore {
       const due = retryable ? this.now() + Math.min(300000, 5000 * 2 ** (row.attempts - 1)) : this.now();
       this.db.prepare('UPDATE actions SET state=?,due=?,receipt=?,last_error=?,updated_at=? WHERE action_key=?')
         .run(state, due, canonical({ outcome, evidence_ref, ...(native_result ? { native_result } : {}) }), error_class, this.now(), key);
+      archiveReviewAttempt(this.db,row,{outcome,receipt:canonical({outcome,evidence_ref,...(native_result?{native_result}:{})}),error_class,settled_at:this.now()});
       if (row.kind === 'task_queue') {
         const wakeId = JSON.parse(row.payload).wake_id;
         const receipt=native_result?.queue_receipt;

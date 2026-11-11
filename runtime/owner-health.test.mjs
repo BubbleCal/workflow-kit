@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {fixture,OWNER} from './test-fixtures/reactive.mjs';
+import {fixture,OWNER,nativeProof} from './test-fixtures/reactive.mjs';
 import {OwnerHealth,classifyOwnerHealth} from './owner-health.mjs';
 import {queueOwnerHealth} from './owner-delivery.mjs';
 import {Mailbox} from './mailbox.mjs';
@@ -49,4 +49,13 @@ test('unconsumed queues are inspected before healthy owners in a bounded health 
   const h=new OwnerHealth({db:f.c.db,reactive:{waitPolicy:{blocked:()=>null},tasks:()=>tasks,openWake:id=>({id,created_at:id==='busy'?1:2,state:id==='busy'?'running':'queued'})},work:f.c.work},{now:f.now});
   assert.equal(h.targets({limit:1})[0].task_id,'queued');
  }finally{f.c.close();}
+});
+
+test('actual followup and trigger execution never claim consumption of an original native queue',()=>{
+ for(const transport of ['native_queue','native_followup','native_trigger']){
+  const f=fixture();try{f.activate();f.event();const wake=f.begin();f.c.db.prepare('UPDATE rt_wakes SET transport=? WHERE id=?').run(transport,wake.id);
+   const h=new OwnerHealth(f.c,{now:f.now}),result=h.observe({task_id:'T-1',native_proof:nativeProof({now:f.now()})});
+   assert.equal(result.state,'running');assert.equal(result.execution_started,true);assert.equal(result.queue_consumed,transport==='native_queue');
+  }finally{f.c.close();}
+ }
 });

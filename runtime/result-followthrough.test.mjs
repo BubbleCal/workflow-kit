@@ -207,3 +207,12 @@ test('typed original execution hold also blocks independent implementation admis
   assert.equal(f.report().followups[0].state,'blocked');assert.equal(f.work.list().length,1);
  }finally{f.c.close();}
 });
+
+test('a reviewed findings result needs an explicit disposition and never queues a review of its own review',()=>{
+ const f=fixture();try{f.report([]);complete(f);const pending=f.work.followthrough.pending().reviews[0];assert(pending);const proof=nativeProof({status:'completed',now:f.now()}),old={task_id:f.parent.id,owner_thread_id:OWNER,report_key:'benchmark-result',outcome:'findings',summary:'Measured avoidable fragment reload',evidence_refs:['s3-report'],review_key:pending.review_key,native_proof:proof};
+ const duplicate=f.work.recordReport(old);assert(duplicate.requires_new_review_report);assert.equal(f.work.followthrough.pending().reviews.length,1);
+ assert.throws(()=>f.work.recordReport({...old,report_key:'review-disposition'}),/explicit structured followup/);
+ const result=f.work.recordReport({...old,report_key:'review-disposition',outcome:'no_actionable_findings',summary:'Existing authorized work covers this result; no independent new task is supported'});assert(result.recorded);assert.equal(f.work.followthrough.pending().reviews.length,0);assert.equal(f.work.recordReport({...old,report_key:'review-disposition',outcome:'no_actionable_findings',summary:'Existing authorized work covers this result; no independent new task is supported'}).review_recorded,true);
+ assert.equal(f.work.list().length,1);assert.equal(f.c.reactive.task(f.parent.id).status,'complete');
+ }finally{f.c.close();}
+});
