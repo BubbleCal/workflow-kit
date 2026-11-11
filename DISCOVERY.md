@@ -219,3 +219,36 @@ Dedicated runtime message trigger delivery follows MESSAGE_TRIGGER.md. Preserve 
 
 
 Overdue source checkpoints receive a bounded opportunity ahead of newly arriving result reviews after one configured start interval. Preserve their immutable source windows, pages and cursors, all original scope/cadence guards and explicit human owner-creation trigger priority. Pending or inconclusive result reviews remain visible and cannot hold every older source window indefinitely.
+
+## Codex history pages after a project listing
+
+A completed `list_threads` page remains immutable. Read each ordinary thread's
+history in a separate stream with `discovery ingest`:
+
+```json
+{
+  "followup": {
+    "parent_page_key": "<full saved primary listing page key>",
+    "thread_id": "<exact listed thread UUID>",
+    "host_id": "local"
+  }
+}
+```
+
+The parent evidence must retain the actual `list_threads` request and native
+readback. At the history page's `evidence_ref`, save the unchanged native result
+inside `{source:"codex_app.read_thread",checked_at,request,readback}`. The request
+contains the exact `threadId`, `hostId` and optional provider `cursor`. Set ingest
+`cursor` to that request's cursor (null for the first page), `next_cursor` to the
+actual `page.nextCursor`, and `complete` to `!page.hasMore`. Resume each saved
+history cursor; never append history to the terminal listing or invent completion.
+
+The runtime checks the listed project, host, thread and cwd, rejects control
+chats, and binds each observation's `version` to a real human message (preferred) or its
+containing turn in that page.
+Keep `entity_key="codex:<thread-id>"`, `item_key=<thread-id>` and the exact Codex
+thread URL. Machine deliveries and assistant summaries are not human requests.
+Original listing and history digests remain bound to the stream. Finish requires
+every started history stream complete and its observations classified; unread
+histories remain a coverage gap. Historical evidence grants no new execution,
+owner creation, external-write or deployment authority.
