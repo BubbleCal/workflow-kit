@@ -1,10 +1,13 @@
 import {DatabaseSync} from 'node:sqlite';
 import {existsSync} from 'node:fs';
 import {join} from 'node:path';
+import {isDeepStrictEqual} from 'node:util';
 
-export function inboxAdmission({key,kind,payload,action,task,completion,ownerCreationAuthorized=false}) {
+export function inboxAdmission({key,kind,payload,action,task,completion,ownerCreationAuthorized=false,resultDecisionVerified=false}) {
   const deny=reason=>({allowed:false,reason});
   if(!['decision','action_required','answer','important_completion'].includes(kind))return deny('routine_notification');
+  if(payload?.result_followup_decision) return kind==='decision'&&resultDecisionVerified?
+    {allowed:true,reason:'recorded_result_followup_needs_decision'}:deny('result_followup_decision_not_verified');
   if(payload?.catalog_candidate) return task?.state==='candidate'&&!task.data?.meeting_preparation?
     {allowed:true,reason:'unaccepted_scope_needs_human_decision'}:deny('already_authorized_or_stale_candidate');
   if(payload?.catalog_owner_needed) return task?.state==='accepted'&&!task.owner_thread_id&&!ownerCreationAuthorized?
@@ -29,6 +32,14 @@ export function inspectInbox(root,input) {
     const ownerCreationAuthorized=!!request||rules.some(r=>r.enabled&&(r.key==='create_owner'&&r.allowed_kinds.includes(task?.kind)||
       r.key==='accept_calendar_preparation'&&task?.data.meeting_preparation?.calendar_id===r.calendar_id));
     const completion=p.task_completed&&db.prepare("SELECT w.id,w.state,w.owner_id,t.status FROM rt_wakes w JOIN rt_tasks t ON t.task_id=w.task_id WHERE w.id=? AND w.task_id=?").get(input.key.replace(/^complete:/,''),p.task_id);
-    return inboxAdmission({...input,action:a?{...a,payload:JSON.parse(a.payload)}:null,task,completion,ownerCreationAuthorized});
+    let resultDecisionVerified=false;
+    if(p.result_followup_decision===true&&input.kind==='decision'&&input.key?.startsWith('result-decision:')&&
+      db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE type='table' AND name IN ('work_result_followups','work_reports','work_notices')").get().n===3){
+      const notice=db.prepare(`SELECT n.payload FROM work_result_followups f JOIN work_reports r ON r.report_key=f.report_key AND r.task_id=f.origin_task_id
+        JOIN work_notices n ON n.key=? AND n.task_id=f.origin_task_id
+        WHERE f.followup_key=? AND f.origin_task_id=? AND f.state='decision'`).get(input.key,input.key.slice('result-decision:'.length),p.task_id??'');
+      resultDecisionVerified=!!notice&&isDeepStrictEqual(JSON.parse(notice.payload),p);
+    }
+    return inboxAdmission({...input,action:a?{...a,payload:JSON.parse(a.payload)}:null,task,completion,ownerCreationAuthorized,resultDecisionVerified});
   }finally{db.close();}
 }

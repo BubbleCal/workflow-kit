@@ -5,6 +5,11 @@ import {nativeProof,OWNER} from './test-fixtures/reactive.mjs';
 import {prepareTaskOwner} from './calendar-preparation.mjs';
 import {bindings} from './instance.mjs';
 import {INBOX} from './control.mjs';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {Mailbox} from './mailbox.mjs';
+import {inspectInbox} from './inbox-policy.mjs';
 
 const CHILD='77777777-7777-4777-8777-777777777777';
 const rule={key:'accept_result_followups',enabled:true,allowed_kinds:['work'],actual_human_verified:true,
@@ -13,12 +18,32 @@ const proposal=()=>({canonical_key:'measured-cache-reuse',problem:'Unchanged fra
  evidence_limits:'One S3 workload and exact binary; no global speedup claim',expected_benefit:'Avoid measured unchanged-fragment reads',disposition:'implement',actions:['implementation','testing','benchmark'],reason:'A bounded implementation hypothesis supported by the profile',
  task:{title:'Reuse unchanged fragments',objective:'Implement and validate cache reuse for append',workspace:'/task',requirements:[{id:'correct',text:'Preserve old and new snapshot addresses under eviction'}],
   difficulty_assessment:{scope:'bounded',uncertainty:'material',validation:'specialist',complexity:'difficult',target_repositories:['example/service'],repository_evidence_ref:'accepted-repository',reason:'Snapshot identity and cache accounting need targeted validation'}}});
-function fixture(constraints=[]){
- const f=workFixture();f.config.scope.project_id=bindings.scope.project_id??'project';f.config.scope.repositories.push('example/service');f.work.setPolicy(rule);
+function fixture(constraints=[],path){
+ const f=workFixture(path);f.config.scope.project_id=bindings.scope.project_id??'project';f.config.scope.repositories.push('example/service');f.work.setPolicy(rule);
  const parent=f.work.create({canonical_key:'finite-benchmark',title:'Benchmark',objective:'Deliver an evidenced comparison',workspace:'/task',constraints,requirements:[{id:'report',text:'Deliver the measured result'}]}).task;
  f.accept(parent.id);f.bind(parent.id);const wake=f.begin(parent.id);
  return {...f,parent,wake,report:(followups=[proposal()],extra={})=>f.work.recordReport({task_id:parent.id,owner_thread_id:OWNER,report_key:'benchmark-result',outcome:'findings',summary:'Measured avoidable fragment reload',evidence_refs:['s3-report'],followups,...extra})};
 }
+
+test('an exact result followup decision reaches the strict inbox once without authorizing execution',()=>{
+ const root=mkdtempSync(join(tmpdir(),'result-decision-inbox-')),f=fixture([],join(root,'control.sqlite')),m=new Mailbox(join(root,'mailbox.sqlite'));
+ const previous={layout:bindings.layout,strict:bindings.delivery.main_inbox_strict,ownerManaged:bindings.delivery.owner_managed};
+ try{
+  bindings.layout='native';bindings.delivery.main_inbox_strict=true;bindings.delivery.owner_managed=true;
+  const report=f.report([{...proposal(),disposition:'decision',requires_additional_authority:true}]),row=report.followups[0];
+  assert.equal(row.state,'decision');assert.equal(row.task_id,null);complete(f);
+  const key=`result-decision:${row.followup_key}`,notice=f.c.db.prepare('select payload from work_notices where key=?').get(key);
+  const input={key,lane:'inbox',kind:'decision',payload:JSON.parse(notice.payload)};
+  assert.equal(inspectInbox(root,{...input,payload:{...input.payload,text:'Forged decision'}}).allowed,false);
+  assert.equal(inspectInbox(root,{...input,key:'invented-key'}).allowed,false);
+  assert.equal(m.enqueue(input).queued,true);assert.equal(m.enqueue(input).queued,false);
+  const completion=JSON.parse(f.c.db.prepare('select payload from work_notices where key=?').get(`complete:${f.wake.id}`).payload);
+  assert.match(completion.text,/原任务已验收。.*后续待决.*尚未全部解决/);
+  f.c.db.prepare("update work_result_followups set state='no_action' where followup_key=?").run(row.followup_key);
+  assert.equal(inspectInbox(root,input).allowed,false);
+  assert.equal(f.work.list().length,1);assert.equal(f.c.reactive.task(f.parent.id).status,'complete');
+ }finally{bindings.layout=previous.layout;bindings.delivery.main_inbox_strict=previous.strict;bindings.delivery.owner_managed=previous.ownerManaged;m.close();f.c.close();rmSync(root,{recursive:true,force:true});}
+});
 function complete(f){
  const t=f.c.reactive.task(f.parent.id);
  f.c.reactive.decide({task_id:t.task_id,owner_thread_id:OWNER,wake_id:f.wake.id,expected_context_rev:t.context_rev,expected_plan_rev:t.plan_rev,disposition:'complete',reason:'Finite measurement delivered',evidence_refs:['report'],acceptance:[{requirement_id:'report',passed:true,evidence_ref:'report'}]});
