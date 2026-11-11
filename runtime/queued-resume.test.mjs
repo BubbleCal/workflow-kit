@@ -7,6 +7,15 @@ const p={thread_id:'owner',existing_wake_id:'wake',existing_queue_id:'queue',nat
 const e={actual_human_message_verified:true,source_actor_verified:true,explicit_resume_request_verified:true,source_message_id:'human',source_text:p.verbatim_text,
  thread_archived:false,actual_turn_id:'old',expected_turn_id:'old',native_thread_snapshot:{checked_at:new Date(now).toISOString(),thread:{id:'owner',status:{type:'notLoaded',activeFlags:[]}},latestTurn:{id:'old',status:'completed'}}};
 test('explicit background recovery preserves an identified unconsumed queue item',()=>assert.deepEqual(queuedResumeReasons(task,wake,p,e,now),[]));
+test('explicit recovery can resume an existing maintenance wake without admitting another service cycle',()=>{
+ const input={...p,intent:'resume_queued_owner'};
+ assert.deepEqual(queuedResumeReasons({...task,contract:{service_lane:'maintenance'}},wake,input,e,now),[]);
+ for(const lane of ['discovery','inbox','coordinator'])
+  assert.ok(queuedResumeReasons({...task,contract:{service_lane:lane}},wake,input,e,now).includes('resume_owner_not_executable'));
+ for(const state of ['running','finished','uncertain'])
+  assert.ok(queuedResumeReasons({...task,contract:{service_lane:'maintenance'}},{...wake,state},input,e,now).length);
+ assert.ok(queuedResumeReasons({...task,contract:{service_lane:'maintenance'}},null,input,e,now).length);
+});
 test('running, consumed, uncertain, held and unrelated owners are never resumed',()=>{
  for(const state of ['running','finished','uncertain'])assert.ok(queuedResumeReasons(task,{...wake,state},p,e,now).length);
  for(const patch of [{mode:'paused'},{status:'complete'},{status:'needs_decision'},{owner_id:'other'}])assert.ok(queuedResumeReasons({...task,...patch},wake,p,e,now).length);

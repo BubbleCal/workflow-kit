@@ -60,6 +60,12 @@ contains the exact original prompt but never began/finished its wake, reconcile
 that consumed turn through `recover`, then invoke ordinary queue delivery once.
 Do not mark this case recovered from the tool's threadId response alone.
 
+The same explicit-human recovery may resume an already-admitted maintenance
+service wake. It preserves the exact existing wake, queue and fixed input batch;
+it does not admit a new maintenance cycle or shorten its cadence. Normal native
+begin and service_begin still verify the actual owner/turn and immutable batch.
+Other service lanes remain excluded from this recovery path.
+
 Do not enable automatic use of that surface unless actual non-UI consumption has
 been verified on this host and the standing rule permits it. A tool error such as
 `Cannot steer ... without an active turn id` remains a client blocker, not recovery.
