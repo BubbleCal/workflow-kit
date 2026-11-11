@@ -1,6 +1,6 @@
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {queueHostFingerprint} from './native-queue.mjs';
+import {queueHostFingerprint,verifyMigratedHostBinding} from './host-identity.mjs';
 import {readMacActivity,idleNavigationAllowed} from './mac-activity.mjs';
 
 const execute=promisify(execFile);
@@ -10,9 +10,10 @@ const poll=value=>{
   for(const item of value?.content??[])if(item.type==='text'){try{const v=JSON.parse(item.text);if(v.polls)return v.polls[0];}catch{}}
   return null;
 };
-export function verifyDesktopLoader(proof,bundleId) {
+export function verifyDesktopLoader(proof,bundleId,{host_fingerprint=queueHostFingerprint()}={}) {
+  verifyMigratedHostBinding(proof);
   const before=poll(proof?.before),after=poll(proof?.after);
-  if(proof?.source!=='codex_app.wait_threads'||proof.bundle_id!==bundleId||proof.host_fingerprint!==queueHostFingerprint()||
+  if(proof?.source!=='codex_app.wait_threads'||proof.bundle_id!==bundleId||proof.host_fingerprint!==host_fingerprint||
     !uuid.test(before?.thread?.id??'')||before.thread.id!==after?.thread?.id||before.thread.hostId!=='local'||after.thread.hostId!=='local'||
     before.thread.status?.type!=='notLoaded'||!['idle','active'].includes(after.thread.status?.type)||
     before.latestTurn?.id!==after.latestTurn?.id||!before.latestTurn?.id)

@@ -1,3 +1,4 @@
+import {migrateRuntimeHostBinding} from './host-binding.mjs';
 import {reconcileAcceptedSource} from './created-project-repair.mjs';
 import {reconcileCompletedProjection,reconcileReviewWorkspace} from './closure-reconciliation.mjs';
 import {reconcileCreationWorkspace} from './creation-workspace-repair.mjs';
@@ -212,6 +213,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
       }
       output(result);return;
     }
+    if(command==='migrate-host-binding'){output(await migrateRuntimeHostBinding(control,read(inputFile()),{root}));return;}
     // Service shutdown must remain usable even when migrating obsolete config.
     if(command==='service'){
       if(process.platform!=='darwin')throw new Error('Use runtime run on non-macOS hosts');

@@ -294,6 +294,10 @@ export class ReactiveDriver {
       if(!wake||wake.state!=='queued'||!wake.queue_id||wake.transport!=='native_queue'||wake.turn_id)return false;
       if((this.config.queue?.blocked_thread_ids??[]).includes(wake.owner_id)||wake.owner_id===this.config.inbox?.thread_id&&this.config.inbox.delivery_mode==='on_request')return false;
       if(db.prepare("SELECT 1 FROM rt_wakes WHERE owner_id=? AND state IN ('running','claimed','uncertain')").get(wake.owner_id))return false;
+      // Loading cannot repair a known failed native turn. Preserve its exact
+      // queue for evidence-based terminal recovery instead of repeated opens.
+      if(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='rt_owner_health'").get()&&
+        db.prepare("SELECT 1 FROM rt_owner_health WHERE owner_id=? AND wake_id=? AND state IN ('turn_failed','context_window_exhausted','native_recovery_blocked')").get(wake.owner_id,wake.id))return false;
       if(wake.batch_id)return this.queuedDesktopBatches().some(b=>b.id===wake.id&&b.owner_id===wake.owner_id&&b.queue_id===wake.queue_id);
       const open=this.state.openWake(wake.task_id),members=open?.member_ids??[];
       if(open?.id!==wake.id||!members.length)return false;

@@ -1,12 +1,12 @@
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createHash} from 'node:crypto';
-import {hostname,homedir} from 'node:os';
+import {queueHostFingerprint,verifyMigratedHostBinding} from './host-identity.mjs';
+export {queueHostFingerprint} from './host-identity.mjs';
 
 const execute=promisify(execFile);
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const messageDigest=text=>createHash('sha256').update(text).digest('hex');
-export const queueHostFingerprint=()=>messageDigest(JSON.stringify([hostname(),homedir()]));
 
 // This adapter submits to Codex's native queue. It never loads a thread, starts
 // a turn, selects an app-server endpoint, changes permissions or handles approval.
@@ -72,6 +72,7 @@ export function nativeReadback(value) {
 // Validate actual native read_thread exports, not a queue ACK or a mock transcript.
 // The operator must obtain these exports through the desktop App's supported tools.
 export function validateQueueCompatibility(evidence,probe) {
+  verifyMigratedHostBinding(evidence);
   if(evidence?.schema_version!==1||evidence.source!=='codex_app.read_thread'||evidence.cli_version!==probe.cli_version||
     evidence.host_fingerprint!==probe.host_fingerprint)throw new Error('Queue validation must match this host and installed CLI');
   const checked=Date.parse(evidence.checked_at);

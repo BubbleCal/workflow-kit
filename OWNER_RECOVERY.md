@@ -153,3 +153,22 @@ It validates the original captured producer turn at its original capture time;
 it never refreshes proof timestamps or fabricates a producer. The normal dated
 occurrence key deduplicates replay and preserves original trigger time, owner,
 schedule, pauses and execution guards.
+
+
+## Stable host identity and legacy evidence
+
+On macOS, queue and desktop capability proofs bind to a SHA256 of the actual
+IOPlatformUUID and user home, rather than the network-dependent hostname. The raw
+hardware UUID is never exported. A changed machine, home or CLI still invalidates
+capability evidence; unavailable hardware identity fails closed.
+
+An acknowledged maintenance owner may explicitly run
+`node workflow.mjs runtime migrate-host-binding --file <request.json>` with genuine
+human authorization, fresh current-turn native proof, the expected runtime-file
+digest, and original queue/desktop evidence paths. Migration validates both proofs
+against the actual current legacy host and installed CLI before binding them to the
+stable identity. It preserves immutable originals, digests, all observations and
+original verification times. This records an identity migration, not a fresh native
+loading trial. A mismatched legacy host requires new genuine evidence instead.
+`restore_desktop:true` restores only an already-authorized idle-only policy; the
+configured input-idle threshold, exclusions and all task holds remain intact.

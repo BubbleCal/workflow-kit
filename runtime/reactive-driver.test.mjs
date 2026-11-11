@@ -1,3 +1,4 @@
+import {OwnerHealth} from './owner-health.mjs';
 import {DesktopLoader} from './desktop-loader.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -307,9 +308,10 @@ test('user input between candidate selection and the final activity check preven
  }finally{await f.close();}
 });
 
-for(const protection of ['paused','hold','excluded','needs_decision','main','uncertain','running'])test(`idle loading preserves ${protection}`,async()=>{
+for(const protection of ['paused','hold','excluded','needs_decision','main','uncertain','running','native_failed'])test(`idle loading preserves ${protection}`,async()=>{
  const f=setup();try{
   f.activate();await f.driver.deliver(f.state.task('T-1'));f.advance(30000);const calls=enableIdleLoader(f),task=f.state.task('T-1');
+  if(protection==='native_failed'){new OwnerHealth(f.control);f.control.db.prepare('INSERT INTO rt_owner_health VALUES (?,?,?,?,?,?,?,?,?,?)').run('T-1',OWNER,'turn_failed','failed-turn',f.state.openWake('T-1').id,f.now(),f.now()+60000,0,'native-failure','{}');}
   if(protection==='paused')f.state.setMode({task_id:'T-1',mode:'paused',source_message_id:'human:pause',actual_human_verified:true});
   if(protection==='hold')f.control.db.prepare('UPDATE rt_tasks SET contract=? WHERE task_id=?').run(JSON.stringify({...task.contract,execution_hold:'Human hold'}),'T-1');
   if(protection==='excluded')f.driver.config.desktop_loader.excluded_task_ids=['T-1'];
@@ -419,4 +421,18 @@ test('legacy typed-source producers publish real completion through the same dur
   f.advance(1000);observe('complete');f.driver.bridgeLegacy();f.driver.bridgeLegacy();await f.driver.deliver(f.state.task('T-1'));assert.equal(f.queue.calls.length,1);
   assert.equal(f.state.checkpoint('T-1').events.filter(e=>e.type==='wait_fact_changed').length,1);
  }finally{m?.close();await f.close();}
+});
+
+
+test('idle loading a finished owner does not suppress its next actual queued cycle',async()=>{
+ const f=setup();try{
+  f.activate();await f.driver.deliver(f.state.task('T-1'));const first=f.state.openWake('T-1'),calls=enableIdleLoader(f);f.advance(30000);
+  assert.equal((await f.driver.loadPendingDesktopChats()).opened,true);
+  f.state.begin({task_id:'T-1',wake_id:first.id,native_proof:nativeProof({workspace:f.root,message:first.prompt,now:f.now()})});
+  f.decide({wake_id:first.id,disposition:'wait',plan:undefined,next_action_at:new Date(f.now()+1000).toISOString()});f.state.finish({task_id:'T-1',wake_id:first.id,turn_id:'native-turn',evidence_ref:'first-cycle-result'});
+  f.advance(30001);f.state.expireWaits();f.event('next-real-event',{review:'new actionable feedback'});await f.driver.deliver(f.state.task('T-1'));const next=f.state.openWake('T-1');
+  assert.notEqual(next.id,first.id);f.advance(30001);
+  assert.equal((await f.driver.loadPendingDesktopChats()).opened,true);assert.equal(calls(),2);assert.equal(f.queue.calls.length,2);
+  assert.equal(f.control.db.prepare('SELECT count(*) n FROM rt_idle_desktop_loads').get().n,2);
+ }finally{await f.close();}
 });
