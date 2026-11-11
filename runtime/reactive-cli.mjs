@@ -1,4 +1,5 @@
 import {MessageTrigger,validateMessageTrigger} from './message-trigger.mjs';
+import {reconcileUnsentTrigger} from './trigger-recovery.mjs';
 import {OwnerWork} from './owner-work.mjs';
 import {verifyTriggerExecution,triggerMessage} from './trigger-proof.mjs';
 import {migrateRuntimeHostBinding} from './host-binding.mjs';
@@ -255,6 +256,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
     const config=runtimeConfig(root),queue=new NativeQueue(config.queue);
     if(command==='trigger'){
       const input=read(inputFile()),trigger=new MessageTrigger(control,config);
+      if(input.op==='reconcile_unsent'){output(reconcileUnsentTrigger(control,config,input));return;}
       if(!['run','pending','prepare','claim','settle','observe'].includes(input.op))throw Error('Unknown trigger operation');
       output(trigger[input.op](input));return;
     }

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,nativeProof,OWNER,QUEUE_ID} from './test-fixtures/reactive.mjs';
 import {MessageTrigger} from './message-trigger.mjs';
+import {reconcileUnsentTrigger} from './trigger-recovery.mjs';
 import {triggerMessage,verifyTriggerExecution,settleTriggerDiscovery} from './trigger-proof.mjs';
 import {ReactiveDriver} from './reactive-driver.mjs';
 import {workFixture,DISCOVERY} from './test-fixtures/work.mjs';
@@ -16,6 +17,39 @@ function setup(){const f=fixture();f.activate();f.event();const cfg=config(),q=n
  const claim=id=>{q.run({native_proof:actor()});const p=q.prepare({id,actor_proof:actor(),native_proof:owner()});assert(p.prepared);f.advance(1);return q.claim({id,digest:p.digest,actor_proof:actor(),native_proof:owner()});};
  return{...f,q,cfg,actor,owner,register,claim};}
 function relay(f,id,{sender=TRIGGER,text,turn='actual-owner-turn',status='inProgress'}={}){const r=triggerMessage(f.c.db,id),p=nativeProof({thread:r.owner_id,workspace:r.workspace,turn,now:f.now(),status});p.readback.turns[0].items=[{type:'functionCallOutput',namespace:'codex_app',name:'send_message_to_thread',output:{truncated:false,text:`<codex_delegation>\n  <source_thread_id>${sender}</source_thread_id>\n  <input>${text??r.prompt}</input>\n</codex_delegation>`}}];return p;}
+
+function unsentClaim(){
+ const f=setup(),id=f.register(),claim=f.claim(id),sender=f.actor();
+ sender.readback.turns[0].status='failed';sender.readback.turns[0].completedAt=f.now()/1000;
+ sender.readback.turns[0].items=[{type:'commandExecution',status:'completed',exitCode:0,command:'node /instance/workflow.mjs runtime trigger --file /claim.json',output:{truncated:false,text:JSON.stringify(claim)}}];
+ const human=nativeProof({thread:'main',turn:'human-turn',message:'Recover the existing owners',now:f.now()});human.readback.turns[0].items[0].id='human:recovery';
+ const input={id,attempt_id:claim.attempt_id,sender_turn_id:sender.readback.turns[0].id,sender_native_proof:sender,owner_native_proof:f.owner(),actual_human_verified:true,evidence_ref:'original-native-history',human_authorization:human,source_thread_id:'main',source_turn_id:'human-turn',source_message_id:'human:recovery',verbatim_text:'Recover the existing owners'};
+ return{...f,id,claim,input};
+}
+
+test('terminal sender history ending at claim releases exactly one proven-unsent attempt without losing its audit',()=>{
+ const f=unsentClaim();try{const before=triggerMessage(f.c.db,f.id),r=reconcileUnsentTrigger(f.c,f.cfg,f.input);assert.equal(r.native_send_invoked,false);assert.equal(f.s.openWake('T-1').state,'reserved');
+  const next=triggerMessage(f.c.db,f.id);assert.equal(next.state,'pending');assert.equal(next.prompt,before.prompt);assert.equal(next.digest,before.digest);assert.equal(next.attempt_id,null);
+  const audit=JSON.parse(f.c.db.prepare('SELECT data FROM rt_trigger_claim_recovery WHERE attempt_id=?').get(f.claim.attempt_id).data);assert.equal(audit.original.attempt_id,before.attempt_id);assert.equal(audit.original.claimed_at,before.claimed_at);
+  assert.equal(reconcileUnsentTrigger(f.c,f.cfg,f.input).already_reconciled,true);assert.equal(f.c.db.prepare('SELECT count(*) n FROM rt_trigger_claim_recovery').get().n,1);
+ }finally{f.c.close();}
+});
+
+test('absence of a receipt never releases an active sender, a later send, incomplete history or a changed target',()=>{
+ for(const change of ['active','later-send','truncated','wrong-attempt','target-changed','receipt','human','stale','paused']){const f=unsentClaim();try{
+  const t=f.input.sender_native_proof.readback.turns[0];
+  if(change==='active')t.status='inProgress';
+  if(change==='later-send')t.items.push({type:'mcpToolCall',server:'codex_app',tool:'send_message_to_thread'});
+  if(change==='truncated')t.items[0].output.truncated=true;
+  if(change==='wrong-attempt')f.input.attempt_id='another-attempt';
+  if(change==='target-changed')f.input.owner_native_proof.readback.turns[0].id='later-real-turn';
+  if(change==='receipt')f.c.db.prepare("UPDATE rt_trigger_messages SET receipt='{}' WHERE id=?").run(f.id);
+  if(change==='human')f.input.source_message_id='not-the-human';
+  if(change==='stale')f.advance(61000);
+  if(change==='paused')f.mode('paused');
+  assert.throws(()=>reconcileUnsentTrigger(f.c,f.cfg,f.input),undefined,change);assert.equal(triggerMessage(f.c.db,f.id).state,'claimed');
+ }finally{f.c.close();}}
+});
 
 test('runtime registers once; trigger sends immutable input once, original owner begins and completes, then a new cycle can send',()=>{
  const f=setup();try{const id=f.register();assert.equal(f.register(),id);assert.equal(f.q.pending().messages.length,1);assert.equal(f.s.openWake('T-1').queue_id,null);

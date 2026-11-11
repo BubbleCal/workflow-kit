@@ -99,10 +99,15 @@ export function reconcileQueuedFollowup(control,input){
   }
   const prior=control.db.prepare('SELECT * FROM rt_wakes WHERE id=?').get(id);
   if(prior){if(prior.turn_id!==proof.turn_id)throw new Error('Followup execution identity changed');return {reconciled:false,already_reconciled:true,wake_id:id,original_queue_consumed:false};}
-  if(task.context_rev!==expected_context_rev||old&&(old.id!==expected_wake_id||old.queue_id!==expected_queue_id||!expected_queue_id||old.transport!=='native_queue'||old.state!=='queued'||old.turn_id||old.started_at||old.member_ids.length!==1||old.member_ids[0]!==task_id||old.owner_id!==task.owner_id)||!old&&(expected_wake_id||expected_queue_id))
+  const pendingTrigger=old?.transport==='native_trigger'?control.db.prepare('SELECT * FROM rt_trigger_messages WHERE id=?').get(old.id):null;
+  const unsentTrigger=old?.transport==='native_trigger'&&old.state==='reserved'&&!old.queue_id&&!expected_queue_id&&pendingTrigger?.state==='pending'&&
+   !pendingTrigger.attempt_id&&!pendingTrigger.claimed_at&&!pendingTrigger.receipt&&!pendingTrigger.execution_turn&&pendingTrigger.owner_id===task.owner_id&&pendingTrigger.prompt===old.prompt;
+  const unconsumedQueue=old?.transport==='native_queue'&&old.state==='queued'&&!!expected_queue_id&&old.queue_id===expected_queue_id;
+  if(task.context_rev!==expected_context_rev||old&&(old.id!==expected_wake_id||!(unconsumedQueue||unsentTrigger)||old.turn_id||old.started_at||old.member_ids.length!==1||old.member_ids[0]!==task_id||old.owner_id!==task.owner_id)||!old&&(expected_wake_id||expected_queue_id))
    throw new Error('Exact unconsumed queued wake and unchanged current task context required');
   if(control.db.prepare("SELECT 1 FROM actions WHERE task_id=? AND state IN ('claimed','uncertain')").get(task_id))throw new Error('Reconcile in-flight effects first');
   if(old){control.db.prepare("UPDATE rt_wakes SET state='superseded',completed_at=? WHERE id=?").run(control.now(),old.id);
+   if(unsentTrigger)control.db.prepare("UPDATE rt_trigger_messages SET state='cancelled',updated_at=? WHERE id=?").run(control.now(),old.id);
    state.diagnostic(`followup-superseded:${old.id}`,{task_id,source_message_id,successor_wake_id:id,turn_id:proof.turn_id,queue_id:old.queue_id,queue_consumed:false,evidence_ref});}
   if(input.projection_only!==true)state.ingestInside({event_id:`followup-execution:${task_id}:${action_key}`,task_id,source:'verified_human_followup',subject:`human-followup:${source_message_id}`,type:'authorized_followup_bound',observed_at:control.now(),payload:{source_message_id,source_thread_id:proof.payload.source_thread_id,verbatim_text:proof.payload.verbatim_text,previous_wake_id:old?.id??null,original_queue_consumed:false},evidence_ref,debounce_ms:0});
   const current=state.task(task_id),events=state.checkpoint(task_id).events.map(e=>e.event_id),running=proof.status==='inProgress';

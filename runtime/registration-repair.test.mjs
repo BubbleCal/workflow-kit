@@ -4,6 +4,7 @@ import {fixture,nativeProof,OWNER,QUEUE_ID} from './test-fixtures/reactive.mjs';
 import {reconcileArtifactBinding} from './registration-repair.mjs';
 import {reconcileQueuedFollowup,recordedReviewResolvesDecision} from './human-followup.mjs';
 import {reviewDecisionTaskReasons} from './review-decision.mjs';
+import {MessageTrigger} from './message-trigger.mjs';
 
 function artifact(){
  const f=fixture();f.c.work.config.scope={...f.c.work.config.scope,project_id:'project',repositories:['example/service']};
@@ -135,5 +136,18 @@ test('projection-only binding observes an already-active authorized correction w
   if(variant==='old-instruction')f.c.db.prepare('UPDATE actions SET created_at=? WHERE action_key=?').run(f.now()-2,f.key);if(variant==='paused')f.mode('paused');
   const before=f.s.task('T-1');if(variant!=='valid'){assert.throws(()=>reconcileQueuedFollowup(f.c,f.input));assert.deepEqual(f.s.task('T-1'),before);continue;}
   const result=reconcileQueuedFollowup(f.c,f.input);assert(result.projection_only);assert.equal(result.decision_preserved,'old-decision');assert.deepEqual(f.s.task('T-1'),before);assert.equal(f.s.openWake('T-1').turn_id,'new-native-turn');assert.equal(f.s.openWake('T-1').state,'running');assert(reconcileQueuedFollowup(f.c,f.input).already_reconciled);
+ }finally{f.c.close();}}
+});
+
+test('a genuine manual followup supersedes only an unclaimed unsent trigger without manufacturing a queue receipt',()=>{
+ for(const variant of ['pending','claimed','sent','uncertain']){const f=followup();try{
+  f.c.db.prepare("UPDATE rt_wakes SET state='reserved',queue_id=NULL WHERE id=?").run(f.w.id);
+  const q=new MessageTrigger(f.c,{message_trigger:{enabled:true,thread_id:'44444444-4444-4444-8444-444444444444',workspace:'/trigger',interval_ms:60000,authorization_ref:'human:trigger',source_message_id:'human:trigger'}});
+  q.registerTask(f.s.task('T-1'),f.s.openWake('T-1'),'old deployment');f.input.expected_queue_id=null;
+  if(variant!=='pending')f.c.db.prepare('UPDATE rt_trigger_messages SET state=?,attempt_id=? WHERE id=?').run(variant,'old-attempt',f.w.id);
+  if(variant==='pending'){
+   const result=reconcileQueuedFollowup(f.c,f.input);assert.equal(result.state,'running');assert.equal(result.original_queue_consumed,false);assert.equal(f.s.openWake('T-1').turn_id,'new-native-turn');
+   assert.equal(f.c.db.prepare('SELECT state FROM rt_trigger_messages WHERE id=?').get(f.w.id).state,'cancelled');assert.equal(f.c.db.prepare('SELECT queue_id FROM rt_wakes WHERE id=?').get(f.w.id).queue_id,null);
+  }else{assert.throws(()=>reconcileQueuedFollowup(f.c,f.input));assert.equal(f.c.db.prepare('SELECT state FROM rt_trigger_messages WHERE id=?').get(f.w.id).state,variant);}
  }finally{f.c.close();}}
 });

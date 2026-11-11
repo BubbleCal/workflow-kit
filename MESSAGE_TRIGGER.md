@@ -62,6 +62,15 @@ files per attempt. A self proof expires after sixty seconds; refresh it as neede
 
 ## Receiver and transport rules
 
+Explicit human maintenance may use `trigger op=reconcile_unsent` for an orphaned
+claim only when fresh complete native sender history ends at the exact successful
+claim command, before any send, and the owner remains at the original quiescent
+preflight turn. The original attempt is archived; the same immutable message
+returns to pending. Missing receipts, timeouts or an idle owner alone never prove
+non-delivery. A real new human followup may supersede a strictly unclaimed pending
+trigger delivery through `reconcile_followup`; claimed/sent/uncertain attempts stay
+protected until their actual outcomes are proved.
+
 For authorized ordinary owner loops, observe automatically registers begin from
 the verified actual running turn. The receiver uses runtime work; it supplies its
 own proof only when automatic binding has not yet happened. Services/discovery
