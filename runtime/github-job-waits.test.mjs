@@ -111,3 +111,13 @@ test('collector validates exact API identity and preserves success, cancellation
   for(const bad of [{id:10,url:'https://api.github.com/repos/example/service/actions/jobs/9',status:'completed',conclusion:'success'},{id:9,url:'https://api.github.com/repos/other/repo/actions/jobs/9',status:'completed',conclusion:'success'},{id:9,url:'https://api.github.com/repos/example/service/actions/jobs/9',status:'completed',conclusion:null}])await assert.rejects(()=>collectGitHubJob(root,{repository:'example/service',job_id:'9'},{run:async()=>({stdout:JSON.stringify(bad)})}),/identity|conclusion/);
  }finally{rmSync(root,{recursive:true,force:true});}
 });
+
+test('source-to-persistence delay cannot reject a genuine terminal result at the one-hour freshness boundary',async()=>{
+ const f=setup();try{f.wait();f.activate();f.driver.jobWaits.collector=async(_r,s)=>{
+  const observed_at=f.now();f.advance(750);return{observed_at,evidence_ref:'job-observed-before-persistence',data:{job_id:s.job_id,repository:s.repository,state:'complete',conclusion:'success'}};
+ };await f.collect();
+ const fact=f.m.db.prepare('SELECT data,observed_at,expires_at FROM wait_facts WHERE fact_key=?').get(f.fact().fact_key);
+ assert.equal(JSON.parse(fact.data).state,'complete');assert.ok(fact.expires_at<=fact.observed_at+3600000);
+ assert.equal(f.s.checkpoint('T-1').events.filter(e=>e.type==='wait_fact_changed').length,1);
+ }finally{await f.close();}
+});

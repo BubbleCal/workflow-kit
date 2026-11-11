@@ -82,7 +82,7 @@ export class GitHubJobWaits {
    const target=this.sources().get(row.subject);if(!target)return;
    const m=new Mailbox(join(this.root,'mailbox.sqlite'),{now:this.now});
    try{
-    m.atomic(()=>{for(const fact of target.facts)m.waits.observe({...fact,kind:'job',data:result.data,observed_at:new Date(result.observed_at).toISOString(),expires_at:new Date(this.now()+3600000).toISOString(),evidence_ref:result.evidence_ref});});
+    m.atomic(()=>{for(const fact of target.facts)m.waits.observe({...fact,kind:'job',data:result.data,observed_at:new Date(result.observed_at).toISOString(),expires_at:new Date(result.observed_at+3600000).toISOString(),evidence_ref:result.evidence_ref});});
     publishWaitObservations({mailbox:m,state:this.control.reactive});
    }finally{m.close();}
    const delay=sourceInterval(this.config,this.control.db.prepare('SELECT COUNT(*) n FROM rt_polls WHERE enabled=1').get().n);
