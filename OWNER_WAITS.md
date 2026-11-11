@@ -50,8 +50,20 @@ Dependency, access, job, PR approval/CI, and review-request waits default to
 Repeated identical states, timestamps, and pending-to-running job progress are
 quiet. Completion, failure, availability, and relevant PR changes become events.
 Expired evidence produces a source-stale diagnostic; it does not establish a
-change or a verified fresh wait. Generic event/job producers must publish actual
-observations through `runtime op wait_observe`; runtime cannot infer unobserved
+change or a verified fresh wait. Exact registered GitHub Actions jobs with subjects
+`github:owner/repo:job123` and matching job IDs in authorized repositories are
+collected automatically by the existing shared GitHub poller. It also watches
+job facts explicitly referenced by the wait, including secondary jobs. Reads
+share the existing concurrency, quota pauses and polling budget; no extra timer
+or owner polling is needed. Running refreshes stay quiet. Actual terminal
+conclusions are saved before the durable wait-observation outbox publishes once.
+`cancelled`, `failure` and `timed_out` retain their actual conclusions and are not
+success; a skipped job is terminal but is not evidence of successful validation.
+Unknown job sources or repeatedly unavailable stale GitHub sources produce one
+actionable input in the existing maintenance lane. This does not clear a pause,
+personal/production hold, or an owner-reported future action time.
+Generic event/job producers must publish actual observations through
+`runtime op wait_observe`; runtime cannot infer unobserved
 external results. Source writes retain a durable outbox until event publication.
 
 A genuine review-window deadline retains its clock behavior. Use

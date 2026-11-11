@@ -29,6 +29,7 @@ export class WaitLedger {
       if (kind === 'dependency' && !data.requirement) throw new Error('Dependency needs an exact version, API or other requirement');
     }
     const prior = this.db.prepare('SELECT * FROM wait_facts WHERE fact_key=?').get(fact_key);
+    if(prior&&kind==='job'&&String(JSON.parse(prior.data).job_id)!==String(data.job_id))throw Error('Registered job identity cannot change');
     if (prior && (prior.kind !== kind || prior.subject !== subject || prior.observed_at > at)) throw new Error('Fact identity changed or observation moved backward');
     this.db.prepare(`INSERT INTO wait_facts VALUES (?,?,?,?,?,?,?) ON CONFLICT(fact_key) DO UPDATE SET
       data=excluded.data,observed_at=excluded.observed_at,expires_at=excluded.expires_at,evidence_ref=excluded.evidence_ref`)

@@ -1,4 +1,5 @@
 import {publishWaitObservations} from './wait-observation.mjs';
+import {GitHubJobWaits} from './github-job-waits.mjs';
 import {eventWakeReason} from './owner-wake.mjs';
 import {renewVerifiedWaits} from './wait-renewal.mjs';
 import {routeOwnerInputs,queueOwnerHealth} from './owner-delivery.mjs';
@@ -56,12 +57,13 @@ ${JSON.stringify({task_id:task.task_id,wake_id:wake.id})}`;
 }
 
 export class ReactiveDriver {
-  constructor({root,control,queue,config,capability,now=()=>Date.now(),collector=collectPullRequest,quotaReader,readActivity,desktopLoader,log=v=>process.stdout.write(JSON.stringify(v)+'\n')}) {
+  constructor({root,control,queue,config,capability,now=()=>Date.now(),collector=collectPullRequest,jobCollector,quotaReader,readActivity,desktopLoader,log=v=>process.stdout.write(JSON.stringify(v)+'\n')}) {
     this.root=root;this.control=control;this.state=control.reactive;this.queue=queue;this.config=config;
     this.messageTrigger=new MessageTrigger(control,config);
     this.capability=capability;this.now=now;this.collector=collector;this.log=log;
     this.polling=new Set();this.delivering=new Set();this.jobs=new Set();
     this.rate=new SourceRate(control.db,{now,readQuota:quotaReader});
+    this.jobWaits=new GitHubJobWaits({root,control,config,rate:this.rate,now,collector:jobCollector});
     this.readActivity=readActivity??(()=>readMacActivity({now:this.now}));this.desktopLoader=desktopLoader;
   }
   configurePolls() {
@@ -93,6 +95,7 @@ export class ReactiveDriver {
         source.task_ids.push(row.task_id);source.observer_task_ids=[...(source.observer_task_ids??[]),row.task_id];
       }
     }
+    for(const [subject,source]of this.jobWaits.sources())subjects.set(subject,source);
     this.control.atomic(()=>{
     for(const row of this.control.db.prepare('SELECT subject FROM rt_polls WHERE enabled=1').all())if(!subjects.has(row.subject))this.control.db.prepare('UPDATE rt_polls SET enabled=0 WHERE subject=?').run(row.subject);
     for(const [subject,config]of subjects){
@@ -104,6 +107,7 @@ export class ReactiveDriver {
   async poll(row) {
     const task=this.state.task(row.task_id);if(!task||!['active','shadow'].includes(task.mode)||task.status==='complete')return;
     if(this.rate.paused())return;
+    if(JSON.parse(row.config).kind==='github_job')return this.jobWaits.poll(row);
     try {
       const result=await this.collector(this.root,JSON.parse(row.config));
       const event=this.state.atomic(()=>{
