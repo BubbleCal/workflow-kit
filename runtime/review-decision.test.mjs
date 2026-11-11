@@ -140,3 +140,16 @@ test('attempted review refresh rejects permits, uncertainty, unverifiable non-de
   const before=f.c.db.prepare('SELECT * FROM actions WHERE action_key=?').get(f.action.key);assert.equal(f.c.refreshReviewDecisionContext(f.input).refreshed,false,change);assert.deepEqual(f.c.db.prepare('SELECT * FROM actions WHERE action_key=?').get(f.action.key),before);
  }finally{f.close();}}
 });
+
+test('verified repository Gatekeeper absence composes with owner delivery while feedback, CI and Functions holds remain enforced',()=>{
+ const f=setup();try{
+  const policy=f.c.reviewChannels();policy.gatekeeper_applicability={repositories:[{repository:'example/service',status:'not_configured',record_protocol:'native_gatekeeper_applicability_v1',actual_human_verified:true,source_actor_verified:true,source_thread_id:INBOX,source_turn_id:'source-turn',source_message_id:'no-gatekeeper',verbatim_text:'This repository has no configured Gatekeeper',evidence_ref:'actual-human',native_source_digest:'a'.repeat(64)}],review_exceptions:[]};f.c.reviewChannels=()=>policy;
+  delete f.evidence.gatekeeper.identity;f.evidence.gatekeeper.reviews=[];f.evidence.gatekeeper.applicability={status:'not_configured',policy_source_message_id:'no-gatekeeper'};
+  for(const patch of [{validation_current:false},{material_findings_open:true},{applicable_ci:{...f.evidence.applicable_ci,complete:false}}])assert.equal(f.c.prepare({...f.action,evidence:{...f.evidence,...patch}}).allowed,false);
+  assert.equal(f.c.prepare(f.action).prepared,true);
+  const slack={...f.action,key:'same-repo-still-functions-held',kind:'slack_pr',payload:{...f.action.payload,channel_id:'CFUNCTIONS'},evidence:{...f.evidence,already_announced:false}};
+  assert.ok(f.c.prepare(slack).reasons.includes('review_delivery_paused_by_user'));
+  f.c.feedback.ingest({repository:'example/service',pr_number:1,head_sha:head,head_before:head,head_after:head,checked_at:f.evidence.verified_at,evidence_ref:'new-feedback',complete:{reviews:true,review_comments:true,issue_comments:true,review_threads:true},reviews:[{id:900,state:'CHANGES_REQUESTED',body:'Fix the actual regression',commit_id:head,user:{login:'human-reviewer'}}],review_comments:[],issue_comments:[],review_threads:[]});
+  assert.equal(f.c.claim({key:f.action.key,owner:OWNER,evidence:f.evidence}).claimed,false);
+ }finally{f.c.close();}
+});

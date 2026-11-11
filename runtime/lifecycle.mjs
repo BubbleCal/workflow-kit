@@ -33,8 +33,8 @@ function retainedApplicableCI(snapshot, previous) {
 // This ledger determines the next obligation; existing control guards still
 // authorize every external action and original owners remain the only writers.
 export class LifecycleLedger {
-  constructor(db, { now = () => Date.now(), readOnly = false, unacknowledged = () => new Set(), deliveryMode = 'slack', dependencyPolicy = readDependencyPolicy, scopeRegistry = () => null } = {}) {
-    this.db = db; this.now = now; this.unacknowledged = unacknowledged; this.deliveryMode = deliveryMode; this.dependencyPolicy=dependencyPolicy; this.scopeRegistry=scopeRegistry;
+  constructor(db, { now = () => Date.now(), readOnly = false, unacknowledged = () => new Set(), deliveryMode = 'slack', dependencyPolicy = readDependencyPolicy, scopeRegistry = () => null,gatekeeperPolicy=()=>undefined } = {}) {
+    this.db = db; this.now = now; this.unacknowledged = unacknowledged; this.deliveryMode = deliveryMode; this.dependencyPolicy=dependencyPolicy; this.scopeRegistry=scopeRegistry;this.gatekeeperPolicy=gatekeeperPolicy;
     if (!readOnly) db.exec(`
       CREATE TABLE IF NOT EXISTS lifecycle_prs (
         pr_key TEXT PRIMARY KEY, task_id TEXT NOT NULL, owner_id TEXT NOT NULL,
@@ -61,11 +61,11 @@ export class LifecycleLedger {
   }
   gatekeeperBinding(snapshot) {
     const g=snapshot.gatekeeper;
-    if(!g||!snapshot.ci?.complete||!fresh(g.checked_at,this.now())||!g.identity?.verified||!g.reviews_complete)return null;
+    if(!g||!snapshot.ci?.complete||!fresh(g.checked_at,this.now())||!g.identity?.verified&&!g.applicability||!g.reviews_complete)return null;
     const feedback=this.db.prepare('SELECT * FROM feedback_source_versions WHERE repository=? AND pr_number=?').get(snapshot.repository,snapshot.pr_number);
     if(!feedback?.surface_digest||feedback.head!==snapshot.head_sha||!fresh(feedback.checked_at,this.now(),60000)||
       feedback.review_digest!==reviewSurfaceDigest(g.reviews))return null;
-    if(reviewStageReasons('slack_pr',{pr_url:`https://github.com/${snapshot.repository}/pull/${snapshot.pr_number}`,expected_head_sha:snapshot.head_sha},snapshot,this.now(),20*60000).some(r=>r.includes('Gatekeeper')))return null;
+    if(reviewStageReasons('slack_pr',{pr_url:`https://github.com/${snapshot.repository}/pull/${snapshot.pr_number}`,expected_head_sha:snapshot.head_sha},snapshot,this.now(),20*60000,this.gatekeeperPolicy()).some(r=>r.includes('Gatekeeper')))return null;
     return {surface_digest:feedback.surface_digest,review_digest:feedback.review_digest,checks_digest:hash(checkSurface(snapshot.ci.checks)),identity_digest:hash(g.identity)};
   }
   retainedGatekeeper(snapshot,previous) {
@@ -166,7 +166,7 @@ export class LifecycleLedger {
       if (!readiness || readiness.head !== s.head_sha || readiness.validation_passed !== true || readiness.technical_review_passed !== true)
         return answer('readiness_unknown', 'obtain_readiness');
       const stageReasons=reviewStageReasons(s.draft?'pr_ready':'slack_pr',
-        {pr_url:url,expected_head_sha:s.head_sha},s,this.now(),20*60000);
+        {pr_url:url,expected_head_sha:s.head_sha},s,this.now(),20*60000,this.gatekeeperPolicy());
       if(stageReasons.length) return answer(stageReasons.some(r=>r.includes('CI'))?'review_ci_pending':'gatekeeper_pending',
         stageReasons.some(r=>r.includes('CI'))?'verify_review_ci':'verify_gatekeeper',{gate_reasons:stageReasons});
       const native=this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='rt_tasks'").get()&&this.db.prepare('SELECT contract FROM rt_tasks WHERE task_id=?').get(w.task_id);

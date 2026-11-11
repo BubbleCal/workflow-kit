@@ -1,3 +1,4 @@
+import {gatekeeperExemption} from './gatekeeper-applicability.mjs';
 const fresh = (at, now, age) => Number.isFinite(Date.parse(at)) && Date.parse(at) <= now + 5000 && now - Date.parse(at) <= age;
 const approvalHeaders = new Set([
   '✅ **Gate recommendation: approve.**',
@@ -19,8 +20,8 @@ function verifiedNoHostedCI(ci, url, head, now, age) {
 
 // CI applicability is an explicit source-backed selection. The gate never
 // turns a missing/skipped check or a generic green summary into CI success.
-export function reviewStageReasons(kind, payload, evidence, now, age = 60000) {
-  if (!['pr_ready', 'slack_pr', 'review_decision'].includes(kind)) return [];
+export function reviewStageReasons(kind, payload, evidence, now, age = 60000, applicabilityPolicy) {
+  if (!['pr_ready', 'slack_pr', 'review_decision','merge'].includes(kind)) return [];
   const url = payload.pr_url ?? payload.message, head = payload.expected_head_sha;
   const ci = evidence.applicable_ci, reasons = [];
   const phase = kind === 'pr_ready' ? 'pre_ready' : 'pre_delivery';
@@ -36,6 +37,10 @@ export function reviewStageReasons(kind, payload, evidence, now, age = 60000) {
     (c.status !== 'completed' || c.conclusion !== 'success'))) reasons.push('current_applicable_CI_not_passed');
   if (kind === 'pr_ready') return reasons;
   const g = evidence.gatekeeper;
+  if(g?.applicability){
+    if(g.pr_url!==url||g.head_sha!==head||g.head_before!==head||g.head_after!==head||!fresh(g.checked_at,now,age)||!g.evidence_ref||!g.semantic_assessment_ref||g.reviews_complete!==true||!Array.isArray(g.reviews)||!gatekeeperExemption(kind,payload,evidence,applicabilityPolicy))reasons.push('Gatekeeper_applicability_not_verified');
+    return reasons;
+  }
   if (!g || g.pr_url !== url || g.head_sha !== head || g.head_before !== head || g.head_after !== head ||
       !fresh(g.checked_at, now, age) || !g.evidence_ref || !g.semantic_assessment_ref ||
       g.identity?.verified !== true || g.identity.kind !== 'github_app' || !g.identity.login || !g.identity.app_id ||

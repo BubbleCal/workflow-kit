@@ -40,7 +40,7 @@ export function mergeAuthorizationReasons(p,e,policy,now){
  if(policy?.review_implies_conditional_merge===undefined||policy.review_implies_conditional_merge.enabled===false)return reasons;
  if(!rule)return [...reasons,'invalid_review_implies_merge_policy'];
  // These remain technical and destination gates, not new human permissions.
- reasons.push(...reviewStageReasons('slack_pr',p,e,now));
+ reasons.push(...reviewStageReasons('merge',p,e,now,60000,policy.gatekeeper_applicability));
  const scope=e.review_routing?.scope,grant=policy.pr_authorizations?.find(a=>a.pr_url===p.pr_url&&a.scope===scope);
  const channel=grant?.channel_id??(scope==='default'?policy.default_channel_id:policy.routes?.find(r=>r.scope===scope)?.channel_id);
  reasons.push(...reviewDestinationReasons({...p,message:p.pr_url,channel_id:channel},e,policy));

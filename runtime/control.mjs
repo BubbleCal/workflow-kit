@@ -2,6 +2,7 @@ import {isDiscoveryResume,discoveryResumeReasons} from './discovery-queued-recov
 import {initReviewAttempts,archiveReviewAttempt,verifiedUnsentReviewRetry} from './review-context-retry.mjs';
 import {createdProjectRepairReasons} from './created-project-repair.mjs';
 import {recordPrReviewAuthorization} from './pr-authorization.mjs';
+import {recordGatekeeperApplicability} from './gatekeeper-applicability.mjs';
 import {reviewClosureArchiveActor} from './review-closure.mjs';
 import {readReviewReportPolicy,reviewReportTaskReasons} from './review-report.mjs';
 import {readCompletionReportPolicy,initCompletionNotices,completionReportStatus,completionReportReasons,completionArchiveReasons,confirmCompletionReport,recordPresentedCompletion} from './completion-report.mjs';
@@ -273,7 +274,7 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
     need(typeof payload?.expected_head_sha === 'string' && /^[a-f0-9]{40,64}$/.test(payload.expected_head_sha) && payload.expected_head_sha === e.current_head_sha, 'head_changed_or_unknown');
   }
   if (kind === 'pr_ready') need(payload?.operation === 'mark_ready' && prUrl(payload.pr_url) && payload.pr_url === e.pr_url, 'verified_draft_transition_required');
-  if (isReviewDelivery(kind)) reasons.push(...reviewStageReasons(kind, payload, e, now));
+  if (isReviewDelivery(kind)) reasons.push(...reviewStageReasons(kind, payload, e, now,60000,reviewChannels?.gatekeeper_applicability));
   reasons.push(...personalReviewReasons(kind,payload,e,reviewChannels,now));
   if (kind === 'review_decision') reasons.push(...reviewDecisionReasons(payload,e,reviewChannels,now));
   if (kind === 'slack_pr') {
@@ -387,7 +388,7 @@ export class ControlStore {
     this.feedback = new ReviewFeedback(this.db,this.now);
     initCompletionNotices(this.db);
     this.reactive = new ReactiveState(this.db, { now:this.now, registry:this.taskRegistry });
-    this.lifecycle = new LifecycleLedger(this.db, { now: this.now, scopeRegistry:this.taskRegistry, dependencyPolicy:this.dependencyPolicy, deliveryMode:bindings.delivery.slack_enabled?'slack':'local', unacknowledged:()=>{
+    this.lifecycle = new LifecycleLedger(this.db, { now: this.now, scopeRegistry:this.taskRegistry, dependencyPolicy:this.dependencyPolicy,gatekeeperPolicy:()=>this.reviewChannels()?.gatekeeper_applicability, deliveryMode:bindings.delivery.slack_enabled?'slack':'local', unacknowledged:()=>{
       const file=path === ':memory:' ? null : resolve(dirname(path),'mailbox.sqlite');
       if (!file || !existsSync(file)) return new Set();
       const m=new DatabaseSync(file,{readOnly:true});
@@ -956,6 +957,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const operations = {
       observe: () => control.observe(input),
       record_pr_review_authorization: () => recordPrReviewAuthorization(control,input),
+      record_gatekeeper_applicability: () => recordGatekeeperApplicability(control,input),
       human_trigger_status: () => {mailbox ??= new Mailbox(resolve(base,'mailbox.sqlite'));return mailbox.immediate.status(input.source_message_id,control);},
       human_trigger_prepare: () => {mailbox ??= new Mailbox(resolve(base,'mailbox.sqlite'));return mailbox.immediate.invocation(input.source_message_id,input.snapshot,control);},
       human_trigger_claim: () => {mailbox ??= new Mailbox(resolve(base,'mailbox.sqlite'));return mailbox.immediate.invocation(input.source_message_id,input.snapshot,control,true);},

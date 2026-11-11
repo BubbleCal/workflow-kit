@@ -85,7 +85,34 @@ source and determine applicability; do not manufacture an all-green summary.
 For URL delivery, also supply gatekeeper with matching PR/head-before/head-after,
 checked_at, evidence_ref, semantic_assessment_ref, reviews_complete=true, complete
 raw reviews, and identity={kind:github_app,login,app_id,verified:true,evidence_ref}.
-Verify the real repository app/trigger surface first. The currently observed
+Verify the real repository app/trigger surface first. A repository without a
+configured Gatekeeper does not wait for a nonexistent approval. Empty reviews,
+skipped checks or absent workflow files alone do not establish that an external
+GitHub App is unconfigured. The central `PR_REVIEW_CHANNELS.json` stores
+`gatekeeper_applicability.repositories` with source-backed `configured` or
+`not_configured` declarations; repositories without verified declarations retain
+the required/unknown gate. A current observed Gatekeeper check/review or unknown
+configuration contradicts an old absence declaration and blocks this path.
+
+Use control op `record_gatekeeper_applicability` with a fresh exact native human
+source, accepted original task/bound PR, stable actual PR/head context and
+`expected_policy_digest`. `mode:repository,status:not_configured` requires an
+explicit repository-owner configuration declaration. This uses ordinary PR
+reads and the actual human source; it does not require repository-admin APIs.
+The API preserves all unrelated authorizations and records source provenance.
+For delivery, keep the full fresh gatekeeper PR/head/review/semantic evidence,
+but replace the absent bot identity with
+`applicability:{status:"not_configured",policy_source_message_id:"actual-source"}`.
+
+For an explicit human one-PR waiver, `mode:review_exception` also requires one
+`authorized_scope.pr_urls` entry and its exact `head_sha`. Delivery selects
+`applicability:{status:"explicit_review_exception",policy_source_message_id:"actual-source"}`.
+It applies only to external review for that PR/head, never merge or a later head.
+No path grants CI, full-feedback, personal/Functions/channel, designated-approval,
+repository-rule, release or deployment permission. Changed/unknown configuration
+must be reconciled with the owning source, never inferred from missing output.
+
+The currently observed
 GitHub apps emit COMMENTED reviews with either observed approval header:
 `✅ **Gate recommendation: approve.**` or
 `⚠️ **Gate recommendation: approve with a non-blocking risk.**`.
