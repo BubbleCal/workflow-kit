@@ -179,7 +179,9 @@ role and `automatic_control_lane:false` may instead use
 `expected_turn_id`, omitting `task_id`. This requires the original support-role
 authority, no configured maintenance service, no unfinished active goal owned by
 that chat and no claimed or uncertain effects. The same human, host, CLI and native
-proof checks apply. It creates no maintenance task or execution wake.
+proof checks apply. It creates no maintenance task or execution wake. Manual
+migration records before/after configuration digests instead of a configuration
+backup; original capability evidence remains preserved.
 
 
 Runtime-authored direct messages are tracked by rt_trigger_messages under MESSAGE_TRIGGER.md. Do not resend a pending native receipt or an uncertain trigger attempt. A distinct native turn with the exact original trigger delegation is required for begin/recovery; old Codex queue receipts are retained and never silently converted.

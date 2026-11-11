@@ -50,7 +50,10 @@ export async function migrateRuntimeHostBinding(control,input,{root=control.work
  writeFileSync(queue.file,queue.bytes,{mode:0o600});writeFileSync(desktop.file,desktop.bytes,{mode:0o600});
  const next={...config,queue_validation:{file:queue.file,digest:queue.digest},desktop_loader:{...config.desktop_loader,evidence_file:desktop.file,evidence_digest:desktop.digest,...(input.restore_desktop===true?{enabled:true}:{})}};
  delete next.desktop_loader.validation_pending;
- writeFileSync(join(dir,'runtime-before.json'),before,{mode:0o600});writeFileSync(path+'.host-binding.tmp',JSON.stringify(next,null,2)+'\n',{mode:0o600});renameSync(path+'.host-binding.tmp',path);
+ if(!interactive)writeFileSync(join(dir,'runtime-before.json'),before,{mode:0o600});
+ const nextBytes=JSON.stringify(next,null,2)+'\n';
+ writeFileSync(path+'.host-binding.tmp',nextBytes,{mode:0o600});renameSync(path+'.host-binding.tmp',path);
  const result={migrated:true,scheme:'macos-platform-uuid-and-user-home-v2',host_fingerprint:host.stable,legacy_verified:true,original_native_evidence_preserved:true,cli_version:probe.cli_version,desktop_enabled:next.desktop_loader.enabled,min_idle_ms:next.desktop_loader.min_idle_ms,queue_validation:next.queue_validation,desktop_evidence_file:desktop.file,authorization_ref:input.evidence_ref,source_message_id:input.source_message_id,actor_mode:interactive?'manual_maintenance':'scheduled_maintenance',owner_thread_id:actor.owner_id,native_turn_id:actor.turn_id,verified_at:new Date(control.now()).toISOString(),raw_hardware_identifier_exported:false};
+ Object.assign(result,{runtime_before_digest:hash(before),runtime_after_digest:hash(nextBytes)});
  writeFileSync(join(dir,'migration.json'),JSON.stringify(result,null,2)+'\n',{mode:0o600});return result;
 }

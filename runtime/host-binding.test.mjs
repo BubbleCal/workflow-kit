@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,writeFileSync,readFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,writeFileSync,readFileSync,rmSync,existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -51,6 +51,8 @@ test('a configured manual maintenance owner migrates original host proofs withou
   const tasks=f.c.db.prepare('SELECT * FROM rt_tasks').all(),wakes=f.c.db.prepare('SELECT * FROM rt_wakes').all();
   delete f.input.task_id;Object.assign(f.input,{interactive_maintenance:true,owner_thread_id:OWNER,expected_turn_id:'native-turn',expected_runtime_digest:digest(readFileSync(join(f.root,'runtime.json')))});
   const r=await migrateRuntimeHostBinding(f.c,f.input,f.options);assert.equal(r.actor_mode,'manual_maintenance');assert.equal(r.owner_thread_id,OWNER);assert.equal(r.min_idle_ms,600000);
+  assert(!existsSync(join(f.root,'observations/host-binding-stable-machi/runtime-before.json')));
+  assert.equal(r.runtime_before_digest,f.input.expected_runtime_digest);assert.equal(r.runtime_after_digest,digest(readFileSync(join(f.root,'runtime.json'))));
   assert.deepEqual(f.c.db.prepare('SELECT * FROM rt_tasks').all(),tasks);assert.deepEqual(f.c.db.prepare('SELECT * FROM rt_wakes').all(),wakes);
  }finally{f.close();}
 });

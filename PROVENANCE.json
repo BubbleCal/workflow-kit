@@ -1,7 +1,7 @@
 {
   "version": "0.9.1",
   "source": "workflow-kit repository source",
-  "upstream_base_commit": "d54751337f1640727fa4a3c59c43d2839145d2a7",
+  "upstream_base_commit": "f86beb94218653685671840ce58406d7fd2dc7c9",
   "source_files": {
     "package.json": "80ba1b31f033e1d5c6727bbf5381196cf7c644b6b90ecedc9ceedd376df42a8d",
     "runtime/calendar-preparation.mjs": "e6c4de5e26b3ecf782cb8143732a58a7ba859ecbf55031e570ddbf78ac6f3113",
@@ -48,8 +48,8 @@
     "runtime/github-job-waits.mjs": "7555b30cd5d10e8e15c4899b8d8813cc84c1c9a6ffd0e2b2c31ea17e0db34ff7",
     "runtime/github-job-waits.test.mjs": "e4b6de96492d722f89ad3ac111905fcc6465918484b31c51cded839f783c9900",
     "runtime/health-recovery.test.mjs": "8a3bc6d80940d432ac6eb94efb695daf7bea056234cf83a187ef44e0ef13ec32",
-    "runtime/host-binding.mjs": "5fae9e096e981201c93e37e1df12479e2860446303bc1be7b5da6c3ff0f164c8",
-    "runtime/host-binding.test.mjs": "cdfeefe1b3e25a29f547b9e9590ad1b973b04b3c870ed575b920cc597799ea14",
+    "runtime/host-binding.mjs": "dca864033d0db8d633a5ddd5a520f0281970e14c635d961b0cda6b3e79da5e43",
+    "runtime/host-binding.test.mjs": "9458cba1fa73f099bfed31367278795b97c4bd0e6fe5dfa0674739772f3554df",
     "runtime/host-identity.mjs": "ef23b0e350a8e49b831fdbe3cac02ff5a01b931b5753751fe15da098efdf0172",
     "runtime/human-followup.mjs": "0a1a129141802ac0d320a6a731bc439c5f518f8714cfe21616777a7ef2709a61",
     "runtime/immediate-trigger.mjs": "92ffba96635fd30ce78215d523a4f12412a45f3a66f5155adbb5fc6c9e38f3af",
