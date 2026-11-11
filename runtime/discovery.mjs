@@ -1,3 +1,4 @@
+import {verifyTriggerExecution,settleTriggerDiscovery} from './trigger-proof.mjs';
 import {verifyDiscoveryExecution} from './human-followup.mjs';
 import {DiscoveryRecovery} from './discovery-recovery.mjs';
 import {OwnerHealth} from './owner-health.mjs';
@@ -262,7 +263,7 @@ export class DiscoveryStore {
     // Reconcile that receipt before incrementing a checkpoint generation.
     for(const scan of this.db.prepare("SELECT id,generation,mail_key,prompt FROM discovery_batches WHERE state IN ('finished','checkpointed')").all()){
       const mail=mailbox.db.prepare('SELECT batch_id FROM mail WHERE item_key=?').get(scan.mail_key);
-      if(!mail?.batch_id)continue;
+      if(!mail?.batch_id){settleTriggerDiscovery(this.db,mailbox,scan,this.config.threads.discovery,this.now());continue;}
       const batch=mailbox.get(mail.batch_id);
       if(batch?.state==='finished')continue;
       if(batch?.prompt!==scan.prompt||!['sending','sent','uncertain','running'].includes(batch?.state))throw new Error('Discovery finish receipt disagrees with its native queue batch');
@@ -333,9 +334,10 @@ export class DiscoveryStore {
         verifyExecutionProof(native_proof,{thread_id:this.config.threads.discovery,workspace:this.config.thread_workspaces?.discovery??this.config.scope.project_root,prompt:b.prompt,now:this.now()});
         return {...b,begun:false,skipped:true,quiet:true,reason:'batch_bound_to_verified_followup'};
       }
-      const proof=verifyDiscoveryExecution(this.db,this.config,b,native_proof,this.now())??verifyExecutionProof(native_proof,{thread_id:this.config.threads.discovery,workspace:this.config.thread_workspaces?.discovery??this.config.scope.project_root,prompt:b.prompt,now:this.now()});
+      const proof=verifyTriggerExecution(this.db,b.mail_key,native_proof,{thread_id:this.config.threads.discovery,workspace:this.config.thread_workspaces?.discovery??this.config.scope.project_root,now:this.now()})??verifyDiscoveryExecution(this.db,this.config,b,native_proof,this.now())??verifyExecutionProof(native_proof,{thread_id:this.config.threads.discovery,workspace:this.config.thread_workspaces?.discovery??this.config.scope.project_root,prompt:b.prompt,now:this.now()});
       if(b.state==='invalidated')return {...b,invalidated:true,skipped:true,quiet:true,reason:'source_scope_changed'};
       this.checkBatch(batch_id);this.selectHealth(b);this.work.creation.recordRun(b,proof);
+      if(proof.transport==='native_trigger')this.db.prepare("UPDATE rt_trigger_messages SET state='started',execution_turn=?,updated_at=? WHERE id=?").run(proof.turn_id,this.now(),b.mail_key);
       this.db.prepare("UPDATE discovery_batches SET state='running',started_at=? WHERE id=?").run(b.state==='pending'?this.now():b.started_at,batch_id);
       return compactDiscoveryBatch(this.checkBatch(batch_id),this.sources());
     });
@@ -344,7 +346,7 @@ export class DiscoveryStore {
     required(evidence_ref,'discovery recovery evidence');
     return this.atomic(()=>{
       const b=this.batch(batch_id);if(!b||b.generation!==generation)throw new Error('Stale discovery generation');
-      const proof=verifyDiscoveryExecution(this.db,this.config,b,native_proof,this.now(),{terminal:true})??verifyExecutionProof(native_proof,{thread_id:this.config.threads.discovery,workspace:this.config.thread_workspaces?.discovery??this.config.scope.project_root,prompt:b.prompt,now:this.now(),terminal:true});
+      const proof=verifyTriggerExecution(this.db,b.mail_key,native_proof,{thread_id:this.config.threads.discovery,workspace:this.config.thread_workspaces?.discovery??this.config.scope.project_root,now:this.now(),terminal:true})??verifyDiscoveryExecution(this.db,this.config,b,native_proof,this.now(),{terminal:true})??verifyExecutionProof(native_proof,{thread_id:this.config.threads.discovery,workspace:this.config.thread_workspaces?.discovery??this.config.scope.project_root,prompt:b.prompt,now:this.now(),terminal:true});
       const native=nativeReadback(native_proof.readback);
       if(!['idle','notLoaded'].includes(native.thread.status?.type)||native.turns[0]?.id!==proof.turn_id||arr(native.thread.status?.activeFlags).length)throw new Error('Discovery owner must be quiescent at the exact ended turn');
       if(effects_reconciled!==true||this.db.prepare("SELECT 1 FROM actions WHERE owner=? AND state IN ('claimed','uncertain') LIMIT 1").get(this.config.threads.discovery))throw new Error('Reconcile discovery effects before recovery');

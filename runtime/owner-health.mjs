@@ -13,6 +13,7 @@ export function classifyOwnerHealth(task,wake,snapshot) {
   if(turn?.status==='failed')return 'turn_failed';
   if(wake?.state==='running'&&wake.turn_id===turn?.id&&['completed','interrupted'].includes(turn?.status))return 'unfinished_terminal_turn';
   if(wake?.state==='uncertain')return 'uncertain_delivery';
+  if(wake?.transport==='native_trigger'&&['reserved','claimed','queued'].includes(wake.state))return 'trigger_delivery_pending';
   if(wake?.state==='queued')return 'queued_unconsumed';
   if(task.status==='ready'&&!wake)return 'continuation_needed';
   return 'waiting';

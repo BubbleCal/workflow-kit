@@ -1,3 +1,4 @@
+import {verifyTriggerExecution} from './trigger-proof.mjs';
 import {validateOwnerDecision} from './owner-continuation.mjs';
 import {verifyHumanFollowup} from './human-followup.mjs';
 import {verifyQueuedRecoveryProof} from './queued-resume.mjs';
@@ -438,11 +439,14 @@ export class ReactiveState {
         deferred?.reason==='user_rescheduled_maintenance' && deferred.authorization_ref && deferred.evidence_ref)
         return {begun:false,skipped:true,quiet:true,reason:'user_rescheduled_maintenance',next_eligible_at:deferred.next_eligible_at,
           instruction:'End this obsolete wake immediately without maintenance, notification, retry or finish. The accepted queue receipt remains historical.'};
-      if(!task || task.mode!=='active' || wake?.id!==wake_id || !['native_queue','native_followup'].includes(wake.transport) ||
+      if(!task || task.mode!=='active' || wake?.id!==wake_id || !['native_queue','native_followup','native_trigger'].includes(wake.transport) ||
         !['claimed','queued','uncertain','running'].includes(wake.state))
         throw new Error('Execution must match the original task, wake and actual new turn');
       let execution;
-      if(wake.transport==='native_followup'){
+      if(wake.transport==='native_trigger'){
+        execution=verifyTriggerExecution(this.db,wake.id,native_proof,{thread_id:task.owner_id,workspace:task.contract.workspace,now:this.now()});
+        if(!execution)throw Error('Original trigger registration missing');
+      }else if(wake.transport==='native_followup'){
         const binding=parse(this.db.prepare('SELECT data FROM rt_diagnostics WHERE key=?').get(`followup-binding:${wake.id}`)?.data);
         const action=binding&&this.db.prepare('SELECT * FROM actions WHERE action_key=?').get(binding.action_key);
         execution=verifyHumanFollowup(native_proof,{task,action,source_message_id:binding?.source_message_id,now:this.now()});
@@ -458,6 +462,7 @@ export class ReactiveState {
       this.db.prepare("UPDATE rt_wakes SET state='running',turn_id=?,started_at=COALESCE(started_at,?),evidence_ref=? WHERE id=?").run(turn_id,this.now(),evidence_ref,wake_id);
       this.db.prepare("UPDATE actions SET state='sent',receipt=?,updated_at=? WHERE action_key=? AND kind='task_queue' AND state IN ('claimed','uncertain')")
         .run(canonical({outcome:'sent',native_consumption:{turn_id,evidence_ref}}),this.now(),wake_id);
+      if(wake.transport==='native_trigger')this.db.prepare("UPDATE rt_trigger_messages SET state='started',execution_turn=?,updated_at=? WHERE id=?").run(turn_id,this.now(),wake.id);
       this.onBeginInside?.(wake);
       return this.checkpoint(task_id);
     });
@@ -473,6 +478,7 @@ export class ReactiveState {
         if(member.status==='ready')throw new Error(`Continue the concrete plan for member ${id}, record a typed wait or request a decision before finishing`);
       }
       this.db.prepare("UPDATE rt_wakes SET state='finished',completed_at=?,evidence_ref=? WHERE id=?").run(this.now(),evidence_ref,wake_id);
+      if(wake.transport==='native_trigger')this.db.prepare("UPDATE rt_trigger_messages SET state='finished',updated_at=? WHERE id=? AND execution_turn=?").run(this.now(),wake_id,turn_id);
       for(const id of wake.member_ids)if(this.task(id).status==='complete')this.onCompleteInside?.(id,wake_id,evidence_ref);
       for(const id of wake.member_ids)this.onFinishInside?.(id,wake,evidence_ref);
       return {finished:true,task_complete:this.task(task_id).status==='complete'};

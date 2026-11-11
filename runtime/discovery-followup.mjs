@@ -1,3 +1,4 @@
+import {settleTriggerDiscovery} from './trigger-proof.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {join} from 'node:path';
 import {verifyHumanFollowup,verifyFollowupAuthority,verifyDirectDiscoveryHuman} from './human-followup.mjs';
@@ -70,6 +71,7 @@ export function beginDiscoveryFollowup(control,input){
 // An authenticated relay can retire a never-sent mailbox item. Its durable
 // source checkpoint still needs a truthful local settlement, not a fake ACK.
 export function settleDiscoveryDelivery(control,mailbox,batch,result){
+ const trigger=settleTriggerDiscovery(control.db,mailbox,batch,control.work.config.threads.discovery,control.now());if(trigger)return trigger;
  const mail=mailbox.db.prepare('SELECT state,batch_id FROM mail WHERE item_key=?').get(batch.mail_key);
  const current=control.discovery.batch(batch.id),row=control.db.prepare('SELECT data FROM rt_diagnostics WHERE key=?').get(`discovery-followup:${batch.id}:${batch.generation}`),binding=row&&JSON.parse(row.data);
  if(mail?.batch_id&&!binding){mailbox.finish(mail.batch_id,{processed_keys:[batch.mail_key],note:result.finished?'source scan completed':'source scan checkpointed'});return null;}

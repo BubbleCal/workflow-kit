@@ -275,3 +275,6 @@ complete an authorized unfinished goal. Continue bounded independent work, retai
 actual jobs/waits, and request only a material human-only decision. Conditional
 holds use their original wording and observable release predicate; unconditional
 pauses and all external-action gates remain. Record remaining goal and next step.
+
+
+When input comes from the dedicated message trigger, follow MESSAGE_TRIGGER.md: use a genuine self read_thread proof with includeOutputs:true and preserve the complete incoming delegation. Keep the original begin/checkpoint/decide/finish contract. The runtime verifies the immutable sender/input and actual distinct native turn; a direct-send ACK is insufficient.

@@ -172,3 +172,6 @@ original verification times. This records an identity migration, not a fresh nat
 loading trial. A mismatched legacy host requires new genuine evidence instead.
 `restore_desktop:true` restores only an already-authorized idle-only policy; the
 configured input-idle threshold, exclusions and all task holds remain intact.
+
+
+Runtime-authored direct messages are tracked by rt_trigger_messages under MESSAGE_TRIGGER.md. Do not resend a pending native receipt or an uncertain trigger attempt. A distinct native turn with the exact original trigger delegation is required for begin/recovery; old Codex queue receipts are retained and never silently converted.

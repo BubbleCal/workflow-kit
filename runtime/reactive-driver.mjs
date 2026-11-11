@@ -9,6 +9,7 @@ import {mkdirSync,readFileSync,writeFileSync,existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
+import {MessageTrigger} from './message-trigger.mjs';
 import {canonical,fingerprint} from './reactive-state.mjs';
 import {Mailbox,renderPrompt} from './mailbox.mjs';
 import {shellQuote} from './instance.mjs';
@@ -46,7 +47,7 @@ export function wakePrompt(root,task,wake,checkpoint) {
   return `[workflow-event:${wake.id}]
 ${lane==='maintenance'?'工作流维护 · ':''}${task.task_id}｜${reason||'有待处理事项'}
 按 ${join(root,protocol)} 执行 begin → checkpoint → decide → finish；首次使用或规则变化时读取协议。${lane?`领取 service_begin 批次 ${batch??'见 checkpoint'}，先结束批次，再 cycle_complete/finish。`:''}
-根据最新 checkpoint 推进下一步并保存结果。${checkpoint.schedule_runs?.length?'本轮定时结果用 cycle_complete 结束。':''}${task.contract.task_kind==='exploration'?'探索结果按 WORK_TASKS.md 保存 task report。':''}
+根据最新 checkpoint 推进下一步并保存结果。${wake.transport==='native_trigger'?'本消息由触发器转发；begin 的 read_thread 证明须 includeOutputs=true，保留完整接收项。':''}${checkpoint.schedule_runs?.length?'本轮定时结果用 cycle_complete 结束。':''}${task.contract.task_kind==='exploration'?'探索结果按 WORK_TASKS.md 保存 task report。':''}
 ${lane?'':'评估、测试或研究产出实质结果时，按 RESULT_FOLLOWTHROUGH.md 提交 task report 与结构化 followups；无可执行发现也记录明确结论。'}
 ${lane?'':'等待 PR/事件时按 OWNER_WAITS.md 报告结构化阻塞；知道下次行动时间时，在 decide(wait) 中提交带时区的 next_action_at，之前不接收自动唤醒。'}
 ${lane?'维护间隔以 daily-review/config.json 为准。':'按 OWNER_CONTINUATION.md 接续；交付遵循 OWNER_DELIVERY.md，仅真实决策或完成通知中心。'}
@@ -57,6 +58,7 @@ ${JSON.stringify({task_id:task.task_id,wake_id:wake.id})}`;
 export class ReactiveDriver {
   constructor({root,control,queue,config,capability,now=()=>Date.now(),collector=collectPullRequest,quotaReader,readActivity,desktopLoader,log=v=>process.stdout.write(JSON.stringify(v)+'\n')}) {
     this.root=root;this.control=control;this.state=control.reactive;this.queue=queue;this.config=config;
+    this.messageTrigger=new MessageTrigger(control,config);
     this.capability=capability;this.now=now;this.collector=collector;this.log=log;
     this.polling=new Set();this.delivering=new Set();this.jobs=new Set();
     this.rate=new SourceRate(control.db,{now,readQuota:quotaReader});
@@ -174,6 +176,18 @@ export class ReactiveDriver {
       queue_compatibility_ref:this.capability?.evidence_digest};
   }
   async deliver(task) {
+    if(this.config.message_trigger?.enabled){
+      try{
+        if(this.state.waitPolicy.blocked(task.task_id))return;
+        const old=this.state.openWake(task.task_id);
+        if(old&&old.state!=='reserved')return;
+        if(task.wake_at===null||task.wake_at>this.now())return;
+        const reserved=old?{reserved:true,wake:old}:this.state.reserveQueuedWake(task.task_id);if(!reserved.reserved)return;
+        const w=reserved.wake;if(w.task_id!==task.task_id)return;
+        return this.messageTrigger.registerTask(task,w,w.prompt??wakePrompt(this.root,task,{...w,transport:'native_trigger'},this.state.checkpoint(task.task_id)));
+      }catch(error){this.state.diagnostic(`trigger-registration:${task.task_id}`,{error:error.message});return;}
+    }
+    if(this.state.openWake(task.task_id)?.transport==='native_trigger')return;
     if(this.capability?.verified!==true){this.state.diagnostic('native-queue',{reason:'Desktop consumption must be verified before activation'});return;}
     try{
       if(this.state.waitPolicy.blocked(task.task_id))return {delivered:false,reason:'owner_next_action_not_due'};
@@ -364,7 +378,7 @@ export class ReactiveDriver {
   }
 
   async discoveryTick() {
-    if(this.capability?.verified!==true)return;
+    if(this.capability?.verified!==true&&!this.config.message_trigger?.enabled)return;
     const m=new Mailbox(join(this.root,'mailbox.sqlite'),{now:this.now});
     try{
       this.control.discovery.reconcileMailbox(m);
@@ -377,6 +391,12 @@ export class ReactiveDriver {
       for(const item of m.db.prepare("SELECT item_key,payload FROM mail WHERE lane='discovery' AND state='pending'").all()){
         if((()=>{const scan=this.control.discovery.batch(JSON.parse(item.payload).batch_id);return scan?.state==='invalidated'||scan&&scan.mail_key!==item.item_key;})())
           m.db.prepare("UPDATE mail SET state='superseded' WHERE item_key=? AND state='pending'").run(item.item_key);
+      }
+      if(this.config.message_trigger?.enabled){
+        for(const item of m.db.prepare("SELECT item_key,payload FROM mail WHERE lane='discovery' AND state IN ('pending','trigger_pending') AND batch_id IS NULL ORDER BY seq").all()){
+          const scan=this.control.discovery.batch(JSON.parse(item.payload).batch_id);
+          if(scan?.state==='pending'&&scan.mail_key===item.item_key){this.messageTrigger.registerDiscovery(scan);m.db.prepare("UPDATE mail SET state='trigger_pending' WHERE item_key=? AND state='pending' AND batch_id IS NULL").run(item.item_key);}
+        }return;
       }
       const reserved=m.reserveQueuedInbox(null,'discovery');if(!reserved.reserved){
         if(reserved.reason==='batch_in_flight'){

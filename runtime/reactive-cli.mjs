@@ -1,3 +1,5 @@
+import {MessageTrigger,validateMessageTrigger} from './message-trigger.mjs';
+import {verifyTriggerExecution} from './trigger-proof.mjs';
 import {migrateRuntimeHostBinding} from './host-binding.mjs';
 import {reconcileAcceptedSource} from './created-project-repair.mjs';
 import {reconcileCompletedProjection,reconcileReviewWorkspace} from './closure-reconciliation.mjs';
@@ -39,6 +41,7 @@ export const DEFAULT_RUNTIME=Object.freeze({schema_version:2,transport:'native_q
 export function runtimeConfig(root=ROOT) {
   const path=join(root,'runtime.json');if(!existsSync(path))throw new Error('Run node workflow.mjs runtime init first');
   const c={...DEFAULT_RUNTIME,...read(path)};
+  validateMessageTrigger(c.message_trigger);
   if(c.schema_version!==2||c.transport!=='native_queue'||c.adapter)throw new Error('Direct session transport was removed. Stop the old service and run runtime init, then verify the native queue');
   for(const key of ['tick_ms','poll_min_ms','poll_max_ms'])if(!Number.isSafeInteger(c[key])||c[key]<100||c[key]>3600000)throw new Error(`Invalid ${key}`);
   if(c.poll_min_ms>c.poll_max_ms)throw new Error('Poll bounds are reversed');
@@ -235,6 +238,11 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
       writeFileSync(path,plist,{mode:0o600});launchctl(['bootstrap',domain,path]);output({installed:true,path});return;
     }
     const config=runtimeConfig(root),queue=new NativeQueue(config.queue);
+    if(command==='trigger'){
+      const input=read(inputFile()),trigger=new MessageTrigger(control,config);
+      if(!['run','pending','prepare','claim','settle','observe'].includes(input.op))throw Error('Unknown trigger operation');
+      output(trigger[input.op](input));return;
+    }
     if(command==='probe'){
       if(args.length!==1)throw new Error('probe only checks CLI queue support; obtain thread identity through desktop native tools');
       output(await queue.probe());return;
@@ -303,7 +311,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
       else if(input.op==='recover'){
         const task=state.task(input.task_id),wake=state.openWake(input.task_id);if(!task||!wake)throw new Error('No wake to reconcile');
         let proof;
-        try{proof=verifyExecutionProof(input.native_proof,{thread_id:task.owner_id,workspace:task.contract.workspace,prompt:wake.prompt,terminal:true});}
+        try{proof=wake.transport==='native_trigger'?verifyTriggerExecution(control.db,wake.id,input.native_proof,{thread_id:task.owner_id,workspace:task.contract.workspace,terminal:true}):verifyExecutionProof(input.native_proof,{thread_id:task.owner_id,workspace:task.contract.workspace,prompt:wake.prompt,terminal:true});if(!proof)throw Error('Original trigger registration required');}
         catch(error){
           const action=control.db.prepare('SELECT * FROM actions WHERE action_key=?').get(`resume-input:${input.task_id}:${wake.queue_id}`);
           if(!action)throw error;
@@ -319,6 +327,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
             .run(JSON.stringify({outcome:'sent',evidence_ref:proof.evidence_ref,native_turn:proof.turn_id}),Date.now(),wake.id);
           control.db.prepare("UPDATE rt_wakes SET state='ended_unresolved',turn_id=?,completed_at=?,evidence_ref=? WHERE id=?")
             .run(proof.turn_id,Date.now(),input.evidence_ref,wake.id);
+          if(wake.transport==='native_trigger')control.db.prepare("UPDATE rt_trigger_messages SET state='ended_unresolved',execution_turn=?,updated_at=? WHERE id=?").run(proof.turn_id,Date.now(),wake.id);
           for(const id of wake.member_ids)state.ingestInside({event_id:`recover:${wake.id}:${id}`,task_id:id,source:'native_desktop_observation',subject:`turn:${proof.turn_id}`,type:'owner_ended',
             observed_at:Date.now(),payload:{previous_wake:wake.id,actual_turn:proof.turn_id,status:proof.status},evidence_ref:input.evidence_ref,debounce_ms:0});
         });result={recovered:true,task_complete:false};
