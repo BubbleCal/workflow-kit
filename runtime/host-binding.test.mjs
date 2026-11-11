@@ -42,3 +42,31 @@ test('wrong human, actor, turn, stale proof, legacy host, CLI and concurrent con
  const changes=[f=>f.input.actual_human_verified=false,f=>f.input.verbatim_text='invented',f=>f.input.native_proof.readback.thread.id='foreign',f=>f.input.native_proof.readback.turns[0].id='wrong',f=>f.advance(61000),f=>f.options.identity=()=>({legacy:'other-machine',stable:'stable-machine-home'}),f=>f.options.probeQueue=async()=>({cli_version:'another-cli',host_fingerprint:'stable-machine-home'}),f=>f.input.expected_runtime_digest='stale',f=>f.options.probeQueue=async()=>{writeFileSync(join(f.root,'runtime.json'),'{"concurrent":true}');return{cli_version:'codex-cli fixture',host_fingerprint:'stable-machine-home'};}];
  for(const change of changes){const f=setup();try{change(f);await assert.rejects(()=>migrateRuntimeHostBinding(f.c,f.input,f.options));const after=JSON.parse(readFileSync(join(f.root,'runtime.json')));assert(!after.desktop_loader?.enabled);assert.notEqual(after.queue_validation?.file,join(f.root,'queue-stable.json'));}finally{f.close();}}
 });
+
+test('a configured manual maintenance owner migrates original host proofs without an invented service wake',async()=>{
+ const f=setup();try{
+  delete f.config.service_tasks;writeFileSync(join(f.root,'runtime.json'),JSON.stringify(f.config));
+  f.c.work.config.support={maintenance_thread_id:OWNER,mode:'manual_only',automatic_control_lane:false,source_message_id:'human:keep-maintenance',evidence_ref:'original-maintenance-binding'};
+  f.c.work.config.scope.project_root='/task';f.c.db.prepare("UPDATE rt_tasks SET mode='paused' WHERE task_id='T-1'").run();f.c.db.prepare("UPDATE rt_wakes SET state='finished'").run();
+  const tasks=f.c.db.prepare('SELECT * FROM rt_tasks').all(),wakes=f.c.db.prepare('SELECT * FROM rt_wakes').all();
+  delete f.input.task_id;Object.assign(f.input,{interactive_maintenance:true,owner_thread_id:OWNER,expected_turn_id:'native-turn',expected_runtime_digest:digest(readFileSync(join(f.root,'runtime.json')))});
+  const r=await migrateRuntimeHostBinding(f.c,f.input,f.options);assert.equal(r.actor_mode,'manual_maintenance');assert.equal(r.owner_thread_id,OWNER);assert.equal(r.min_idle_ms,600000);
+  assert.deepEqual(f.c.db.prepare('SELECT * FROM rt_tasks').all(),tasks);assert.deepEqual(f.c.db.prepare('SELECT * FROM rt_wakes').all(),wakes);
+ }finally{f.close();}
+});
+
+test('manual host migration rejects missing role authority, foreign actors, borrowed tasks and active effects',async()=>{
+ for(const variant of ['no-binding','wrong-owner','wrong-turn','task','service','active-goal','unknown-effect','stale']){const f=setup();try{
+  delete f.config.service_tasks;writeFileSync(join(f.root,'runtime.json'),JSON.stringify(f.config));f.c.work.config.support={maintenance_thread_id:OWNER,mode:'manual_only',automatic_control_lane:false,source_message_id:'human:keep',evidence_ref:'actual-binding'};f.c.work.config.scope.project_root='/task';f.c.db.prepare("UPDATE rt_tasks SET mode='paused'").run();f.c.db.prepare("UPDATE rt_wakes SET state='finished'").run();
+  delete f.input.task_id;Object.assign(f.input,{interactive_maintenance:true,owner_thread_id:OWNER,expected_turn_id:'native-turn',expected_runtime_digest:digest(readFileSync(join(f.root,'runtime.json')))});
+  if(variant==='no-binding')delete f.c.work.config.support.source_message_id;
+  if(variant==='wrong-owner')f.input.owner_thread_id='foreign';
+  if(variant==='wrong-turn')f.input.expected_turn_id='different-turn';
+  if(variant==='task')f.input.task_id='T-1';
+  if(variant==='service'){f.config.service_tasks={maintenance:'T-1'};writeFileSync(join(f.root,'runtime.json'),JSON.stringify(f.config));f.input.expected_runtime_digest=digest(readFileSync(join(f.root,'runtime.json')));}
+  if(variant==='active-goal')f.c.db.prepare("UPDATE rt_tasks SET mode='active'").run();
+  if(variant==='unknown-effect')f.c.db.prepare("INSERT INTO actions(action_key,kind,task_id,scope_key,digest,payload,state,owner,due,created_at,updated_at) VALUES ('unknown','human_input','T-1','scope','digest','{}','uncertain',?,0,0,0)").run(OWNER);
+  if(variant==='stale')f.advance(61000);
+  await assert.rejects(()=>migrateRuntimeHostBinding(f.c,f.input,f.options));assert.equal(JSON.parse(readFileSync(join(f.root,'runtime.json'))).desktop_loader.enabled,false);
+ }finally{f.close();}}
+});
