@@ -413,8 +413,10 @@ export class ControlStore {
       this.work.publishToParentInside(this.reactive,id,{key:wake,type:'child_completed',payload:{status:'complete'},evidence_ref});
       if(bindings.delivery.owner_managed){
         const task=this.reactive.task(id),item=this.work.get(id);
+        const unresolved=this.db.prepare("SELECT COUNT(*) n FROM work_result_followups WHERE origin_task_id=? AND state IN ('decision','blocked')").get(id).n;
+        const remaining=unresolved?` 另有 ${unresolved} 项后续待决或受阻；相关问题尚未全部解决。`:'';
         this.db.prepare("INSERT OR IGNORE INTO work_notices VALUES (?,?,?,'pending')").run(`complete:${wake}`,id,canonical({task_id:id,task_completed:true,
-          text:`${id} · ${item?.data.title??task.contract.objective}：已完成全部任务验收。成果证据：${evidence_ref}`,
+          text:`${displayTaskTitle(item??{id},task.contract.objective)}：原任务已验收。${remaining} 成果证据：${evidence_ref}`,
           notification_status:'pending_user_visible_delivery',delivery_protocol:'TASK_COMPLETION_DELIVERY.md',
           archive_request:{task_id:id,thread_id:task.owner_id,evidence_ref},evidence_ref}));
       }
@@ -1040,3 +1042,4 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     process.exitCode = 1;
   } finally { mailbox?.close(); control.close(); }
 }
+import {displayTaskTitle} from './task-display.mjs';

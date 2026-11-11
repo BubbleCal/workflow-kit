@@ -95,7 +95,7 @@ export class ResultFollowthrough {
       this.db.prepare('INSERT INTO work_result_followups VALUES (?,?,?,?,?,?,?,?,?)')
         .run(key,parent.id,reportKey,f.canonical_key,encoded,task?.id??null,state,reason,this.now());
       if(state==='decision')this.db.prepare("INSERT OR IGNORE INTO work_notices VALUES (?,?,?,'pending')").run(`result-decision:${key}`,parent.id,
-        JSON.stringify({task_id:parent.id,result_followup_decision:true,text:`${parent.id} · 结果后续待决：${f.problem}\n${reason}\n证据：${f.evidence_refs.join(', ')}`}));
+        JSON.stringify({task_id:parent.id,result_followup_decision:true,text:`${displayTaskTitle(parent)} · 结果后续待决：${f.problem}\n${reason}\n证据：${f.evidence_refs.join(', ')}`}));
       results.push(this.db.prepare('SELECT * FROM work_result_followups WHERE followup_key=?').get(key));
     }
     return results;
@@ -160,3 +160,4 @@ export class ResultFollowthrough {
       payload:{followup:row.data,origin_task_id:row.origin_task_id},evidence_ref:row.report_key,debounce_ms:0});
   }
 }
+import {displayTaskTitle} from './task-display.mjs';

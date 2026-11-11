@@ -80,7 +80,7 @@ export async function prepareTaskOwner(control,{task_id,projects,project_catalog
   const payload={canonical_task_key:task.canonical_key,source_message_id:r.source_message_id,verbatim_text:r.verbatim_text,
     ...(task.data.source?.kind==='user'&&task.data.source.model_override?{model_override:task.data.source.model_override}:{}),
     permission_probe_only:true,starts_heavy_work:false,run_id:r.control_action_key,placement:resolved.placement,
-    prompt:r.initial_prompt,native:{target:resolved.native_target,prompt:r.initial_prompt,title:`${task.id} · ${task.data.title}`}};
+    prompt:r.initial_prompt,native:{target:resolved.native_target,prompt:r.initial_prompt,title:displayTaskTitle(task)}};
   const evidence={...(creation_actor?{creation_actor}:{}),verified_at:new Date(control.now()).toISOString(),scope_authorized:true,authorization_ref:task.authorization.evidence_ref,
     policy_version:policy,current_policy_version:policy,stopped:false,actual_human_message_verified:true,source_actor_verified:true,
     explicit_new_thread_request_verified:true,source_message_id:r.source_message_id,source_text:r.verbatim_text,canonical_task_key:task.canonical_key,
@@ -92,3 +92,4 @@ export async function prepareTaskOwner(control,{task_id,projects,project_catalog
   return {key:r.control_action_key,preparation,evidence,next:'Claim this exact key with the returned evidence; invoke only claim.payload.native once, settle its real receipt, confirm project placement, bind_owner and start. Refresh prepare_owner if the project proof expires.'};
 }
 export {prepareTaskOwner as prepareMeetingOwner};
+import {displayTaskTitle} from './task-display.mjs';

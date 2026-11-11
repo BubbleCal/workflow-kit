@@ -12,13 +12,22 @@ import {join} from 'node:path';
 function fixture(){
  const f=workFixture();f.config.scope.project_id=bindings.scope.project_id??'project';f.config.discovery={min_start_interval_ms:900000};
  f.work.setPolicy({key:'discovery_owns_creation',enabled:true,allowed_kinds:['work','project','exploration'],source_message_id:'human:roles',verbatim_text:'Main registers; discovery creates accepted task owners',actual_human_verified:true,evidence_ref:'actual-role-request'});
- const task=(key='actual-work',start=false,source)=>{const t=f.work.create({canonical_key:key,title:key,objective:'Deliver the accepted scope',workspace:'/task',requirements:[{id:'done',text:'Verify the result'}],source}).task;
+ const task=(key='actual-work',start=false,source,title=key)=>{const t=f.work.create({canonical_key:key,title,objective:'Deliver the accepted scope',workspace:'/task',requirements:[{id:'done',text:'Verify the result'}],source}).task;
   f.work.accept({task_id:t.id,source_message_id:'human:'+key,evidence_ref:'actual-task-request',actual_human_verified:true,start_requested:start});return f.work.get(t.id);};
  const mail=[];const enqueue=()=>f.c.discovery.enqueueDue({enqueue:v=>{if(!mail.some(x=>x.key===v.key))mail.push(v);return {queued:true,key:v.key};}},'/instance');
  const begin=()=>{const q=enqueue(),b=f.c.discovery.batch(q.batch_id),proof=nativeProof({thread:DISCOVERY,message:b.prompt,turn:'discovery-turn-'+b.generation,now:f.now()});
   f.c.discovery.begin({batch_id:b.id,generation:b.generation,native_proof:proof});return {b,actor:{thread_id:DISCOVERY,batch_id:b.id,generation:b.generation,native_proof:proof}};};
  return {...f,task,enqueue,begin,mail};
 }
+
+test('native owner creation preserves an explicit public task title without another internal prefix',async()=>{
+ const f=fixture();try{
+  const title='PM-031 · Retained archive recovery',t=f.task('archive-recovery',false,undefined,title),{actor}=f.begin();
+  const p=await prepareTaskOwner(f.c,{task_id:t.id,creation_actor:actor,projects:[{hostId:'local',projectId:f.config.scope.project_id}],project_catalog_ref:'actual',checked_at:new Date(f.now()).toISOString()});
+  const claimed=f.c.claim({key:p.key,owner:DISCOVERY,evidence:p.evidence});assert.equal(claimed.claimed,true,JSON.stringify(claimed));
+  assert.equal(claimed.payload.native.title,title);assert.equal(claimed.payload.canonical_task_key,t.canonical_key);
+ }finally{f.c.close();}
+});
 
 test('accepted ownerless work reaches discovery creation, binding, queue and actual begin once; main is rejected',async()=>{
  const f=fixture();try{
