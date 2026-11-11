@@ -39,7 +39,7 @@ export function verifyHumanFollowup(proof,{task,action,source_message_id,now=Dat
  if(proof?.source!=='codex_app.read_thread'||!Number.isFinite(at)||at>now+5000||now-at>60000||!proof.evidence_ref||
   read.thread?.id!==task.owner_id||read.thread?.kind!=='codex'||read.thread?.hostId!=='local'||read.thread?.cwd!==task.contract.workspace||!turn?.id||
   !Number.isFinite(turn.startedAt)||turn.startedAt*1000<action.created_at-1000||
-  !(turn.status==='inProgress'&&read.thread.status?.type==='active'&&!turn.error||['completed','failed','interrupted'].includes(turn.status)&&['idle','notLoaded'].includes(read.thread.status?.type)))
+    !(turn.status==='inProgress'&&read.thread.status?.type==='active'&&!turn.error||['completed','failed','interrupted'].includes(turn.status)&&(['idle','notLoaded'].includes(read.thread.status?.type)||turn.status==='failed'&&read.thread.status?.type==='systemError')))
   throw new Error('Fresh actual current native followup turn required');
  const expected=`<codex_delegation>\n  <source_thread_id>${action.owner}</source_thread_id>\n  <input>${p.prompt}</input>\n</codex_delegation>`;
  if(turn.items?.filter(i=>i.type==='functionCallOutput'&&i.namespace==='codex_app'&&i.name==='send_message_to_thread'&&i.output?.truncated===false&&i.output.text===expected).length!==1)
@@ -52,6 +52,15 @@ export function verifyFollowupAuthority(human_authorization,payload){
  if(human_authorization?.source!=='codex_app.read_thread'||authority.thread?.id!==payload.source_thread_id||authority.thread.kind!=='codex'||authority.thread.hostId!=='local'||
   turn?.items?.filter(i=>i.type==='userMessage'&&i.id===payload.source_message_id&&(i.content??[]).filter(c=>c.type==='text').map(c=>c.text).join('\n')===payload.verbatim_text).length!==1)
   throw new Error('Original native human message identity and exact text must corroborate the sent followup');
+}
+
+export function verifyFollowupTerminal(control,task,wake,native_proof){
+ const row=control.db.prepare('SELECT data FROM rt_diagnostics WHERE key=?').get(`followup-binding:${wake.id}`),binding=row?JSON.parse(row.data):null;
+ const action=binding?.action_key?control.db.prepare('SELECT * FROM actions WHERE action_key=?').get(binding.action_key):null;
+ const proof=verifyHumanFollowup(native_proof,{task,action,source_message_id:action?JSON.parse(action.payload).source_message_id:null,now:control.now()});
+ if(wake.transport!=='native_followup'||wake.state!=='running'||wake.turn_id!==proof.turn_id||!['completed','failed','interrupted'].includes(proof.status))
+  throw Error('Exact terminal acknowledged followup execution required');
+ return{...proof,original_queue_consumed:false};
 }
 
 export function verifyDiscoveryExecution(db,config,batch,native_proof,now,{terminal=false}={}){

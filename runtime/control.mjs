@@ -247,7 +247,14 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
     const restoredQuiescentOwner = e.thread_status === 'notLoaded' &&
       e.explicit_resume_request_verified === true && e.thread_archived === false &&
       e.latest_turn_quiescent === true && (e.pending_dispatch === false || isQueuedResume(kind,payload)&&e.queued_resume_verified===true) && e.overlapping_owner === false;
-    need(['idle', 'active', 'awaiting_input'].includes(e.thread_status) || restoredQuiescentOwner || isDiscoveryResume(kind,payload)&&e.discovery_resume_verified===true, 'human_input_target_state_unknown');
+    const failed=e.terminal_failure_proof,failedRead=failed?nativeReadback(failed.readback):null,failedTurn=failedRead?.turns?.[0],failedAt=Date.parse(failed?.checked_at);
+    const manualFailedOwner=payload?.intent==='correction'&&payload.native_resume_only===true&&e.thread_status==='systemError'&&
+      e.explicit_resume_request_verified===true&&e.thread_archived===false&&e.pending_dispatch===false&&e.overlapping_owner===false&&
+      failed?.source==='codex_app.read_thread'&&!!failed.evidence_ref&&Number.isFinite(failedAt)&&failedAt<=now+5000&&now-failedAt<=60000&&
+      failedRead.thread?.id===payload.thread_id&&failedRead.thread.kind==='codex'&&failedRead.thread.hostId==='local'&&failedRead.thread.cwd===e.owner_workspace&&
+      failedRead.thread.status?.type==='systemError'&&!(failedRead.thread.status.activeFlags??[]).length&&failedTurn?.status==='failed'&&
+      failedTurn.id===e.actual_turn_id&&e.actual_turn_id===e.expected_turn_id&&/Bad Request/.test(failedTurn.error?.message??'')&&/invalid_request_error/.test(failedTurn.error?.message??'');
+    need(['idle', 'active', 'awaiting_input'].includes(e.thread_status) || restoredQuiescentOwner || manualFailedOwner || isDiscoveryResume(kind,payload)&&e.discovery_resume_verified===true, 'human_input_target_state_unknown');
     if (payload?.intent === 'question' && payload.thread_id !== COORDINATOR) {
       need(e.thread_status === 'idle' || restoredQuiescentOwner, 'technical_question_waits_for_idle_owner');
       need(e.queued_input === false && e.pending_dispatch === false && e.underlying_job_running === false,

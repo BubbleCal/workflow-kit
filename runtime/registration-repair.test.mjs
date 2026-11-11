@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,nativeProof,OWNER,QUEUE_ID} from './test-fixtures/reactive.mjs';
 import {reconcileArtifactBinding} from './registration-repair.mjs';
-import {reconcileQueuedFollowup,recordedReviewResolvesDecision} from './human-followup.mjs';
+import {reconcileQueuedFollowup,recordedReviewResolvesDecision,verifyFollowupTerminal} from './human-followup.mjs';
 import {reviewDecisionTaskReasons} from './review-decision.mjs';
 import {MessageTrigger} from './message-trigger.mjs';
 
@@ -149,5 +149,20 @@ test('a genuine manual followup supersedes only an unclaimed unsent trigger with
    const result=reconcileQueuedFollowup(f.c,f.input);assert.equal(result.state,'running');assert.equal(result.original_queue_consumed,false);assert.equal(f.s.openWake('T-1').turn_id,'new-native-turn');
    assert.equal(f.c.db.prepare('SELECT state FROM rt_trigger_messages WHERE id=?').get(f.w.id).state,'cancelled');assert.equal(f.c.db.prepare('SELECT queue_id FROM rt_wakes WHERE id=?').get(f.w.id).queue_id,null);
   }else{assert.throws(()=>reconcileQueuedFollowup(f.c,f.input));assert.equal(f.c.db.prepare('SELECT state FROM rt_trigger_messages WHERE id=?').get(f.w.id).state,variant);}
+ }finally{f.c.close();}}
+});
+
+
+test('terminal manual-followup proof reconciles the exact failed bound turn including native systemError',()=>{
+ for(const variant of ['valid','active','wrong-turn','truncated','unknown-action']){const f=followup();try{
+  const bound=reconcileQueuedFollowup(f.c,f.input),proof=structuredClone(f.input.native_proof);
+  proof.readback.thread.status.type='systemError';proof.readback.turns[0].status='failed';proof.readback.turns[0].error={message:'Codex: Bad Request'};
+  if(variant==='active'){proof.readback.thread.status.type='active';proof.readback.turns[0].status='inProgress';proof.readback.turns[0].error=null;}
+  if(variant==='wrong-turn')proof.readback.turns[0].id='another-real-turn';
+  if(variant==='truncated')proof.readback.turns[0].items[0].output.truncated=true;
+  if(variant==='unknown-action')f.c.db.prepare("UPDATE actions SET state='uncertain' WHERE action_key=?").run(f.key);
+  if(variant==='valid'){const result=verifyFollowupTerminal(f.c,f.s.task('T-1'),f.s.openWake('T-1'),proof);assert.equal(result.status,'failed');assert.equal(result.original_queue_consumed,false);}
+  else assert.throws(()=>verifyFollowupTerminal(f.c,f.s.task('T-1'),f.s.openWake('T-1'),proof));
+  assert.equal(f.s.openWake('T-1').id,bound.wake_id);assert.equal(f.s.openWake('T-1').state,'running');
  }finally{f.c.close();}}
 });

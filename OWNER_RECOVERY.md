@@ -183,3 +183,15 @@ For an already-running authorized original-owner correction with a stale needs_d
 
 
 Native trigger discovery begin is acknowledged from its exact registered sender/input and recorded native creation run; it does not require an old Codex queue receipt. Its unbatched source input remains trigger_pending until actual source finish/checkpoint settlement. Health reports execution_started for genuine followup/trigger turns while queue_consumed is reserved for actual native_queue consumption.
+
+### Failed manual continuation
+
+A `native_followup` wake can end with a failed native turn while its runtime row
+still says running. `runtime op recover` verifies the exact recorded sent human
+action and untruncated incoming delegation, including a terminal `systemError`,
+then records ended_unresolved without claiming old queue consumption or completion.
+Preserve healthy background jobs and source edits. A fresh, explicitly authorized
+human correction may reach an exact terminal Bad Request owner using
+`terminal_failure_proof`, expected/actual turn IDs and `native_resume_only:true`;
+automatic dispatch remains blocked. Missing, stale, active or different-turn
+evidence cannot authorize this path. Never loop retries after another failure.

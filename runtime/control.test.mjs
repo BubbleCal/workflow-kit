@@ -779,3 +779,13 @@ test('repository PR routing is preserved in actual claimed creation arguments',(
  assert.equal(s.prepare(a).prepared,true);const claim=s.claim({key:a.key,owner:'creator',evidence:a.evidence});assert.equal(claim.claimed,true);assert.equal(claim.payload.native.model,'gpt-6.1-sol');assert.equal(claim.payload.native.thinking,'xhigh');assert.deepEqual(claim.payload.difficulty_assessment.target_repositories,['lance-format/lance']);
  }finally{s.close();}
 });
+
+test('only verified manual correction can reach an exact quiescent Bad Request owner',()=>{
+ const p={thread_id:'worker-1',source_message_id:'human-recover',verbatim_text:'Recover the existing task',intent:'correction',native_resume_only:true};
+ const proof={source:'codex_app.read_thread',evidence_ref:'actual-failed-turn',checked_at:new Date(NOW).toISOString(),readback:{schemaVersion:1,thread:{id:'worker-1',kind:'codex',hostId:'local',cwd:'/task',status:{type:'systemError'}},turns:[{id:'failed-turn',status:'failed',error:{message:'{"type":"invalid_request_error","message":"Codex: Bad Request"}'}}]}};
+ const e={...common(),actual_human_message_verified:true,source_actor_verified:true,source_message_id:p.source_message_id,source_text:p.verbatim_text,input_already_delivered:false,owner_matches:true,owner_thread_id:p.thread_id,thread_status:'systemError',explicit_resume_request_verified:true,thread_archived:false,pending_dispatch:false,overlapping_owner:false,owner_workspace:'/task',actual_turn_id:'failed-turn',expected_turn_id:'failed-turn',terminal_failure_proof:proof};
+ assert.equal(assess('human_input',p,e,NOW).allowed,true);
+ for(const patch of [{actual_human_message_verified:false},{explicit_resume_request_verified:false},{thread_archived:true},{pending_dispatch:true},{actual_turn_id:'another'},{terminal_failure_proof:null},{terminal_failure_proof:{...proof,checked_at:new Date(NOW-61000).toISOString()}}])assert.equal(assess('human_input',p,{...e,...patch},NOW).allowed,false);
+ assert.equal(assess('human_input',{...p,intent:'question'},e,NOW).allowed,false);assert.equal(assess('human_input',{...p,native_resume_only:false},e,NOW).allowed,false);
+ const active=structuredClone(proof);active.readback.turns[0].status='inProgress';assert.equal(assess('human_input',p,{...e,terminal_failure_proof:active},NOW).allowed,false);
+});

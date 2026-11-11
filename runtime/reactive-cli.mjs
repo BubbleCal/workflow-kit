@@ -8,7 +8,7 @@ import {reconcileCompletedProjection,reconcileReviewWorkspace} from './closure-r
 import {reconcileCreationWorkspace} from './creation-workspace-repair.mjs';
 import {beginDiscoveryFollowup,beginDiscoveryInteractive,settleDiscoveryDelivery,recoverUnstartedDiscoveryFollowup} from './discovery-followup.mjs';
 import {reconcileArtifactBinding} from './registration-repair.mjs';
-import {reconcileQueuedFollowup} from './human-followup.mjs';
+import {reconcileQueuedFollowup,verifyFollowupTerminal} from './human-followup.mjs';
 import {verifyQueuedRecoveryProof} from './queued-resume.mjs';
 import {scheduleCalendarPreparation,prepareTaskOwner} from './calendar-preparation.mjs';
 import {transferPausedOwner} from './owner-transfer.mjs';
@@ -328,7 +328,7 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
       else if(input.op==='recover'){
         const task=state.task(input.task_id),wake=state.openWake(input.task_id);if(!task||!wake)throw new Error('No wake to reconcile');
         let proof;
-        try{proof=wake.transport==='native_trigger'?verifyTriggerExecution(control.db,wake.id,input.native_proof,{thread_id:task.owner_id,workspace:task.contract.workspace,terminal:true}):verifyExecutionProof(input.native_proof,{thread_id:task.owner_id,workspace:task.contract.workspace,prompt:wake.prompt,terminal:true});if(!proof)throw Error('Original trigger registration required');}
+        try{proof=wake.transport==='native_followup'?verifyFollowupTerminal(control,task,wake,input.native_proof):wake.transport==='native_trigger'?verifyTriggerExecution(control.db,wake.id,input.native_proof,{thread_id:task.owner_id,workspace:task.contract.workspace,terminal:true}):verifyExecutionProof(input.native_proof,{thread_id:task.owner_id,workspace:task.contract.workspace,prompt:wake.prompt,terminal:true});if(!proof)throw Error('Original trigger registration required');}
         catch(error){
           const action=control.db.prepare('SELECT * FROM actions WHERE action_key=?').get(`resume-input:${input.task_id}:${wake.queue_id}`);
           if(!action)throw error;
