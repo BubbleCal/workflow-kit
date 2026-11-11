@@ -1,99 +1,88 @@
 # Runtime-authored message trigger
 
-Yang authorized a dedicated trigger on 2026-11-11. The runtime alone registers
-immutable owner IDs, prompts, task/source revisions and delivery identities in
-`control.sqlite/rt_trigger_messages`. The trigger is a transmitter, not a
-coordinator: it does not discover work, create owners, choose routes, rewrite
-messages, change tasks, or perform product/external actions.
+The runtime prepares immutable messages; the dedicated trigger verifies native
+state, sends those exact messages and reconciles execution. Yang's 2026-11-12
+instruction removes per-run item/time caps and authorizes existing-owner recovery.
+The installed authorization is runtime.json/message_trigger/recovery_authorization_ref.
+The existing automation runs every ten minutes. Discovery retains its fifteen-minute
+start gate; maintenance retains its eight-hour cadence.
 
-The existing automation `automation-3` is retargeted to the dedicated trigger.
-Its configurable initial interval is one minute (`runtime.json/message_trigger`).
-It does not change discovery's fifteen-minute gate, maintenance's eight-hour gate,
-or any owner-reported next-action time. Processing off disables sending.
+## Process the complete work set
 
-## Each scheduled invocation
+Use node /absolute/instance/workflow.mjs runtime trigger --file <request.json>.
 
-Use supported native tools and the public command:
+1. Save a genuine self read_thread proof and call op=run. If allowed=false, end.
+   Otherwise process the complete result of op=pending: messages, unresolved,
+   executions and discoveries. There is no item count or fifty-second deadline.
+   Refresh the self proof as needed; its actual native turn must remain active.
+2. Check every executions entry with its read_arguments. Active owners are left
+   alone. For an ended/failed turn obtain includeOutputs=true and enough output
+   to retain the exact complete incoming delivery. Call op=watch with wake_id,
+   native_proof and fresh actor_proof. Actual native evidence, not a running ledger
+   label, decides whether execution ended. A different native turn is preserved.
+3. Check every discoveries entry the same way and use op=watch_discovery with
+   batch_id/generation. Recovery preserves the source snapshot, pages/cursors,
+   coverage and owner-creation receipts. Normal scheduling still enforces the
+   discovery start gate. Never invent completed source coverage or effects.
+4. Handle every unresolved receipt. If its exact incoming message is found, use
+   observe and then watch/watch_discovery for a terminal run. If there is no
+   delivery proof, never resend or expire the claim merely because time passed.
+   For a claimed attempt known to have stopped before sending, read its original
+   sender_turn_id from this trigger's history. Complete terminal sender history
+   must end at the exact successful claim command, with no later send. Only then
+   call release_unsent with id, attempt_id, sender_turn_id, sender_native_proof,
+   owner_native_proof, evidence_ref and fresh actor_proof. The original owner must
+   still be at the quiescent preflight turn. The runtime retains the old attempt.
+   Unknown outcomes stay unresolved; record the exact blocker and continue others.
+5. For every pending message read the named target. Ordinary messages require an
+   idle/notLoaded owner with a completed, error-free latest turn. For notLoaded,
+   attach the actual list_threads(mode=history,archived=false) page containing
+   the exact local thread/cwd as active_listing. Do not navigate the UI.
+6. Call prepare with id/native_proof/actor_proof. Get a second fresh target proof,
+   then claim with id/digest/native_proof/actor_proof. Only send=true authorizes
+   one native send_message_to_thread with the returned arguments unchanged.
+   Owner proofs must be at most fifteen seconds old and the second must be newer.
+   Refresh proofs throughout a long invocation; never refresh old timestamps.
+7. Save the entire native return before another action, then settle the exact
+   id/attempt_id with native_result/evidence_ref/actor_proof. Read the target with
+   includeOutputs=true and call observe. Only a distinct actual native turn with
+   the exact sender and prompt proves execution. An ACK or same-turn steering
+   does not. Owner autonomy may bind begin automatically from actual execution.
+8. Read pending again to pick up new recovery messages or arrivals. Process every
+   eligible new message. Track visited IDs and disposition per invocation: skip
+   busy, paused, decision-bound, not-yet-due or unresolved entries after recording
+   their blocker, rather than polling them in a tight loop. Finish when no new
+   eligible work remains. A blocked owner never stops processing other owners.
 
-`node /Users/yang/.codex/workflow-system/workflow.mjs runtime trigger --file <JSON request>`
+Keep summaries compact and save full proofs under observations/message-trigger/
+<native-trigger-turn>/. Do not dump entire histories into the working context.
+Do not create another timer, coordinator, task/chat, or change models/permissions.
+Do not perform product work, external comments/reviews, Slack/email or deployment.
+Routine completion is quiet; preserve actual decision/completion notification rules.
 
-1. Read this trigger's actual latest native turn and persist the exact envelope.
-   Wrap it with `source:"codex_app.read_thread"`, a real immediate `checked_at`,
-   `evidence_ref`, and `readback`. Call `op:"run",native_proof:<wrapper>`.
-   End immediately if `allowed:false`. Do not create another timer or loop until
-   the next scheduled occurrence. Stop this invocation within fifty seconds.
-2. Call `op:"pending",limit:4`. Empty results require no other work or notification.
-   Read only the named target owners; never scan unrelated conversations.
-3. For a pending message, read its `read_arguments`. Skip active, failed,
-   interrupted, awaiting-user/approval, archived or unknown owners. A `notLoaded`
-   owner additionally requires an actual `list_threads(mode:"history",
-   archived:false)` page containing that exact local thread/cwd. Attach its exact
-   wrapper as `active_listing` (source `codex_app.list_threads`, checked_at,
-   request, readback). Page only as needed; if identity is unknown, skip it.
-4. Call `op:"prepare",id,actor_proof:<self>,native_proof:<target>`.
-   Save the returned digest and expected turn. No send is authorized yet.
-5. Obtain a **second** fresh target readback, then call `op:"claim",id,digest,
-   actor_proof:<fresh self>,native_proof:<second target>`. A proof must be at most
-   fifteen seconds old; the second observation must be newer and show the same
-   terminal turn. The runtime rechecks task/member revisions, holds, wait time,
-   processing, ownership and competing effects. Only `send:true` grants one send.
-6. Call `codex_app.send_message_to_thread` with the returned `arguments` exactly.
-   Do not add model/thinking overrides, edit prompt text, append instructions,
-   use a shell substitute, open any UI, or send a second copy. Save the entire
-   native return **before** another action, then call `op:"settle",id,attempt_id,
-   actor_proof:<fresh self>,native_result:<exact return>,evidence_ref:<saved file>`.
-   Errors/timeouts remain uncertain. Never assume an error proves no delivery.
-7. Read the target with `includeOutputs:true,maxOutputCharsPerItem:16000`, retain
-   its complete incoming delegation, then call `op:"observe",id,actor_proof,
-   native_proof`. Only a distinct actual turn containing the exact registered
-   sender/input proves execution. An ACK alone is not execution; same-turn
-   steering is not a successful idle dispatch. If observation is not yet possible,
-   retain the send receipt and continue only independent candidates.
-8. In later runs, inspect at most two `unresolved` entries using the same bounded
-   native readback/observe path. Never resend a claimed, sent or uncertain entry,
-   expire its claim, replace its message, or reconstruct missing evidence.
-   Preserve unresolved conditions for existing maintenance. End quietly after
-   the bounded batch; do not message main with routine transport updates.
+## Recovery semantics
 
-Use real wall-clock checked_at values immediately after each native tool returns;
-never refresh an old proof's timestamp. Persist proofs/requests/results under
-`observations/message-trigger/<native-trigger-turn>/`, using distinct immutable
-files per attempt. A self proof expires after sixty seconds; refresh it as needed.
+watch uses the same exact-delivery terminal verification as manual runtime recover,
+including native_trigger, native_followup and already-consumed native_queue runs.
+If a valid wait/decision/completion was recorded, it closes the execution without
+reopening that outcome. An unfinished ordinary completed turn or an exact native
+Bad Request may receive one distinct continuation for that actual ended turn.
+The runtime authors it and includes instructions to read saved results and existing
+jobs first. Healthy builds, edits and completed experiments are retained.
 
-## Receiver and transport rules
+Failed-state sends are allowed only for that runtime-recorded recovery, under the
+actual standing human authorization, for the same original owner and failed turn.
+Ordinary messages never bypass a failed target. Repeated failures back off between
+invocations; they do not create a same-run retry loop. Unknown errors, interrupted
+work, explicit pauses, real human decisions and uncertain external effects remain
+protected. Fixed service batches retain their specialized recovery protocol.
 
-Explicit human maintenance may use `trigger op=reconcile_unsent` for an orphaned
-claim only when fresh complete native sender history ends at the exact successful
-claim command, before any send, and the owner remains at the original quiescent
-preflight turn. The original attempt is archived; the same immutable message
-returns to pending. Missing receipts, timeouts or an idle owner alone never prove
-non-delivery. A real new human followup may supersede a strictly unclaimed pending
-trigger delivery through `reconcile_followup`; claimed/sent/uncertain attempts stay
-protected until their actual outcomes are proved.
+Recovery preserves original transport receipts and never claims an unconsumed
+queue was consumed. Discovery recovery never advances coverage. Reconciliation
+and sending remain separate; a recovery report is not product acceptance.
 
-For authorized ordinary owner loops, observe automatically registers begin from
-the verified actual running turn. The receiver uses runtime work; it supplies its
-own proof only when automatic binding has not yet happened. Services/discovery
-retain their specialized protocols. For trigger-delivered
-input, the initial self `read_thread` proof must use `includeOutputs:true` and
-preserve the complete incoming `send_message_to_thread` functionCallOutput.
-The runtime verifies the original trigger sender and exact immutable prompt;
-it never invents a userMessage. Discovery retains its exact source batch,
-generation, source coverage, native creation actor and guarded owner setup.
-
-Pending events coalesce before registration. A changed context can supersede only
-an unsent registration, preserving unhandled events for the next message. Once a
-claim exists, it is not replayed automatically. A fresh successor cycle gets a
-new identity. Explicit pauses, decisions, source scope, external-action gates,
-expected heads and native model/permission settings remain unchanged.
-
-Already accepted or uncertain native queues retain their original receipts and
-are not converted to direct messages. Their old idle-only loader remains subject
-to the existing configurable ten-minute input-idle gate; the trigger never opens
-or selects chats. On-request main delivery remains on request. Original owners
-still own all review/merge/completion delivery.
-
-The native send tool has no atomic idle-only predicate. Two observations reduce
-the status-check/send race, but cannot eliminate a simultaneous human start.
-Actual turn readback detects same-turn steering or a missing start; preserve it
-as unresolved rather than claiming reliable execution or blindly retrying.
+Native send has no atomic idle-only predicate. Two observations reduce the race
+with a new human turn; actual readback detects missing starts or same-turn steering.
+Preserve uncertainty rather than replaying an ambiguous send. The trigger never
+opens/selects a chat. The old queued-chat loader retains its separate configurable
+ten-minute keyboard/mouse-inactivity condition.

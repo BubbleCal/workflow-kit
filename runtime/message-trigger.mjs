@@ -3,6 +3,7 @@ import {ownerAutonomyPolicy} from './owner-continuation.mjs';
 import {randomUUID,createHash} from 'node:crypto';
 import {nativeReadback,verifyNativeBinding} from './native-queue.mjs';
 import {triggerMessage,verifyTriggerExecution} from './trigger-proof.mjs';
+import {TriggerFallback} from './trigger-fallback.mjs';
 
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const parse=r=>({...r,data:JSON.parse(r.data)});
@@ -22,6 +23,7 @@ export class MessageTrigger {
    created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,last_offered_at INTEGER NOT NULL DEFAULT 0);
    CREATE TABLE IF NOT EXISTS rt_trigger_runs (turn_id TEXT PRIMARY KEY,started_at INTEGER NOT NULL,source_thread_id TEXT NOT NULL);`);
   if(!this.db.prepare('PRAGMA table_info(rt_trigger_messages)').all().some(c=>c.name==='last_offered_at'))this.db.exec('ALTER TABLE rt_trigger_messages ADD COLUMN last_offered_at INTEGER NOT NULL DEFAULT 0');
+  this.fallback=new TriggerFallback(control,config);
  }
  get policy(){return this.config.message_trigger;}
  actor(proof){
@@ -41,6 +43,7 @@ export class MessageTrigger {
  reasons(r){
   if(!this.policy?.enabled||r.sender_id!==this.policy.thread_id)return['trigger_binding_changed'];
   if(this.db.prepare("SELECT value FROM settings WHERE key='processing'").get()?.value!=='on')return['processing_paused'];
+  const recoveryReasons=this.fallback.reasons(r);if(recoveryReasons.length)return recoveryReasons;
   if(r.owner_id===this.policy.thread_id||r.owner_id===this.config.inbox?.thread_id&&this.config.inbox?.delivery_mode==='on_request')return['human_only_or_self_target'];
   if(r.kind==='discovery'){
    const b=this.c.discovery.batch(r.data.batch_id);
@@ -69,6 +72,8 @@ export class MessageTrigger {
  registerTask(task,wake,prompt){
   return this.c.atomic(()=>{
    if(!wake)return{registered:false,reason:'no_due_wake'};
+   const recovery=this.fallback.registration('task',task.owner_id,task.task_id,wake.id);
+   if(recovery?.deferred)return{registered:false,reason:'recovery_backoff',next_at:recovery.next_at};
    this.db.prepare("UPDATE rt_trigger_messages SET state='cancelled',updated_at=? WHERE task_id=? AND state='pending' AND id<>? AND id IN (SELECT id FROM rt_wakes WHERE state IN ('superseded','finished','ended_unresolved'))").run(this.now(),task.task_id,wake.id);
    const old=triggerMessage(this.db,wake.id);
    if(old){
@@ -76,39 +81,44 @@ export class MessageTrigger {
      this.db.prepare("UPDATE rt_trigger_messages SET state='cancelled',updated_at=? WHERE id=? AND state='pending'").run(this.now(),old.id);
      this.db.prepare("UPDATE rt_wakes SET state='superseded',completed_at=? WHERE id=? AND state='reserved'").run(this.now(),old.id);
      return{registered:false,reason:'unsent_message_superseded',events_preserved:true};
-    }return{registered:true,id:old.id,state:old.state};
+    }if(old.state==='pending')this.fallback.attach(old);return{registered:true,id:old.id,state:old.state};
    }
    if(!this.policy?.enabled||wake.state!=='reserved'||wake.queue_id||wake.transport!=='native_queue'||wake.owner_id!==task.owner_id||
     this.db.prepare("SELECT 1 FROM actions WHERE action_key=? AND state IN ('claimed','sent','uncertain')").get(wake.id))return{registered:false,reason:'preserve_existing_transport'};
+   if(recovery)prompt+='\n本次接续已中断的执行：先读上次结果和现有作业，保留健康编译、代码与已完成实验，再从 checkpoint 继续；不要重启或重复整轮工作。';
    const members=wake.member_ids.map(id=>{const t=this.s.task(id);return{task_id:id,context_rev:t.context_rev,plan_rev:t.plan_rev,contract_rev:t.contract_rev};});
    this.db.prepare("UPDATE rt_wakes SET prompt=?,transport='native_trigger' WHERE id=? AND state='reserved'").run(prompt,wake.id);
    const r={id:wake.id,kind:'task',task_id:task.task_id,owner_id:task.owner_id,sender_id:this.policy.thread_id,workspace:task.contract.workspace,prompt,data:{members,authorization_ref:this.policy.authorization_ref}};
+   this.fallback.attach(r);
    const reasons=this.reasons(r);if(reasons.length)throw Error(reasons.join(','));
    this.insert(r);return{registered:true,id:r.id,state:'pending',native_message_sent:false};
   });
  }
  registerDiscovery(batch){
   return this.c.atomic(()=>{
-   const old=triggerMessage(this.db,batch.mail_key);if(old)return{registered:true,id:old.id,state:old.state};
+   const recovery=this.fallback.registration('discovery',this.c.discovery.config.threads.discovery,null,batch.mail_key);
+   if(recovery?.deferred)return{registered:false,reason:'recovery_backoff',next_at:recovery.next_at};
+   const old=triggerMessage(this.db,batch.mail_key);if(old){if(old.state==='pending')this.fallback.attach(old);return{registered:true,id:old.id,state:old.state};}
    const r={id:batch.mail_key,kind:'discovery',task_id:null,owner_id:this.c.discovery.config.threads.discovery,sender_id:this.policy.thread_id,workspace:this.c.discovery.config.thread_workspaces?.discovery??this.c.discovery.config.scope.project_root,prompt:batch.prompt,data:{batch_id:batch.id,generation:batch.generation,authorization_ref:this.policy.authorization_ref}};
+   this.fallback.attach(r);
    const reasons=this.reasons(r);if(reasons.length)throw Error(reasons.join(','));this.insert(r);return{registered:true,id:r.id,state:'pending'};
   });
  }
  insert(r){if(typeof r.prompt!=='string'||!r.prompt.trim()||Buffer.byteLength(r.prompt)>65536)throw Error('Bounded immutable prompt required');
   this.db.prepare("INSERT INTO rt_trigger_messages(id,kind,task_id,owner_id,sender_id,workspace,prompt,digest,data,state,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?)")
    .run(r.id,r.kind,r.task_id,r.owner_id,r.sender_id,r.workspace,r.prompt,hash(r.prompt),JSON.stringify(r.data),this.now(),this.now());}
- pending({limit=8}={}){
-  if(!Number.isInteger(limit)||limit<1||limit>8)throw Error('Bounded trigger page required');
+ pending(){
   return this.c.atomic(()=>{
-   const rows=this.db.prepare("SELECT * FROM rt_trigger_messages WHERE state='pending' ORDER BY last_offered_at,created_at,id").all().map(parse).filter(r=>!this.reasons(r).length).slice(0,limit);
-   const unresolved=this.db.prepare("SELECT id,owner_id,state,attempt_id FROM rt_trigger_messages WHERE state IN ('claimed','uncertain') OR state='sent' AND execution_turn IS NULL ORDER BY last_offered_at,created_at,id LIMIT 2").all();
+   const rows=this.db.prepare("SELECT * FROM rt_trigger_messages WHERE state='pending' ORDER BY last_offered_at,created_at,id").all().map(parse).filter(r=>!this.reasons(r).length);
+   const unresolved=this.db.prepare("SELECT id,kind,task_id,owner_id,workspace,state,attempt_id,claimed_at,json_extract(data,'$.claimed_by_turn') sender_turn_id FROM rt_trigger_messages WHERE state IN ('claimed','uncertain') OR state='sent' AND execution_turn IS NULL ORDER BY last_offered_at,created_at,id").all();
    // An active owner must not keep later idle owners behind the same first page.
    for(const r of [...rows,...unresolved])this.db.prepare('UPDATE rt_trigger_messages SET last_offered_at=? WHERE id=?').run(this.now(),r.id);
-   return{messages:rows.map(r=>({id:r.id,kind:r.kind,task_id:r.task_id,thread_id:r.owner_id,workspace:r.workspace,digest:r.digest,read_arguments:{threadId:r.owner_id,hostId:'local',turnLimit:1,includeOutputs:false,maxOutputCharsPerItem:1200}})),unresolved};
+   return{messages:rows.map(r=>({id:r.id,kind:r.kind,task_id:r.task_id,thread_id:r.owner_id,workspace:r.workspace,digest:r.digest,read_arguments:{threadId:r.owner_id,hostId:'local',turnLimit:1,includeOutputs:false,maxOutputCharsPerItem:1200}})),unresolved,executions:this.fallback.executions(),discoveries:this.fallback.discoveries()};
   });
  }
  target(r,proof){
   const at=Date.parse(proof?.checked_at);if(!Number.isFinite(at)||this.now()-at>15000)throw Error('Immediate fresh owner state required');
+  if(this.fallback.failedTarget(r,proof))return nativeReadback(proof.readback).turns[0].id;
   verifyNativeBinding(proof,{thread_id:r.owner_id,workspace:r.workspace,now:this.now()});
   const read=nativeReadback(proof.readback),t=read.turns?.[0];
   if(!['idle','notLoaded'].includes(read.thread.status.type)||(read.thread.status.activeFlags??[]).length||t?.status!=='completed'||t.error)throw Error('Owner is busy, awaiting input or failed; preserve it');
@@ -121,13 +131,13 @@ export class MessageTrigger {
    return{send:false,prepared:true,id,digest:r.digest,expected_turn_id:turn};});
  }
  claim({id,digest,native_proof,actor_proof}){
-  return this.c.atomic(()=>{const actor=this.actor(actor_proof);const run=this.db.prepare('SELECT started_at FROM rt_trigger_runs WHERE turn_id=?').get(actor);if(!run)throw Error('Begin the bounded trigger run first');if(this.now()-run.started_at>50000)return{send:false,reason:'trigger_run_budget'};
+  return this.c.atomic(()=>{const actor=this.actor(actor_proof);const run=this.db.prepare('SELECT started_at FROM rt_trigger_runs WHERE turn_id=?').get(actor);if(!run)throw Error('Begin the trigger run first');
    const r=triggerMessage(this.db,id);if(!r||r.state!=='pending')return{send:false,reason:r?.state??'missing'};
    const reasons=this.reasons(r);if(reasons.length)return{send:false,reasons};
    const turn=this.target(r,native_proof),at=Date.parse(native_proof.checked_at);
    if(r.digest!==digest||hash(r.prompt)!==digest||r.preflight_turn!==turn||!r.preflight_at||at<=r.preflight_at||this.now()-r.preflight_at>30000)return{send:false,reason:'owner_turn_or_preflight_changed'};
    if(this.db.prepare("SELECT 1 FROM rt_trigger_messages WHERE owner_id=? AND id<>? AND state IN ('claimed','uncertain')").get(r.owner_id,id))return{send:false,reason:'owner_send_in_flight'};
-   const attempt=randomUUID();this.db.prepare("UPDATE rt_trigger_messages SET state='claimed',attempt_id=?,claimed_at=?,updated_at=? WHERE id=? AND state='pending'").run(attempt,this.now(),this.now(),id);
+   const attempt=randomUUID();this.db.prepare("UPDATE rt_trigger_messages SET state='claimed',attempt_id=?,claimed_at=?,updated_at=?,data=? WHERE id=? AND state='pending'").run(attempt,this.now(),this.now(),JSON.stringify({...r.data,claimed_by_turn:actor}),id);
    if(r.kind==='task')this.db.prepare("UPDATE rt_wakes SET state='claimed' WHERE id=? AND state='reserved'").run(id);
    return{send:true,id,attempt_id:attempt,digest,arguments:{threadId:r.owner_id,hostId:'local',prompt:r.prompt},execution_verified:false};});
  }
@@ -157,4 +167,8 @@ export class MessageTrigger {
   }
   return observed;
  }
+ recoveryActor(proof){const turn=this.actor(proof);if(!this.db.prepare('SELECT 1 FROM rt_trigger_runs WHERE turn_id=?').get(turn))throw Error('Begin the trigger run before recovery');}
+ watch(input){this.recoveryActor(input.actor_proof);return this.fallback.watch(input);}
+ watch_discovery(input){this.recoveryActor(input.actor_proof);return this.fallback.watchDiscovery(input);}
+ release_unsent(input){this.recoveryActor(input.actor_proof);return this.fallback.releaseUnsent(input);}
 }

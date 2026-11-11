@@ -7,7 +7,7 @@ import {triggerMessage,verifyTriggerExecution,settleTriggerDiscovery} from './tr
 import {ReactiveDriver} from './reactive-driver.mjs';
 import {workFixture,DISCOVERY} from './test-fixtures/work.mjs';
 import {Mailbox} from './mailbox.mjs';
-import {mkdtempSync,rmSync} from 'node:fs';
+import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 const TRIGGER='44444444-4444-4444-8444-444444444444';
@@ -124,16 +124,21 @@ test('discovery uses the same immutable source batch and original creation actor
  }finally{mailbox?.close();await driver?.close();f.c.close();rmSync(dir,{recursive:true,force:true});}
 });
 
-test('a busy first owner cannot starve later owners across bounded trigger invocations',()=>{
- const f=setup();try{const first=f.register();const original=f.s.task('T-1').contract;
- for(let n=2;n<=5;n++){const owner=`${n}1111111-1111-4111-8111-111111111111`,id=`T-${n}`;f.s.adopt({task_id:id,owner_thread_id:owner,contract:{...original,canonical_key:'work-'+n},source_message_id:'human:distinct-work',actual_human_verified:true});f.s.setMode({task_id:id,mode:'active',source_message_id:'human:start',actual_human_verified:true,native_binding:nativeProof({thread:owner,status:'completed',now:f.now()}),queue_compatibility_verified:true,legacy_quiescent:true});f.s.ingest({event_id:'event-'+n,task_id:id,source:'actual',subject:'work-'+n,type:'change',observed_at:f.now(),payload:{changed:true},evidence_ref:'actual-source',debounce_ms:0});const w=f.s.reserveQueuedWake(id).wake;f.q.registerTask(f.s.task(id),w,'Exact work '+n);}
- const seen=[];for(let n=0;n<5;n++){seen.push(f.q.pending({limit:1}).messages[0].id);f.advance(60000);}assert.equal(new Set(seen).size,5);assert.equal(seen[0],first);assert.equal(triggerMessage(f.c.db,first).state,'pending');
+test('one trigger snapshot returns every pending target and unresolved receipt, even for old limited callers',()=>{
+ const f=setup();try{const original=f.s.task('T-1').contract,ids=[f.register()];
+  for(let n=2;n<=14;n++){const owner=n.toString(16).padStart(8,'0')+'-1111-4111-8111-111111111111',id='T-'+n;
+   f.s.adopt({task_id:id,owner_thread_id:owner,contract:{...original,canonical_key:'work-'+n},source_message_id:'human:distinct-work',actual_human_verified:true});
+   f.s.setMode({task_id:id,mode:'active',source_message_id:'human:start',actual_human_verified:true,native_binding:nativeProof({thread:owner,status:'completed',now:f.now()}),queue_compatibility_verified:true,legacy_quiescent:true});
+   f.s.ingest({event_id:'event-'+n,task_id:id,source:'actual',subject:'work-'+n,type:'change',observed_at:f.now(),payload:{changed:true},evidence_ref:'actual-source',debounce_ms:0});const w=f.s.reserveQueuedWake(id).wake;f.q.registerTask(f.s.task(id),w,'Exact work '+n);ids.push(w.id);
+  }
+  for(const id of ids.slice(0,5))f.c.db.prepare("UPDATE rt_trigger_messages SET state='uncertain' WHERE id=?").run(id);
+  const result=f.q.pending({limit:4});assert.equal(result.messages.length,9);assert.equal(result.unresolved.length,5);assert.equal(new Set(result.messages.map(r=>r.thread_id)).size,9);
  }finally{f.c.close();}
 });
 
-
-test('the trigger cannot send beyond its bounded run even with fresh owner proofs',()=>{
- const f=setup();try{const id=f.register();f.q.run({native_proof:f.actor()});f.advance(50001);const p=f.q.prepare({id,actor_proof:f.actor(),native_proof:f.owner()});f.advance(1);assert.equal(f.q.claim({id,digest:p.digest,actor_proof:f.actor(),native_proof:f.owner()}).reason,'trigger_run_budget');assert.equal(triggerMessage(f.c.db,id).state,'pending');}finally{f.c.close();}
+test('a long trigger invocation may keep draining while each actor and owner proof remains fresh',()=>{
+ const f=setup();try{const id=f.register();f.q.run({native_proof:f.actor()});f.advance(55000);const p=f.q.prepare({id,actor_proof:f.actor(),native_proof:f.owner()});f.advance(1);assert.equal(f.q.claim({id,digest:p.digest,actor_proof:f.actor(),native_proof:f.owner()}).send,true);
+ }finally{f.c.close();}
 });
 
 test('autonomous trigger observation binds real ordinary work before sender ACK and never reopens a finished cycle',()=>{
@@ -157,4 +162,85 @@ test('autonomous observation never binds a paused task or interprets a terminal 
   const proof=relay(f,id,{status:stopped==='terminal'?'completed':'inProgress'}),observed=f.q.observe({id,native_proof:proof,actor_proof:f.actor()});
   assert.equal(observed.execution_observed,true);assert.notEqual(f.s.openWake('T-1')?.state,'running');assert.notEqual(observed.execution_bound,true);
  }finally{f.c.close();}}
+});
+
+function recoveryFixture(){
+ const f=setup(),dir=mkdtempSync(join(tmpdir(),'trigger-recovery-')),human=nativeProof({thread:'main',turn:'human-recovery',message:'Drain all work and recover failed owners',now:f.now()});
+ human.readback.turns[0].items[0].id='human:recovery';
+ const authority={enabled:true,allow_existing_owner_recovery:true,source_message_id:'human:recovery',source_thread_id:'main',source_turn_id:'human-recovery',verbatim_text:'Drain all work and recover failed owners',human_authorization:human};
+ writeFileSync(join(dir,'authority.json'),JSON.stringify(authority));f.c.work.config.instance_root=dir;f.cfg.message_trigger.recovery_authorization_ref=join(dir,'authority.json');
+ const active=()=>{const id=f.register();f.claim(id);f.s.begin({task_id:'T-1',wake_id:id,native_proof:relay(f,id)});return id;};
+ const ended=(id,status='failed')=>{const p=relay(f,id,{status}),t=p.readback.turns[0];t.completedAt=f.now()/1000;if(status==='failed'){p.readback.thread.status.type='systemError';t.error={message:'{"type":"invalid_request_error","message":"Codex: Bad Request"}'};}return p;};
+ const close=()=>{f.c.close();rmSync(dir,{recursive:true,force:true});};return{...f,dir,active,ended,close};
+}
+
+test('trigger fallback closes exact failed execution and sends one distinct checkpoint continuation, with backoff on repeated failures',()=>{
+ const f=recoveryFixture();try{const id=f.active(),proof=f.ended(id);
+  assert.equal(f.q.pending().executions.some(r=>r.id===id),true);
+  const r=f.q.watch({wake_id:id,native_proof:proof,actor_proof:f.actor()});assert.equal(r.resume,true);assert.equal(f.s.openWake('T-1'),null);
+  assert.equal(f.c.db.prepare('SELECT state FROM rt_wakes WHERE id=?').get(id).state,'ended_unresolved');
+  assert.equal(f.q.watch({wake_id:id,native_proof:proof,actor_proof:f.actor()}).reason,'execution_already_closed');
+  const next=f.register();assert.notEqual(next,id);assert.match(triggerMessage(f.c.db,next).prompt,/健康编译/);
+  const prepared=f.q.prepare({id:next,native_proof:proof,actor_proof:f.actor()});assert(prepared.prepared);f.advance(1);
+  const fresh=f.ended(id),claim=f.q.claim({id:next,digest:prepared.digest,native_proof:fresh,actor_proof:f.actor()});assert(claim.send);
+  f.s.begin({task_id:'T-1',wake_id:next,native_proof:relay(f,next,{turn:'second-native-turn'})});
+  const failedAgain=relay(f,next,{turn:'second-native-turn',status:'failed'});failedAgain.readback.thread.status.type='systemError';failedAgain.readback.turns[0].error={message:'{"type":"invalid_request_error","message":"Codex: Bad Request"}'};
+  const again=f.q.watch({wake_id:next,native_proof:failedAgain,actor_proof:f.actor()});assert.equal(again.attempt,2);assert(again.not_before>f.now());
+  const w=f.s.reserveQueuedWake('T-1').wake;assert.equal(f.q.registerTask(f.s.task('T-1'),w,'next recovery').reason,'recovery_backoff');
+  assert.equal(f.c.db.prepare('SELECT count(*) n FROM rt_trigger_recoveries').get().n,2);
+ }finally{f.close();}
+});
+
+test('fallback preserves active work, future source waits, exact human decisions, paused owners and uncertain effects',()=>{
+ for(const variant of ['active','different','paused','wait','decision','uncertain','wrong-input','stale']){const f=recoveryFixture();try{const id=f.active();let proof=f.ended(id);
+  if(variant==='active')proof=relay(f,id);
+  if(variant==='different')proof.readback.turns[0].id='different-real-turn';
+  if(variant==='paused')f.mode('paused');
+  if(variant==='wait')f.decide({wake_id:id,disposition:'wait',plan:undefined,next_action_at:new Date(f.now()+60000).toISOString()});
+  if(variant==='decision')f.decide({wake_id:id,disposition:'needs_decision',plan:undefined});
+  if(variant==='uncertain')f.c.db.prepare("INSERT INTO actions(action_key,kind,task_id,scope_key,digest,payload,state,due,created_at,updated_at) VALUES ('unknown','merge','T-1','scope','digest','{}','uncertain',0,0,0)").run();
+  if(variant==='wrong-input')proof.readback.turns[0].items[0].output.text='Not the actual delivery';
+  if(variant==='stale')f.advance(61000);
+  if(['uncertain','wrong-input','stale'].includes(variant))assert.throws(()=>f.q.watch({wake_id:id,native_proof:proof,actor_proof:f.actor()}));
+  else{const r=f.q.watch({wake_id:id,native_proof:proof,actor_proof:f.actor()});if(['wait','decision'].includes(variant)){assert.equal(r.finished,true);assert.equal(f.s.task('T-1').status,variant==='wait'?'waiting':'needs_decision');}else assert(r.preserved);}
+  assert.equal(f.c.db.prepare('SELECT count(*) n FROM rt_trigger_recoveries').get().n,0);
+ }finally{f.close();}}
+});
+
+test('trigger fallback also monitors an actual human-followup wake with no trigger-message row',()=>{
+ const f=recoveryFixture();try{f.q.run({native_proof:f.actor()});const w=f.s.reserveQueuedWake('T-1').wake,prompt='Actual authorized human continuation',key='human-recovery-action';
+  const p={intent:'correction',thread_id:OWNER,source_message_id:'human:resume',source_thread_id:'main',source_turn_id:'human-turn',verbatim_text:'Continue the original work',prompt};
+  f.c.db.prepare("INSERT INTO actions(action_key,kind,task_id,scope_key,digest,payload,state,owner,receipt,due,created_at,updated_at) VALUES (?,'human_input','T-1','scope','digest',?,'sent','main',?,0,?,?)").run(key,JSON.stringify(p),JSON.stringify({outcome:'sent',native_result:{structuredContent:{threadId:OWNER}}}),f.now(),f.now());
+  f.c.db.prepare("UPDATE rt_wakes SET state='running',transport='native_followup',prompt=?,turn_id='manual-native-turn',started_at=? WHERE id=?").run(prompt,f.now(),w.id);f.s.diagnostic('followup-binding:'+w.id,{action_key:key});
+  const proof=nativeProof({turn:'manual-native-turn',status:'failed',now:f.now()});proof.readback.thread.status.type='systemError';proof.readback.turns[0].error={message:'{"type":"invalid_request_error","message":"Codex: Bad Request"}'};proof.readback.turns[0].items=[{type:'functionCallOutput',namespace:'codex_app',name:'send_message_to_thread',output:{truncated:false,text:`<codex_delegation>\n  <source_thread_id>main</source_thread_id>\n  <input>${prompt}</input>\n</codex_delegation>`}}];
+  assert.equal(f.q.pending().executions[0].transport,'native_followup');assert.equal(f.q.watch({wake_id:w.id,native_proof:proof,actor_proof:f.actor()}).resume,true);
+ }finally{f.close();}
+});
+
+test('a later authorized trigger can release a proven-unsent orphan using the original terminal sender history',()=>{
+ const f=unsentClaim(),dir=mkdtempSync(join(tmpdir(),'trigger-unsent-policy-'));try{
+  const {source_message_id,source_thread_id,source_turn_id,verbatim_text,human_authorization}=f.input;
+  writeFileSync(join(dir,'authority.json'),JSON.stringify({enabled:true,allow_existing_owner_recovery:true,source_message_id,source_thread_id,source_turn_id,verbatim_text,human_authorization}));f.cfg.message_trigger.recovery_authorization_ref=join(dir,'authority.json');
+  f.advance(60001);f.q.run({native_proof:f.actor()});const sender=structuredClone(f.input.sender_native_proof);sender.checked_at=new Date(f.now()).toISOString();
+  const result=f.q.release_unsent({...f.input,sender_native_proof:sender,owner_native_proof:f.owner(),actor_proof:f.actor()});
+  assert.equal(result.native_send_invoked,false);assert.equal(triggerMessage(f.c.db,f.id).state,'pending');assert.equal(f.c.db.prepare('SELECT count(*) n FROM rt_trigger_claim_recovery').get().n,1);
+ }finally{f.c.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('trigger fallback checkpoints an exact failed discovery run without losing its snapshot, coverage or original receipt',async()=>{
+ const f=workFixture(),dir=mkdtempSync(join(tmpdir(),'trigger-source-recovery-'));let driver;try{
+  f.config.instance_root=dir;f.work.setPolicy({key:'discovery_owns_creation',enabled:true,allowed_kinds:['work'],source_message_id:'human:creation',verbatim_text:'Discovery creates accepted tasks',actual_human_verified:true,evidence_ref:'original-creation-authority'});
+  const task=f.work.create({canonical_key:'real-source-work',title:'Accepted work',objective:'Implement scoped work',requirements:[{id:'done',text:'Verify result'}]}).task;f.accept(task.id);
+  const cfg=config(),human=nativeProof({thread:'main',turn:'human-turn',message:'Recover existing execution',now:f.now()});human.readback.turns[0].items[0].id='human:recover';
+  writeFileSync(join(dir,'authority.json'),JSON.stringify({enabled:true,allow_existing_owner_recovery:true,source_message_id:'human:recover',source_thread_id:'main',source_turn_id:'human-turn',verbatim_text:'Recover existing execution',human_authorization:human}));cfg.message_trigger.recovery_authorization_ref=join(dir,'authority.json');
+  const q=new MessageTrigger(f.c,cfg);driver=new ReactiveDriver({root:dir,control:f.c,queue:{enqueue(){assert.fail('No native queue submission');}},config:cfg,capability:{verified:true},now:f.now,log:()=>{}});
+  await driver.discoveryTick();const id=q.pending().messages[0].id,r=triggerMessage(f.c.db,id),b=f.c.discovery.batch(r.data.batch_id),snapshot=JSON.stringify(b.snapshot);
+  const actor=()=>nativeProof({thread:TRIGGER,workspace:'/trigger',turn:'trigger-run',now:f.now()}),owner=()=>nativeProof({thread:DISCOVERY,status:'completed',turn:'previous-discovery',now:f.now()});q.run({native_proof:actor()});const p=q.prepare({id,actor_proof:actor(),native_proof:owner()});f.advance(1);const claim=q.claim({id,digest:p.digest,actor_proof:actor(),native_proof:owner()});
+  f.c.discovery.begin({batch_id:b.id,generation:b.generation,native_proof:relay(f,id,{turn:'actual-source-turn'})});q.settle({id,attempt_id:claim.attempt_id,actor_proof:actor(),native_result:{structuredContent:{threadId:DISCOVERY}},evidence_ref:'original-send-ack'});
+  assert.equal(q.pending().discoveries.length,1);
+  const proof=relay(f,id,{turn:'actual-source-turn',status:'failed'});proof.readback.thread.status.type='systemError';proof.readback.turns[0].error={message:'{"type":"invalid_request_error","message":"Codex: Bad Request"}'};
+  const recovered=q.watch_discovery({batch_id:b.id,generation:b.generation,native_proof:proof,actor_proof:actor()});assert.equal(recovered.recovered,true);assert.equal(recovered.coverage_advanced,false);
+  const after=f.c.discovery.batch(b.id);assert.equal(after.state,'checkpointed');assert.equal(JSON.stringify(after.snapshot),snapshot);assert.equal(after.pages.length,b.pages.length);assert.equal(f.work.get(task.id).owner_thread_id,null);
+  assert.equal(triggerMessage(f.c.db,id).state,'finished');assert.deepEqual(triggerMessage(f.c.db,id).receipt.native_result,{structuredContent:{threadId:DISCOVERY}});
+ }finally{await driver?.close();f.c.close();rmSync(dir,{recursive:true,force:true});}
 });

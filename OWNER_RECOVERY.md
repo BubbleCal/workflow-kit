@@ -195,3 +195,15 @@ human correction may reach an exact terminal Bad Request owner using
 `terminal_failure_proof`, expected/actual turn IDs and `native_resume_only:true`;
 automatic dispatch remains blocked. Missing, stale, active or different-turn
 evidence cannot authorize this path. Never loop retries after another failure.
+
+### Trigger fallback
+
+The existing message trigger now checks every running execution and unresolved
+receipt under MESSAGE_TRIGGER.md; there is no four-target/two-receipt/time cap.
+Its watch/watch_discovery operations reconcile exact terminal native proofs,
+preserve valid outcomes and prepare distinct original-owner continuations for
+unfinished ordinary work or Bad Request. Unknown effects remain protected.
+release_unsent accepts only complete terminal sender history proving no send;
+missing receipts alone never suffice. All authority comes from the installed
+human recovery record, not generated prompts. Repeated failures back off without
+restarting healthy jobs or replaying the original message.
