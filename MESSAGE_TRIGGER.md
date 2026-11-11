@@ -62,7 +62,10 @@ files per attempt. A self proof expires after sixty seconds; refresh it as neede
 
 ## Receiver and transport rules
 
-Receivers keep normal `begin → checkpoint → decide → finish`. For trigger-delivered
+For authorized ordinary owner loops, observe automatically registers begin from
+the verified actual running turn. The receiver uses runtime work; it supplies its
+own proof only when automatic binding has not yet happened. Services/discovery
+retain their specialized protocols. For trigger-delivered
 input, the initial self `read_thread` proof must use `includeOutputs:true` and
 preserve the complete incoming `send_message_to_thread` functionCallOutput.
 The runtime verifies the original trigger sender and exact immutable prompt;

@@ -329,3 +329,24 @@ test('public CLI discovery begin and finish accept actual trigger execution with
   const calls=readFileSync(join(dir,'native-queue-calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse).filter(a=>a[0]==='queue'&&a[1]==='--thread');assert.equal(calls.length,0);
  }finally{db?.close();mail?.close();rmSync(root,{recursive:true,force:true});}
 });
+
+test('public work entry advances and checkpoints engineering without queue configuration or manual revision plumbing',()=>{
+ const root=setup();try{
+  const dir=init(root,'one');bind(dir,'one');const f=fixture(join(dir,'control.sqlite'),dir);let wake;
+  try{
+   f.advance(Date.now()-NOW);
+   for(const key of ['owner_autonomy','continuous_authorized_work'])f.c.work.setPolicy({key,enabled:true,allowed_kinds:['work'],actual_human_verified:true,source_message_id:'actual-user-autonomy',verbatim_text:'Let owners work toward goals and runtime handle bookkeeping',evidence_ref:'actual-user-source'});
+   f.activate();f.event();wake=f.s.reserveQueuedWake('T-1').wake;
+   f.c.db.prepare("UPDATE rt_wakes SET prompt='Actual portable work',state='queued',queue_id=? WHERE id=?").run('22222222-2222-4222-8222-222222222222',wake.id);
+  }finally{f.c.close();}
+  // Internal bookkeeping must remain available when transport config needs repair.
+  writeFileSync(join(dir,'runtime.json'),JSON.stringify({schema_version:2,transport:'invalid-transport-for-this-test'}));
+  const lease={task_id:'T-1',owner_thread_id:OWNER,wake_id:wake.id},work=input=>run(dir,'workflow.mjs',['runtime','work'],{...lease,...input});
+  const started=work({op:'start',native_proof:nativeProof({workspace:dir,message:'Actual portable work',now:Date.now()})});assert.equal(started.status,0,JSON.stringify(started));assert.equal(started.json.started,true);
+  const progress=work({op:'progress',next_action:'Investigate the observed bottleneck',evidence_ref:'actual-profile'});assert.equal(progress.status,0,JSON.stringify(progress));assert.equal(progress.json.finished,false);
+  const q=work({op:'question',kind:'authority',question:'May the result be sent externally?',why_owner_cannot_decide:'Existing external hold needs human clearance',blocked_actions:['slack_pr'],next_action:'Complete the independent regression investigation',evidence_ref:'actual-human-hold'});assert.equal(q.status,0,JSON.stringify(q));assert.equal(q.json.question.scope,'action');
+  const waited=work({op:'wait',next_action_at:new Date(Date.now()+60000).toISOString(),reason:'Known next useful checkpoint',evidence_ref:'actual-job-deadline'});assert.equal(waited.status,0,JSON.stringify(waited));assert.equal(waited.json.finished,true);
+  assert.equal(existsSync(join(dir,'native-queue-calls.jsonl')),false);
+  const db=new DatabaseSync(join(dir,'control.sqlite'));try{assert.equal(db.prepare("SELECT status FROM rt_tasks WHERE task_id='T-1'").get().status,'waiting');assert.equal(db.prepare('SELECT state FROM rt_wakes WHERE id=?').get(wake.id).state,'finished');}finally{db.close();}
+ }finally{rmSync(root,{recursive:true,force:true});}
+});

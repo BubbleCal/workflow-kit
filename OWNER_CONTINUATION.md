@@ -1,56 +1,67 @@
-# Continue the accepted goal
+# Own the goal and keep working
 
-Yang's rule from 2026-11-10, source message
-01a1c433-66ce-78e3-a734-08cd5d4f2274: unfinished authorized work must have
-actual execution, a verified job/dependency wait with a real continuation, or a
-material human-only decision. A phase report, idle chat or negative experiment
-does not create a fourth state. Once all accepted scope is done, deliver its
-work/result/effect/impact and use the existing archive guards.
+Yang approved this owner-loop redesign on 2026-11-12. It supersedes historical
+internal coordinator routing and mandatory per-phase bookkeeping. The actual
+source is retained in the installed `work_rules.owner_autonomy` record.
 
-Compare each phase against the whole accepted goal. Select a bounded next
-hypothesis, fix and validation yourself when they remain authorized. Preserve
-negative results; do not repeat passed tests or sweep parameters indefinitely
-just to appear active. A research-only assessment may finish with an evidenced
-negative recommendation; it grants no implementation or cloud authority.
+You own the whole accepted goal. Choose the next useful technical step yourself.
+Within the authorized code/resources, investigate across relevant modules and
+repositories, try a bounded approach, inspect the result, and adjust. Preserve
+negative results and working evidence. Do not ask the user to pick an ordinary
+implementation detail or approve continuing already-authorized work.
 
-An external review/merge hold restricts those actions. Continue independent
-authorized engineering when it exists. Keep every hold's actual human wording
-and source. For a conditional hold, preserve the observable release predicate
-and evidence; re-evaluate it when its prerequisite changes. Once released, do not
-invent another requirement that Yang say “continue.” Unconditional pauses and
-revocations remain effective. No continuation rule releases personal review,+Functions channel permission, CI/Gatekeeper/Xuanwo, expected-head, ownership,
-repository or deployment gates.
+A failed experiment, unavailable integration, or blocked delivery is a reason to
+find another useful path. Read actual CI/job failures before choosing a fix or
+retry. Do not repeat a healthy job or unchanged failed request blindly. If no
+supported path remains, state exactly what is missing and the smallest recovery.
 
-At each phase boundary save the remaining contract requirements, concrete next
-action, actual running jobs and dependency evidence. Optional `decide.progress`
-uses `{remaining_requirements:[id], next_action, jobs:[], dependencies:[]}`.
-Use the original owner's running wake for actual work, OWNER_WAITS.md for a
-typed dependency/job/time wait, and preserve its subscription and real deadline.
-Use the existing continuation/health paths; create no coordinator or timer.
+Apply each boundary to its actual action. A personal/external review or merge
+hold still permits independent authorized investigation, fixes and tests. Explicit
+whole-task pauses, assessment-only instructions, excluded scope, resource budgets
+and production limits remain effective. A new user goal or irreversible commitment
+still needs real authority. Keep existing owner/worktree/job identity intact.
 
-When `continuous_authorized_work` is enabled, `needs_decision` requires progress
-and a `decision_request` containing:
+## One work entry
 
-- `kind`: authority, identity, scope, external_commitment or material_choice.
-- `scope:"task"`, the actual question and `why_owner_cannot_decide`.
-- `blocked_requirements` from the accepted contract and actual `evidence_refs`.
-- `independent_authorized_work:[]`; if work remains here, continue it first.
-- For material_choice, two or more `{choice,impact}` options with real effects.
+Use `node /absolute/instance/workflow.mjs runtime work --file <request.json>`.
+Read this once per policy version, not before every command. Start once, then do
+engineering continuously. Record progress when it is useful; finish only at a
+real stopping point. Existing runtime op clients remain supported.
 
-Ordinary “continue optimizing or pause” and negative-result categories are not
-human blockers. Ask main only for material missing authority, identity,
-out-of-scope commitments or choices the owner cannot reasonably make. Report
-submission is not completion; use full acceptance to complete the actual goal.
+Start with `op:start,task_id,owner_thread_id,wake_id`. If the trigger already
+verified and bound the actual native turn, start returns the goal/frontier directly.
+Otherwise it asks for one genuine current `read_thread` proof with
+includeOutputs=true and the full incoming delivery; retry start with native_proof.
+Do not invent a proof. An acknowledgment alone never starts work.
 
-Health observation must not skip a real running wake merely because an older
-decision projection says needs_decision. Observe failures and bind actual human
-relay execution from its exact native proof; ACK is not execution. Paused tasks
-and genuine decision-only waits stay protected. Never interrupt healthy jobs.
+At a useful checkpoint use `op:progress,next_action,evidence_ref` plus the same
+owner/task/wake IDs. Runtime supplies current revisions and plan bookkeeping.
+Optional jobs/dependencies preserve actual known work; omitted arrays retain the
+previous checkpoint. This keeps the turn open: continue the next experiment or fix.
 
-`runtime reconcile_followup` may resolve a stale decision only with
-`resume_authorized_work:true`, the exact `expected_decision_id`, and a newer
-sent task-specific human continuation corroborated by the actual original human
-message and full native incoming relay. The original contract and external
-holds remain. It cannot resolve a pause, completion, another scope, uncertain
-effect or competing running writer. Preserve original queues and never claim a
-superseded queue was consumed. Refresh proof and verify actual execution.
+For a question use `op:question,question,evidence_ref`. Ordinary technical choices
+stay with you: choose a small experiment or implementation. A human-only question
+also supplies kind (authority, identity, scope, external_commitment, material_choice)
+and why_owner_cannot_decide. Include next_action for useful independent work;
+the question is recorded against the action and the task keeps running. Only
+all_work_blocked=true with no next_action produces a task-wide human wait.
+A material choice includes the actual options and consequences. Record/send the
+real question through the existing guarded main-notification path when needed.
+
+For a real wait use `op:wait,evidence_ref,wait` under OWNER_WAITS.md, or
+next_action_at with timezone for a known time. Runtime fills relevant fact versions,
+persists the typed predicate and closes the turn. Stale/unknown facts are not a
+verified wait: refresh the owning source or use existing source recovery. Do not
+ask the user to say continue after an observed prerequisite already clears.
+
+For accepted completion use `op:complete,evidence_ref,acceptance`. Every original
+requirement needs real evidence. A recurring task closes its current occurrence;
+a finite task completes its goal. Runtime closes the wake, and existing delivery
+and archival checks still apply. Substantive results use RESULT_FOLLOWTHROUGH.md.
+Use the same update_id when explicitly retrying one checkpoint; changed intent
+needs a different update. New facts at closure keep the turn open for assessment.
+
+Low-level contract/plan/evidence schema errors are infrastructure to diagnose,
+not a new human product decision. Do not submit a final answer merely because a
+phase ended. Report actual remaining work and the next action, source wait or
+human-only condition. Healthy jobs and existing user decisions remain protected.

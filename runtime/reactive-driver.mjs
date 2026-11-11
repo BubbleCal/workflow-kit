@@ -44,6 +44,12 @@ export function wakePrompt(root,task,wake,checkpoint) {
   const events=checkpoint.events??[],reasons=[...new Set(events.map(eventWakeReason))];
   const reason=reasons.slice(0,3).join('；')+(reasons.length>3?`；另有 ${reasons.length-3} 项变化`:'');
   const lane=task.contract.service_lane,batch=events.find(e=>e.type==='service_batch_ready')?.payload?.batch_id;
+  if(!lane&&checkpoint.owner_autonomy?.enabled&&checkpoint.owner_autonomy.allowed_kinds?.includes(task.contract.task_kind??'work'))return `[workflow-event:${wake.id}]
+${task.task_id}｜${reason||'推进未完成目标'}
+你对整个目标负责：在已授权代码和资源内自行调查、试验、修复、验证并接续。技术选择自己判断；一条路径受阻时寻找可推进的工作。
+读 ${join(root,'OWNER_CONTINUATION.md')}。用 runtime work 的 start 获取目标和当前变化，然后持续工作；在真正等待、需要人决定或完成时提交 outcome，runtime 自动登记与收尾。对外操作仍按 OWNER_DELIVERY.md。
+入口：node ${shellQuote(join(root,'workflow.mjs'))} runtime work（JSON stdin 或 --file）
+${JSON.stringify({op:'start',task_id:task.task_id,owner_thread_id:task.owner_id,wake_id:wake.id})}`;
   const protocol=lane?'NATIVE_SERVICES.md':'REACTIVE.md';
   return `[workflow-event:${wake.id}]
 ${lane==='maintenance'?'工作流维护 · ':''}${task.task_id}｜${reason||'有待处理事项'}

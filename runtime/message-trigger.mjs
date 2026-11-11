@@ -1,4 +1,5 @@
 import {scopeActionReasons} from './scope-exclusions.mjs';
+import {ownerAutonomyPolicy} from './owner-continuation.mjs';
 import {randomUUID,createHash} from 'node:crypto';
 import {nativeReadback,verifyNativeBinding} from './native-queue.mjs';
 import {triggerMessage,verifyTriggerExecution} from './trigger-proof.mjs';
@@ -141,10 +142,19 @@ export class MessageTrigger {
    return{settled:true,state,execution_verified:!!r.execution_turn,automatic_retry:false};});
  }
  observe({id,native_proof,actor_proof}){
-  return this.c.atomic(()=>{this.actor(actor_proof);const r=triggerMessage(this.db,id);if(!r)throw Error('Unknown trigger message');
+  const observed=this.c.atomic(()=>{this.actor(actor_proof);const r=triggerMessage(this.db,id);if(!r)throw Error('Unknown trigger message');
    const read=nativeReadback(native_proof.readback),terminal=['completed','failed','interrupted'].includes(read.turns?.[0]?.status);
    const proof=verifyTriggerExecution(this.db,id,native_proof,{thread_id:r.owner_id,workspace:r.workspace,now:this.now(),terminal});
-   this.db.prepare("UPDATE rt_trigger_messages SET execution_turn=?,state='started',updated_at=? WHERE id=?").run(proof.turn_id,this.now(),id);
-   return{execution_observed:true,turn_id:proof.turn_id,status:proof.status,owner_begin_required:r.kind==='task'};});
+   this.db.prepare("UPDATE rt_trigger_messages SET execution_turn=?,state=CASE WHEN state='finished' THEN state ELSE 'started' END,updated_at=? WHERE id=?").run(proof.turn_id,this.now(),id);
+   return{execution_observed:true,turn_id:proof.turn_id,status:proof.status,owner_begin_required:r.kind==='task'&&r.state!=='finished',task_id:r.task_id,finished:r.state==='finished'};});
+  const autonomy=ownerAutonomyPolicy(this.db);
+  if(observed.task_id&&!observed.finished&&observed.status==='inProgress'&&autonomy?.enabled){
+    const task=this.s.task(observed.task_id);
+    if(task?.mode==='active'&&autonomy.allowed_kinds?.includes(task.contract.task_kind??'work')&&!task.contract.retired&&!task.contract.service_lane&&!['complete','needs_decision'].includes(task.status)){
+      const began=this.s.begin({task_id:task.task_id,wake_id:id,native_proof});
+      return{...observed,owner_begin_required:!began.wake,execution_bound:began.wake?.turn_id===observed.turn_id};
+    }
+  }
+  return observed;
  }
 }

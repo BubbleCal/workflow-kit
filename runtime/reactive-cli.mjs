@@ -1,4 +1,5 @@
 import {MessageTrigger,validateMessageTrigger} from './message-trigger.mjs';
+import {OwnerWork} from './owner-work.mjs';
 import {verifyTriggerExecution,triggerMessage} from './trigger-proof.mjs';
 import {migrateRuntimeHostBinding} from './host-binding.mjs';
 import {reconcileAcceptedSource} from './created-project-repair.mjs';
@@ -130,6 +131,12 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
       output({initialized:true,transport:'native_queue',backup,paused_tasks:paused,queue_verified:false,receipts_preserved:true});return;
     }
     if(command==='status'){output(state.status());return;}
+    if(command==='work'){
+      const input=fileIndex>=0?read(inputFile()):JSON.parse(readFileSync(0,'utf8'));
+      mailbox=new Mailbox(join(root,'mailbox.sqlite'));
+      state.checkWait=c=>['pr','review_request'].includes(c?.kind)?control.checkReactiveWait(c):mailbox.waits.check(c);
+      output(new OwnerWork(control).run(input));return;
+    }
     if(command==='schedule'){
       const input=args[1]==='list'?{op:'list'}:fileIndex>=0?read(inputFile()):JSON.parse(readFileSync(0,'utf8'));
       let result;

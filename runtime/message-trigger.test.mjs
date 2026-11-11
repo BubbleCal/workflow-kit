@@ -101,3 +101,26 @@ test('a busy first owner cannot starve later owners across bounded trigger invoc
 test('the trigger cannot send beyond its bounded run even with fresh owner proofs',()=>{
  const f=setup();try{const id=f.register();f.q.run({native_proof:f.actor()});f.advance(50001);const p=f.q.prepare({id,actor_proof:f.actor(),native_proof:f.owner()});f.advance(1);assert.equal(f.q.claim({id,digest:p.digest,actor_proof:f.actor(),native_proof:f.owner()}).reason,'trigger_run_budget');assert.equal(triggerMessage(f.c.db,id).state,'pending');}finally{f.c.close();}
 });
+
+test('autonomous trigger observation binds real ordinary work before sender ACK and never reopens a finished cycle',()=>{
+ const f=setup();try{
+  f.c.work.setPolicy({key:'owner_autonomy',enabled:true,allowed_kinds:['work'],source_message_id:'human:autonomy',verbatim_text:'Let runtime handle execution bookkeeping',evidence_ref:'actual-human',actual_human_verified:true});
+  const id=f.register(),claim=f.claim(id),proof=relay(f,id);
+  const observed=f.q.observe({id,native_proof:proof,actor_proof:f.actor()});assert.equal(observed.execution_bound,true);assert.equal(observed.owner_begin_required,false);
+  assert.equal(f.s.openWake('T-1').turn_id,'actual-owner-turn');assert.equal(f.s.openWake('T-1').state,'running');
+  f.q.settle({id,attempt_id:claim.attempt_id,actor_proof:f.actor(),native_result:{structuredContent:{threadId:OWNER}},evidence_ref:'actual-send-ack'});
+  assert.equal(f.s.openWake('T-1').state,'running');
+  f.decide({wake_id:id,disposition:'wait',plan:undefined,next_action_at:new Date(f.now()+1000).toISOString()});f.s.finish({task_id:'T-1',wake_id:id,turn_id:'actual-owner-turn',evidence_ref:'actual-checkpoint'});
+  const terminal=relay(f,id,{status:'completed'});f.q.observe({id,native_proof:terminal,actor_proof:f.actor()});
+  assert.equal(triggerMessage(f.c.db,id).state,'finished');assert.equal(f.s.openWake('T-1'),null);
+ }finally{f.c.close();}
+});
+
+test('autonomous observation never binds a paused task or interprets a terminal no-op as ongoing engineering',()=>{
+ for(const stopped of ['paused','terminal']){const f=setup();try{
+  f.c.work.setPolicy({key:'owner_autonomy',enabled:true,allowed_kinds:['work'],source_message_id:'human:autonomy',verbatim_text:'Automatic execution bookkeeping',evidence_ref:'actual-human',actual_human_verified:true});
+  const id=f.register();f.claim(id);if(stopped==='paused')f.mode('paused');
+  const proof=relay(f,id,{status:stopped==='terminal'?'completed':'inProgress'}),observed=f.q.observe({id,native_proof:proof,actor_proof:f.actor()});
+  assert.equal(observed.execution_observed,true);assert.notEqual(f.s.openWake('T-1')?.state,'running');assert.notEqual(observed.execution_bound,true);
+ }finally{f.c.close();}}
+});

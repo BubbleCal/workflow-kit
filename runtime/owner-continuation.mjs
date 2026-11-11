@@ -3,6 +3,11 @@ export function continuationPolicy(db){
  return row?JSON.parse(row.data):null;
 }
 
+export function ownerAutonomyPolicy(db){
+ const row=db.prepare("SELECT data FROM work_rules WHERE key='owner_autonomy'").get();
+ return row?JSON.parse(row.data):null;
+}
+
 export function validateOwnerDecision(db,task,{disposition,decision_request,progress}){
  if(!continuationPolicy(db)?.enabled||task.contract.service_lane)return;
  const ids=new Set(task.contract.requirements.map(r=>r.id));

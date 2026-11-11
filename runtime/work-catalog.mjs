@@ -114,7 +114,7 @@ export class WorkCatalog {
   }
   taskForSource(key){const r=this.db.prepare('SELECT task_id FROM work_sources WHERE source_key=?').get(key);return r?this.get(r.task_id):null;}
   setPolicy({key,enabled,allowed_kinds,assignee_id,calendar_id,self_email,lead_minutes=45,service_task_id,timezone,profiles,exclusions,source_message_id,verbatim_text,evidence_ref,actual_human_verified}){
-    if(!['create_owner','discovery_owns_creation','accept_assigned_linear','accept_calendar_preparation','accept_result_followups','continuous_authorized_work'].includes(key))throw new Error('Unknown work policy');
+    if(!['create_owner','discovery_owns_creation','accept_assigned_linear','accept_calendar_preparation','accept_result_followups','continuous_authorized_work','owner_autonomy'].includes(key))throw new Error('Unknown work policy');
     if(actual_human_verified!==true)throw new Error('A standing work policy needs actual user authorization');
     for(const [n,v] of Object.entries({source_message_id,verbatim_text,evidence_ref}))required(v,n);
     if(enabled&&(!Array.isArray(allowed_kinds)||!allowed_kinds.length||allowed_kinds.some(k=>!['work','project','exploration'].includes(k))))throw new Error('Declare allowed ordinary task kinds');

@@ -1,5 +1,5 @@
 import {verifyTriggerExecution} from './trigger-proof.mjs';
-import {validateOwnerDecision} from './owner-continuation.mjs';
+import {validateOwnerDecision,ownerAutonomyPolicy} from './owner-continuation.mjs';
 import {verifyHumanFollowup} from './human-followup.mjs';
 import {verifyQueuedRecoveryProof} from './queued-resume.mjs';
 import {prWakeProjection,prChangeReasons} from './owner-wake.mjs';
@@ -285,7 +285,7 @@ export class ReactiveState {
   }
   checkpoint(task_id) {
     const task = this.task(task_id); if (!task) throw new Error('Unknown task');
-    return { task, plan: this.plan(task_id),scope_exclusions:activeScopeExclusions(this.registry(),task_id),
+    return { task, plan: this.plan(task_id),scope_exclusions:activeScopeExclusions(this.registry(),task_id),owner_autonomy:ownerAutonomyPolicy(this.db),
       facts: this.db.prepare('SELECT * FROM rt_facts WHERE task_id=? ORDER BY subject').all(task_id).map(f=>({...f,data:parse(f.data)})),
       events: this.db.prepare('SELECT * FROM rt_events WHERE task_id=? AND disposition IS NULL ORDER BY context_rev,event_id').all(task_id).map(e=>{const payload=parse(e.payload);
         const previous=e.source==='github'&&payload?.pr?.head_sha?this.db.prepare("SELECT payload FROM rt_events WHERE task_id=? AND subject=? AND source='github' AND rowid<(SELECT rowid FROM rt_events WHERE event_id=?) ORDER BY rowid DESC LIMIT 1").get(task_id,e.subject,e.event_id):null;
@@ -319,7 +319,7 @@ export class ReactiveState {
     }
   }
   decide({ task_id, expected_context_rev, expected_plan_rev, disposition, reason, evidence_refs, plan, wait,
-    acceptance, wake_id, owner_thread_id, alternatives_considered = [],next_action_at,decision_request,progress }) {
+    acceptance, wake_id, owner_thread_id, alternatives_considered = [],next_action_at,decision_request,progress,work_update }) {
     if (!['continue','revise','wait','needs_decision','complete','cycle_complete'].includes(disposition)) throw new Error('Unknown decision disposition');
     required(reason,'decision reason');
     if (!Array.isArray(evidence_refs) || !evidence_refs.length || evidence_refs.some(r=>typeof r!=='string'||!r.trim())) throw new Error('Decision needs evidence');
@@ -355,7 +355,7 @@ export class ReactiveState {
         if (this.db.prepare(`SELECT 1 FROM actions WHERE task_id=? AND kind NOT IN ('task_wake','task_queue') AND ${liveAction}`).get(task_id))
           throw new Error('Uncertain external effects prevent whole-task completion');
       }
-      const id=randomUUID(), data={reason,evidence_refs,alternatives_considered,acceptance,wait,...(decision_request?{decision_request}:{}),...(progress?{progress}:{})};
+      const id=randomUUID(), data={reason,evidence_refs,alternatives_considered,acceptance,wait,...(decision_request?{decision_request}:{}),...(progress?{progress}:{}),...(work_update?{work_update}:{})};
       this.db.prepare('INSERT INTO rt_decisions VALUES (?,?,?,?,?,?,?)').run(id,task_id,task.context_rev,revision,disposition,canonical(data),this.now());
       this.db.prepare("UPDATE rt_events SET disposition='handled',decision_id=? WHERE task_id=? AND disposition IS NULL AND context_rev<=?").run(id,task_id,task.context_rev);
       const status=['wait','cycle_complete'].includes(disposition)?'waiting':disposition==='complete'?'complete':disposition==='needs_decision'?'needs_decision':'ready';
