@@ -128,3 +128,16 @@ test('meeting owner preparation supplies real catalog guard fields and preserves
  assert.equal(f.c.db.prepare("SELECT count(*) n FROM actions WHERE kind='create_thread'").get().n,1);
  }finally{f.c.close();}
 });
+
+test('closed intake rejects new meeting work while preserving an accepted occurrence update and cancellation',()=>{
+ const f=workFixture();try{
+  const service=unified(f);f.work.atomic(()=>f.work.prepareCalendarInside(observation,meeting));scheduleCalendarPreparation(f.c,service.id);
+  f.work.setPolicy({key:'new_task_intake',enabled:false,source_message_id:'user-existing-only',verbatim_text:'Continue existing work only',evidence_ref:'actual-human',actual_human_verified:true});
+  const fresh=f.work.atomic(()=>f.work.prepareCalendarInside({...observation,entity_key:'calendar:work@example.com:new',item_key:'new'},{...meeting,id:'new'}));
+  assert.equal(fresh.reason,'new_task_intake_closed');assert.equal(f.work.meetingOccurrences(service.id).length,1);
+  f.work.atomic(()=>f.work.prepareCalendarInside(observation,{...meeting,start:'2026-11-06T10:00:00+08:00'}));scheduleCalendarPreparation(f.c,service.id);
+  assert.equal(f.c.scheduler.list().filter(s=>s.status==='enabled').length,1);
+  f.work.atomic(()=>f.work.prepareCalendarInside(observation,{...meeting,status:'cancelled'}));scheduleCalendarPreparation(f.c,service.id);
+  assert.equal(f.c.scheduler.list().filter(s=>s.status==='enabled').length,0);assert.equal(f.work.list().length,1);
+ }finally{f.c.close();}
+});

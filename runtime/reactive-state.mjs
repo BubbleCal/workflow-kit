@@ -1,3 +1,4 @@
+import {newTaskIntakeEnabled} from './work-intake.mjs';
 import {verifyTriggerExecution} from './trigger-proof.mjs';
 import {validateOwnerDecision,ownerAutonomyPolicy} from './owner-continuation.mjs';
 import {verifyHumanFollowup} from './human-followup.mjs';
@@ -116,6 +117,7 @@ export class ReactiveState {
           throw new Error('Adoption cannot overwrite an existing contract or owner');
         return { adopted: false, task: old };
       }
+      if(!newTaskIntakeEnabled(this.db)&&!this.db.prepare("SELECT 1 FROM work_items WHERE id=? AND state='accepted'").get(task_id))throw new Error('New task intake is closed; only existing accepted work may be adopted');
       this.db.prepare(`INSERT INTO rt_tasks(task_id,owner_id,mode,contract,authorization_ref,mode_source,updated_at)
         VALUES (?,?,'shadow',?,?,?,?)`).run(task_id, owner_thread_id, canonical(contract), contract.authorization_ref, source_message_id, this.now());
       if(contract.service_lane)this.db.prepare("UPDATE rt_tasks SET status='waiting' WHERE task_id=?").run(task_id);

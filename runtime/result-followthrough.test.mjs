@@ -241,3 +241,15 @@ test('a reviewed findings result needs an explicit disposition and never queues 
  assert.equal(f.work.list().length,1);assert.equal(f.c.reactive.task(f.parent.id).status,'complete');
  }finally{f.c.close();}
 });
+
+test('closed new-task intake preserves accepted owner reports and findings without creating followup tasks',()=>{
+ const f=fixture();try{
+  f.work.setPolicy({key:'new_task_intake',enabled:false,source_message_id:'user-winddown',verbatim_text:'Continue existing work only',evidence_ref:'actual-user',actual_human_verified:true});
+  const result=f.report();assert.equal(result.recorded,true);assert.equal(result.followups[0].state,'blocked');
+  assert.match(result.followups[0].reason,/intake is closed/);assert.equal(f.work.list().length,1);
+  const p={canonical_key:'future-proposal',title:'Future work',objective:'A separate future improvement'};
+  const legacy=f.report([],{report_key:'legacy-proposal',proposals:[p]});
+  assert.equal(legacy.recorded,true);assert.deepEqual(legacy.proposals,[]);assert.deepEqual(legacy.proposals_deferred,['future-proposal']);
+  assert.equal(f.work.list().length,1);assert.equal(f.c.db.prepare('select count(*) as n from work_reports').get().n,2);
+ }finally{f.c.close();}
+});

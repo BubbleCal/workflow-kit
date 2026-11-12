@@ -1,3 +1,11 @@
+> Existing-work mode: an actual human policy `new_task_intake` with `enabled:false`
+> closes new catalog registration, candidate acceptance and direct adoption of
+> unaccepted work. Accepted tasks retain their owners, execution, waits, schedules,
+> delivery and existing holds. Canonical replay remains idempotent. Reports keep
+> findings/proposals; new independent followups are recorded as blocked/deferred,
+> while feedback to an accepted existing task continues. Reopening intake needs
+> a later explicit human policy; migration or a technical-ready signal is not one.
+
 > Before completion archival, deliver the actual work, result, effect and impact to Yang in main under TASK_COMPLETION_DELIVERY.md. A file or pending inbox entry is insufficient; the archive guard requires verified main delivery. Reuse an already presented result without duplicate notification.
 
 > Cloud authentication is part of execution. Before declaring AWS access blocked or asking Yang to sign in, read AUTH_RECOVERY.md, reuse its verified Chrome/Bitwarden flow and save the concrete remaining step. Passive autofill failure or a detached page is not a human-only factor. Original owners recover; existing discovery/maintenance coach when needed. Preserve one login owner per shared session.

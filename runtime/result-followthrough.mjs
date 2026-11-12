@@ -64,6 +64,7 @@ export class ResultFollowthrough {
         parent.data.exploration?.allow_product_changes===false||/assessment.only|review.only|implementation hold|do not implement|no product (?:code )?changes|不得实现|禁止实现/i.test(constraints);
       if(['implement','existing'].includes(f.disposition)){
         if(!rule?.enabled||!rule.allowed_kinds.includes('work')){state='blocked';reason='No standing result implementation authorization';}
+        else if(!this.work.intakeEnabled()&&task?.state!=='accepted'&&task?.state!=='completed'){state='blocked';reason='New task intake is closed; finding preserved for T3 migration';}
         else if(held){state='blocked';reason='Original assessment-only or implementation hold is preserved';}
         else if(f.requires_additional_authority===true){state='decision';reason='A material choice or expanded goal needs Yang';}
         else if(task?.state==='completed'||task&&this.work.execution(task.id)?.status==='complete'){state='complete';reason='Existing canonical task already completed';}

@@ -459,6 +459,10 @@ export class DiscoveryStore {
       if(disposition==='existing'&&!task)throw new Error('Existing-task routing needs an exact registered source identity');
       if(disposition==='candidate'){
         if(!candidate)throw new Error('Describe the candidate work');
+        if(!this.work.intakeEnabled()&&!this.work.get(candidate.canonical_key)){
+          this.db.prepare("UPDATE discovery_observations SET disposition='ignore',decision=? WHERE observation_id=?").run(JSON.stringify({reason:'new_task_intake_closed',evidence_ref,proposed_candidate:candidate}),observation_id);
+          return {classified:true,ignored:true,reason:'new_task_intake_closed',execution_authorized:false,owner_required:false};
+        }
         task=this.work.createInside({...candidate,state:'candidate',source:{kind:data.source_kind,key:o.entity_key,url:data.url,evidence_ref}}).task;
         this.work.linkSourceInside(task.id,o.entity_key,{url:data.url,evidence_ref});
         task=this.work.acceptAssignedInside(task,data);
@@ -526,6 +530,6 @@ export class DiscoveryStore {
       return {finished:allComplete,checkpointed:!allComplete};
     });
   }
-  status(){return {sources:this.sources(),batches:this.db.prepare("SELECT id,state,created_at FROM discovery_batches WHERE state<>'finished'").all(),
+  status(){return {new_task_intake_enabled:this.work.intakeEnabled(),sources:this.sources(),batches:this.db.prepare("SELECT id,state,created_at FROM discovery_batches WHERE state<>'finished'").all(),
     observations:this.db.prepare('SELECT * FROM discovery_observations ORDER BY created_at DESC LIMIT 100').all().map(o=>({...o,data:JSON.parse(o.data)}))};}
 }

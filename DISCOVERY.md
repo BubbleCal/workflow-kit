@@ -1,3 +1,10 @@
+> When discovery status reports `new_task_intake_enabled:false`, follow only
+> accepted existing work. Match genuine feedback to its original task/owner;
+> record unmatched source items as ignored with their evidence. Do not create or
+> accept new candidates, independent result followups or new meeting occurrences.
+> Existing accepted meeting updates/cancellations and task health still matter.
+> This policy does not pause existing owners or disable their recovery trigger.
+
 > AWS access waits require the recovery evidence in AUTH_RECOVERY.md. During the existing owner-health audit, inspect new authentication failures and coach the original owner with the relevant verified success/failure procedure. Do not renew a generic "please log in" wait when ordinary supported recovery was not attempted. Keep one recovery owner per shared session and preserve human-only MFA boundaries.
 
 > Owner recovery runs before source reads. `discovery begin/plan` returns a fixed
