@@ -1,4 +1,10 @@
-> T3 Code migration preparation lives on `yang/t3code`. Read
+> T3 Code's native operating profile lives on `yang/t3code`. For a new T3
+> installation, start with [T3_NATIVE_WORKFLOW.md](T3_NATIVE_WORKFLOW.md): native
+> role chats and scheduling, a separate SQLite task/decision index, and
+> `node workflow.mjs t3 ledger --instance <t3-root> --file <operation.json>`.
+> Keep T3 attention shelves separate from owner execution and business acceptance.
+>
+> Migration preparation is separate. Read
 > [T3_MIGRATION.md](T3_MIGRATION.md) for the target architecture, runnable read-only
 > inventory/probe commands, tested transport prototype and remaining cutover work.
 > [T3_ATTENTION.md](T3_ATTENTION.md) specifies the Inbox-first decision workflow.
