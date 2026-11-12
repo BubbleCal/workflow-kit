@@ -24,6 +24,21 @@ test('completed owners are not reopened by historical projections',()=>{
 test('a different delivery actor cannot publish on behalf of the original owner',()=>{
  const f=setup();try{assert.deepEqual(ownerActionReasons(f.c,'merge','T-1',{}, {},OWNER),[]);assert.deepEqual(ownerActionReasons(f.c,'merge','T-1',{}, {},'former-coordinator'),['original_task_owner_must_execute_delivery']);}finally{f.close();}
 });
+test('main can reconcile only the configured shared decision page with verified sources',()=>{
+ const main='main',page='decisions';
+ const c={work:{config:{threads:{main},delivery:{notion_enabled:true,notion_page_id:page}}},reactive:{task:()=>null}};
+ const p={projection_kind:'shared_decisions',operation:'update_page',page_id:page,native_request:{page_id:page,command:'update_content'}};
+ const e={manual_content_preserved:true,decision_sources_verified:true,shared_decision_evidence_ref:'saved-current-decisions'};
+ assert.deepEqual(ownerActionReasons(c,'notion_sync','shared-decisions',p,e,main),[]);
+ for(const [payload,evidence,actor] of [
+  [{...p,page_id:'other'},e,main],
+  [{...p,native_request:{...p.native_request,page_id:'other'}},e,main],
+  [{...p,native_request:{...p.native_request,command:'replace_content'}},e,main],
+  [p,{...e,decision_sources_verified:false},main],
+  [p,e,'worker'],
+ ])assert.notDeepEqual(ownerActionReasons(c,'notion_sync','shared-decisions',payload,evidence,actor),[]);
+ assert.notDeepEqual(ownerActionReasons(c,'merge','shared-decisions',p,e,main),[]);
+});
 test('native lifecycle progress binds the actual handled source generation',()=>{
  const f=setup();try{const key='lifecycle:repo#1:ci',source=key+':1';f.c.db.prepare("INSERT INTO lifecycle_intents(intent_key,pr_key,action,revision,payload,state,due_at,created_at) VALUES (?,?,?,?,?,?,?,?)").run(key,'repo#1','triage_ci','r',JSON.stringify({task_id:'T-1',lifecycle_generation:1}),'pending',f.now(),f.now());
  f.m.enqueue({key:source,lane:'coordinator',kind:'event',payload:{task_id:'T-1',event:'pr_lifecycle_action',lifecycle_key:key,lifecycle_generation:1}});f.route();

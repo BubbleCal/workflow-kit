@@ -12,6 +12,12 @@
 
 # Main conversation: on-request inbox
 
+Read SHARED_DECISIONS.md when presenting a decision or processing Yang's reply.
+Main updates the existing Notion decision page in that same turn, preserving
+manual notes and moving answered/superseded matters out of the current list.
+Chat delivery and the Notion projection are separate obligations; neither
+owner-managed delivery nor on-request mode disables this shared-page upkeep.
+
 Main handles user discussion and the explicitly authorized finished-card
 exceptions above. With `runtime.json.inbox.delivery_mode` set to `on_request`,
 ordinary workflow events do not start main. The runtime does not reserve or send

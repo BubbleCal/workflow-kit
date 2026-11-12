@@ -122,10 +122,20 @@ export function nativeLifecycleProgress(control,input) {
 
 export function ownerActionReasons(control,kind,taskId,payload,evidence={},actor) {
   if(!['pr_ready','slack_pr','merge','notion_sync','archive'].includes(kind))return [];
-  const task=control.reactive.task(taskId);
-  if(!task)return ['registered_native_delivery_owner_required'];
   const executor=actor??evidence.executor_thread_id;
   const main=control.work.config.threads?.main;
+  const delivery=control.work.config.delivery;
+  // Main maintains the shared decision page; execution owners retain their
+  // separate outcome rows. A private decision card is not an automatic write.
+  if(kind==='notion_sync'&&executor===main&&delivery?.notion_enabled===true&&
+    payload.projection_kind==='shared_decisions'&&payload.operation==='update_page'&&
+    payload.page_id===delivery.notion_page_id&&!payload.data_source_id&&
+    payload.native_request?.page_id===payload.page_id&&
+    ['update_content','insert_content'].includes(payload.native_request.command)&&
+    evidence.manual_content_preserved===true&&evidence.decision_sources_verified===true&&
+    typeof evidence.shared_decision_evidence_ref==='string'&&evidence.shared_decision_evidence_ref.trim())return [];
+  const task=control.reactive.task(taskId);
+  if(!task)return ['registered_native_delivery_owner_required'];
   if(kind==='archive'&&executor===main&&(task.status==='complete'||payload.purpose==='task_consolidation'&&control.work.archivableConsolidation(taskId)))return [];
   const fallback=control.completionReportPolicy?.()?.maintenance_fallback,service=fallback?.enabled&&control.reactive.task(fallback.task_id);
   if(kind==='archive'&&task.status==='complete'&&service?.mode==='active'&&service.owner_id===executor&&service.contract.service_lane==='maintenance')return [];
