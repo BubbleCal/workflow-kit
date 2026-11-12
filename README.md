@@ -1,6 +1,7 @@
 > T3 Code migration preparation lives on `yang/t3code`. Read
 > [T3_MIGRATION.md](T3_MIGRATION.md) for the target architecture, runnable read-only
 > inventory/probe commands, tested transport prototype and remaining cutover work.
+> [T3_ATTENTION.md](T3_ATTENTION.md) specifies the Inbox-first decision workflow.
 > This branch does not switch a running Codex workflow to T3.
 
 0.9.0 supports task difficulty assessment before conversation creation, with a centrally configured model/effort mapping. See [MODEL_SELECTION.md](MODEL_SELECTION.md). Existing conversations keep their selected models.

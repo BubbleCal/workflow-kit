@@ -34,6 +34,16 @@ the old failure was a queue tied to desktop-loaded sessions, not the existence
 of a queue itself. Always send automatic work with explicit `mode: "queue"`;
 T3's default `auto` can steer a busy owner.
 
+## Inbox-first human interaction
+
+The target interaction model follows Yang's supplied inbox design:
+[Inbox-first attention and asynchronous decisions](T3_ATTENTION.md). Use native
+Inbox/Working/Snoozed/Settled for attention, keep Working collapsed, and route
+actual choices into a dedicated decision case. The original owner continues
+independent authorized work and receives the scoped human result asynchronously.
+Snooze is not an execution pause; `next_action_at` and actual approvals remain
+separate. Decision conversations are interfaces, not additional engineering owners.
+
 ## Use the platform's capabilities
 
 | Capability | Target use | Verification / boundary |

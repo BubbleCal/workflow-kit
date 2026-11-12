@@ -95,7 +95,8 @@ export class T3WakeOutbox {
     const t=target?.thread,p=row.payload;
     if(t?.threadId!==p.thread_id||t.projectId!==p.project_id||t.providerInstanceId!==p.provider_instance_id||t.model!==p.model||t.runtimeMode!==p.runtime_mode)
       throw new Error('T3 target identity or effective settings differ from the prepared mapping');
-    if(t.archived||t.snoozed||t.settled||t.pendingRequestCount>0)return {...row,deferred:true,reason:'Target has a native hold, settlement or pending approval; preserve prepared work'};
+    // Snooze controls human attention; it does not pause background execution.
+    if(t.archived||t.settled||t.pendingRequestCount>0)return {...row,deferred:true,reason:'Target is archived, explicitly settled or awaiting native approval; preserve prepared work'};
     if(!this.db.prepare("UPDATE t3_prepared_wakes SET state='sending',updated_at=? WHERE wake_key=? AND state='prepared'").run(this.now(),key).changes)return this.get(key);
     try{
       const p=row.payload,result=await this.client.call('t3_thread_send',{environmentId:p.environment_id,threadId:p.thread_id,message:p.message,mode:'queue',clientRequestId:row.request_id});

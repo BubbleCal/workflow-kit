@@ -46,8 +46,16 @@ test('effective mode, project, provider and model are verified before sending; n
   for(const [key,value]of [['projectId','other'],['providerInstanceId','other'],['model','other'],['runtimeMode','approval-required']]){
    c.thread={...thread,[key]:value};await assert.rejects(box.deliver(row.wake_key),/differ/);assert.equal(box.get(row.wake_key).state,'prepared');
   }
-  for(const patch of [{snoozed:true},{archived:true},{settled:true},{pendingRequestCount:1}]){c.thread={...thread,...patch};assert.equal((await box.deliver(row.wake_key)).deferred,true);}
+  for(const patch of [{archived:true},{settled:true},{pendingRequestCount:1}]){c.thread={...thread,...patch};assert.equal((await box.deliver(row.wake_key)).deferred,true);}
   assert.equal(c.items.length,0);
+ }finally{box.close();}
+});
+test('human snooze preserves autonomous delivery while approval and explicit task parking still defer',async()=>{
+ const c=fake(),box=new T3WakeOutbox(':memory:',{client:c});try{
+  c.thread={...thread,snoozed:true,snoozedUntil:'2099-01-01T00:00:00Z'};
+  const row=box.prepare(payload),result=await box.deliver(row.wake_key);
+  assert.equal(result.state,'accepted');assert.equal(c.items.length,1);
+  assert.equal(c.calls.find(x=>x.name==='t3_thread_send').args.mode,'queue');assert.equal(c.thread.snoozed,true);
  }finally{box.close();}
 });
 test('read proof requires the exact accepted run and complete agent-authored MCP message, rather than latest idle/finished status',()=>{
