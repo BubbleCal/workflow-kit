@@ -34,6 +34,7 @@ export class T3NativeLedger {
     this.db=new DatabaseSync(join(this.root,'t3-workflow.sqlite'));
     this.db.exec(`CREATE TABLE IF NOT EXISTS tasks(task_id TEXT PRIMARY KEY,canonical_key TEXT UNIQUE NOT NULL,data TEXT NOT NULL,owner TEXT,state TEXT NOT NULL,version INTEGER NOT NULL,created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS decisions(case_id TEXT PRIMARY KEY,task_id TEXT NOT NULL,revision INTEGER NOT NULL,data TEXT NOT NULL,answer TEXT,attention TEXT NOT NULL,snoozed_until TEXT);
+      CREATE TABLE IF NOT EXISTS task_reports(report_key TEXT PRIMARY KEY,task_id TEXT NOT NULL,data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS decision_history(case_id TEXT NOT NULL,revision INTEGER NOT NULL,snapshot TEXT NOT NULL,PRIMARY KEY(case_id,revision));
       CREATE TABLE IF NOT EXISTS result_deliveries(delivery_key TEXT PRIMARY KEY,case_id TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL,receipt TEXT);`);
   }
@@ -57,6 +58,21 @@ export class T3NativeLedger {
     need(owner.environment_id===this.config.environment_id&&owner.provider_instance_id&&owner.model&&owner.runtime_mode==='full-access','Verified same-environment owner and actual Full access required');
     if(task.owner){const {evidence_ref:oldRef,...old}=task.owner,{evidence_ref:newRef,...current}=owner;need(encode(old)===encode(current),'Preserve the existing owner binding');return task;}
     this.db.prepare("UPDATE tasks SET owner=?,state='assigned' WHERE task_id=?").run(encode(owner),task.task_id);return this.task(task.task_id);
+  });}
+  report(i){return this.atomic(()=>{
+    const task=this.task(i.task_id),r=nativeRead(i.native_proof);
+    need(task?.owner&&task.version===i.expected_version&&r.thread.threadId===task.owner.thread_id&&r.thread.projectId===task.data.project_id,'Current original owner and task version required');
+    need(i.report_key&&i.summary&&i.evidence_refs?.length&&['progress','waiting','blocked','complete'].includes(i.outcome),'Concrete evidenced owner report required');
+    const message=r.items?.find(m=>m.type==='assistant_message'&&m.messageId===i.message_id);
+    const run=r.recentRuns?.find(run=>run.runId===message?.runId);
+    need(message&&!message.textTruncated&&message.text===i.summary&&run?.status==='completed','Exact completed native owner report required');
+    const data={task_version:task.version,outcome:i.outcome,summary:i.summary,evidence_refs:i.evidence_refs,message_id:message.messageId,run_id:run.runId,next_action_at:i.next_action_at??null,wait_condition:i.wait_condition??null};
+    if(data.next_action_at)need(Number.isFinite(Date.parse(data.next_action_at))&&/(Z|[+-]\d\d:\d\d)$/.test(data.next_action_at),'Next action time needs an explicit timezone');
+    const old=this.db.prepare('SELECT * FROM task_reports WHERE report_key=?').get(i.report_key);
+    if(old){const {native_evidence_ref,...prior}=JSON.parse(old.data);need(old.task_id===task.task_id&&hash(prior)===hash(data),'Owner report key is immutable');return {recorded:false,task:this.task(task.task_id)};}
+    this.db.prepare('INSERT INTO task_reports VALUES (?,?,?)').run(i.report_key,task.task_id,encode({...data,native_evidence_ref:i.native_proof.evidence_ref}));
+    this.db.prepare('UPDATE tasks SET state=? WHERE task_id=?').run(i.outcome==='complete'?'reported_complete':i.outcome,task.task_id);
+    return {recorded:true,task:this.task(task.task_id),business_acceptance:false};
   });}
   decision(i){return this.atomic(()=>{
     const task=this.task(i.task_id);need(task&&i.case_id&&i.question&&i.recommendation&&i.options?.length&&i.evidence_refs?.length,'A concrete task decision with options and evidence is required');
@@ -117,6 +133,6 @@ export class T3NativeLedger {
 }
 
 export function runT3Ledger(root,input){const ledger=new T3NativeLedger(root);try{
-  const operations={register:()=>ledger.register(input),bind_owner:()=>ledger.bind(input),decision:()=>ledger.decision(input),answer:()=>ledger.answer(input),attention:()=>ledger.attention(input),pending:()=>ledger.pending(),get:()=>ledger.task(input.task_id),settle:()=>ledger.settle(input),observe:()=>ledger.observe(input)};
+  const operations={register:()=>ledger.register(input),bind_owner:()=>ledger.bind(input),report:()=>ledger.report(input),decision:()=>ledger.decision(input),answer:()=>ledger.answer(input),attention:()=>ledger.attention(input),pending:()=>ledger.pending(),get:()=>ledger.task(input.task_id),settle:()=>ledger.settle(input),observe:()=>ledger.observe(input)};
   need(operations[input.op],'Unknown T3 native ledger operation');return operations[input.op]();
 }finally{ledger.close();}}

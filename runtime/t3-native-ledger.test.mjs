@@ -98,3 +98,22 @@ test('public CLI persists native instance data across reopen without starting an
   assert.equal(result.tasks[0].task_id,task.task_id);assert.deepEqual(result.deliveries,[]);
   assert.equal(runT3Ledger(f.root,{op:'get',task_id:task.task_id}).data.objective,task.data.objective);
 });
+
+test('original owner reports preserve real wait and completion evidence without claiming acceptance or replaying stale state',t=>{
+  const f=fixture(t),task=f.register();f.bind(task.task_id);
+  function report(outcome,extra={}){
+    const summary=outcome==='waiting'?'Waiting for a released dependency':'Scoped result verified';
+    const native_proof=f.proof('owner',[{type:'assistant_message',messageId:outcome,runId:'run:'+outcome,text:summary,textTruncated:false}]);
+    const saved=JSON.parse(readFileSync(native_proof.evidence_ref,'utf8')),body=JSON.parse(saved.response.content[0].text);
+    body.recentRuns=[{runId:'run:'+outcome,status:'completed'}];saved.response.content[0].text=JSON.stringify(body);writeFileSync(native_proof.evidence_ref,JSON.stringify(saved));
+    return {task_id:task.task_id,expected_version:1,report_key:outcome,message_id:outcome,outcome,summary,evidence_refs:['actual-report'],native_proof,...extra};
+  }
+  const wait=report('waiting',{wait_condition:'Dependency release'});
+  assert.equal(f.ledger.report(wait).task.state,'waiting');
+  const done=report('complete');assert.equal(f.ledger.report(done).business_acceptance,false);
+  assert.equal(f.ledger.report(report('complete')).recorded,false);
+  assert.equal(f.ledger.report(wait).task.state,'reported_complete');
+  assert.throws(()=>f.ledger.report({...done,expected_version:2}),/task version/);
+  assert.throws(()=>f.ledger.report({...done,summary:'Different result'}),/completed native owner/);
+  assert.throws(()=>f.ledger.report({...done,native_proof:f.proof('other')}),/original owner/);
+});

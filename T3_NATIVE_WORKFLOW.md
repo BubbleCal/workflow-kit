@@ -62,6 +62,18 @@ binding. Scope changes require a recorded discussion, not silent replacement.
 The ledger is a local provenance/decision index, not a replacement scheduler
 or another execution coordinator. T3 owns execution and run persistence.
 
+At a meaningful stage boundary, `op: "report"` records the original owner's
+`task_id`, `expected_version`, immutable `report_key`, `outcome`
+(progress/waiting/blocked/complete), exact `message_id`, full `summary`,
+`evidence_refs`, and native owner readback. A known wait can include
+`next_action_at` with explicit timezone and `wait_condition`. Only the exact
+message from a completed native owner run is accepted. A completion report
+sets `reported_complete`; it does not assert business acceptance, merge,
+release or deployment. Main verifies the evidence and presents the important
+result once. Replaying an older report never overwrites a newer task state.
+Valuable findings can produce deduplicated followups within existing authority;
+they must not disappear merely because their assessment task has finished.
+
 ## Inbox decisions without blocking independent work
 
 Follow `T3_ATTENTION.md`. Keep Working folded. A real human decision needs one
