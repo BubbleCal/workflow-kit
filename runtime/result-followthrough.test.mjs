@@ -10,6 +10,8 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Mailbox} from './mailbox.mjs';
 import {inspectInbox} from './inbox-policy.mjs';
+import {MessageTrigger} from './message-trigger.mjs';
+import {triggerMessage} from './trigger-proof.mjs';
 
 const CHILD='77777777-7777-4777-8777-777777777777';
 const rule={key:'accept_result_followups',enabled:true,allowed_kinds:['work'],actual_human_verified:true,
@@ -43,6 +45,44 @@ test('an exact result followup decision reaches the strict inbox once without au
   assert.equal(inspectInbox(root,input).allowed,false);
   assert.equal(f.work.list().length,1);assert.equal(f.c.reactive.task(f.parent.id).status,'complete');
  }finally{bindings.layout=previous.layout;bindings.delivery.main_inbox_strict=previous.strict;bindings.delivery.owner_managed=previous.ownerManaged;m.close();f.c.close();rmSync(root,{recursive:true,force:true});}
+});
+
+test('only new, verified, unresolved result decisions can reach an on-request main via the trigger',()=>{
+ const root=mkdtempSync(join(tmpdir(),'result-decision-delivery-')),f=fixture([],join(root,'control.sqlite')),m=new Mailbox(join(root,'mailbox.sqlite'),{now:f.now});
+ try{
+  f.config.instance_root=root;
+  const row=f.report([{...proposal(),disposition:'decision',requires_additional_authority:true}]).followups[0];complete(f);
+  const key=`result-decision:${row.followup_key}`,payload=JSON.parse(f.c.db.prepare('select payload from work_notices where key=?').get(key).payload);
+  m.enqueue({key,lane:'inbox',kind:'decision',payload});
+  const sender='44444444-4444-4444-8444-444444444444',main='main',cfg={
+   message_trigger:{enabled:true,thread_id:sender,workspace:'/trigger',interval_ms:60000,authorization_ref:'human',source_message_id:'human-trigger'},
+   inbox:{thread_id:main,workspace:'/main',delivery_mode:'on_request',result_decisions:{since_ms:f.now()+1}}};
+  const q=new MessageTrigger(f.c,cfg);
+  assert.equal(q.registerResultDecision(key).registered,false);
+  cfg.inbox.result_decisions.since_ms=f.now();
+  assert.equal(q.registerResultDecision('result-decision:invented').registered,false);
+  const id=q.registerResultDecision(key).id;assert.ok(id);
+  assert.equal(q.registerResultDecision(key).registered,false);
+  assert.equal(q.pending().messages[0].thread_id,main);
+  const actor=()=>nativeProof({thread:sender,workspace:'/trigger',turn:'trigger',now:f.now()});
+  const target=()=>nativeProof({thread:main,workspace:'/main',turn:'previous',status:'completed',now:f.now()});
+  q.run({native_proof:actor()});
+  const prepared=q.prepare({id,native_proof:target(),actor_proof:actor()});assert(prepared.prepared);
+  f.advance(1);
+  f.c.db.prepare("update work_result_followups set state='no_action' where followup_key=?").run(row.followup_key);
+  assert.equal(q.claim({id,digest:prepared.digest,native_proof:target(),actor_proof:actor()}).send,false);
+  f.c.db.prepare("update work_result_followups set state='decision' where followup_key=?").run(row.followup_key);
+  const claim=q.claim({id,digest:prepared.digest,native_proof:target(),actor_proof:actor()});assert.equal(claim.send,true);
+  assert.equal(q.settle({id,attempt_id:claim.attempt_id,native_result:{structuredContent:{threadId:main}},evidence_ref:'receipt',actor_proof:actor()}).execution_verified,false);
+  const actual=nativeProof({thread:main,workspace:'/main',turn:'decision-received',now:f.now()});
+  actual.readback.turns[0].items=[{type:'functionCallOutput',namespace:'codex_app',name:'send_message_to_thread',output:{truncated:false,
+   text:`<codex_delegation>\n  <source_thread_id>${sender}</source_thread_id>\n  <input>${claim.arguments.prompt}</input>\n</codex_delegation>`}}];
+  const observed=q.observe({id,native_proof:actual,actor_proof:actor()});
+  assert.equal(observed.owner_begin_required,false);assert.equal(triggerMessage(f.c.db,id).state,'finished');
+  assert.equal(q.pending().messages.length,0);assert.equal(q.registerResultDecision(key).registered,false);
+  assert.equal(f.c.reactive.task(f.parent.id).status,'complete');
+  assert.equal(m.db.prepare('select state from mail where item_key=?').get(key).state,'pending');
+ }finally{m.close();f.c.close();rmSync(root,{recursive:true,force:true});}
 });
 function complete(f){
  const t=f.c.reactive.task(f.parent.id);

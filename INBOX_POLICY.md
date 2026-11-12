@@ -21,6 +21,15 @@ their separate native delivery protocols, not that queue transport.
 New inbox bindings default to this mode. Existing explicitly configured `automatic`
 bindings retain their delivery behavior until changed.
 
+An explicit user authorization may enable `inbox.result_decisions` while keeping
+`on_request`. The existing native message trigger then delivers only new,
+unresolved result decisions whose exact payload matches both the original report
+and the durable followup. Both the notice and the decision must be newer than
+the configured cutoff. Older notices, routine results and other internal
+batches stay on request. Each card uses its original immutable key; an unknown
+send is not retried. Native receipt and actual main turn are recorded separately
+from a human answer; notification never starts engineering or closes a decision.
+
 When the user asks for decisions, progress or results, main can read the durable
 inbox through the mailbox CLI with JSON stdin:
 

@@ -4,6 +4,7 @@ import {randomUUID,createHash} from 'node:crypto';
 import {nativeReadback,verifyNativeBinding} from './native-queue.mjs';
 import {triggerMessage,verifyTriggerExecution} from './trigger-proof.mjs';
 import {TriggerFallback} from './trigger-fallback.mjs';
+import {currentResultDecision,decisionCard} from './result-decision-delivery.mjs';
 
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const parse=r=>({...r,data:JSON.parse(r.data)});
@@ -43,6 +44,12 @@ export class MessageTrigger {
  reasons(r){
   if(!this.policy?.enabled||r.sender_id!==this.policy.thread_id)return['trigger_binding_changed'];
   if(this.db.prepare("SELECT value FROM settings WHERE key='processing'").get()?.value!=='on')return['processing_paused'];
+  if(r.kind==='result_decision'){
+   const inbox=this.config.inbox;
+   if(!inbox?.result_decisions||r.owner_id!==inbox.thread_id||r.workspace!==inbox.workspace||r.owner_id===this.policy.thread_id)return ['decision_destination_changed'];
+   const payload=currentResultDecision(this.c,this.config,r.data.mail_key);
+   return payload&&r.prompt===decisionCard(payload,r.data.mail_key)?[]:['decision_no_longer_pending'];
+  }
   const recoveryReasons=this.fallback.reasons(r);if(recoveryReasons.length)return recoveryReasons;
   if(r.owner_id===this.policy.thread_id||r.owner_id===this.config.inbox?.thread_id&&this.config.inbox?.delivery_mode==='on_request')return['human_only_or_self_target'];
   if(r.kind==='discovery'){
@@ -104,6 +111,20 @@ export class MessageTrigger {
    const reasons=this.reasons(r);if(reasons.length)throw Error(reasons.join(','));this.insert(r);return{registered:true,id:r.id,state:'pending'};
   });
  }
+ registerResultDecision(key){
+  return this.c.atomic(()=>{
+   const inbox=this.config.inbox,id=`inbox:${key}`;
+   if(!this.policy?.enabled||!inbox?.result_decisions)return{registered:false};
+   const old=triggerMessage(this.db,id);
+   if(old)return{registered:false,state:old.state};
+   const payload=currentResultDecision(this.c,this.config,key);
+   if(!payload)return{registered:false};
+   const r={id,kind:'result_decision',task_id:null,owner_id:inbox.thread_id,sender_id:this.policy.thread_id,workspace:inbox.workspace,
+    prompt:decisionCard(payload,key),data:{mail_key:key}};
+   if(this.reasons(r).length)return{registered:false};
+   this.insert(r);return{registered:true,id,state:'pending'};
+  });
+ }
  insert(r){if(typeof r.prompt!=='string'||!r.prompt.trim()||Buffer.byteLength(r.prompt)>65536)throw Error('Bounded immutable prompt required');
   this.db.prepare("INSERT INTO rt_trigger_messages(id,kind,task_id,owner_id,sender_id,workspace,prompt,digest,data,state,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?)")
    .run(r.id,r.kind,r.task_id,r.owner_id,r.sender_id,r.workspace,r.prompt,hash(r.prompt),JSON.stringify(r.data),this.now(),this.now());}
@@ -155,8 +176,9 @@ export class MessageTrigger {
   const observed=this.c.atomic(()=>{this.actor(actor_proof);const r=triggerMessage(this.db,id);if(!r)throw Error('Unknown trigger message');
    const read=nativeReadback(native_proof.readback),terminal=['completed','failed','interrupted'].includes(read.turns?.[0]?.status);
    const proof=verifyTriggerExecution(this.db,id,native_proof,{thread_id:r.owner_id,workspace:r.workspace,now:this.now(),terminal});
-   this.db.prepare("UPDATE rt_trigger_messages SET execution_turn=?,state=CASE WHEN state='finished' THEN state ELSE 'started' END,updated_at=? WHERE id=?").run(proof.turn_id,this.now(),id);
-   return{execution_observed:true,turn_id:proof.turn_id,status:proof.status,owner_begin_required:r.kind==='task'&&r.state!=='finished',task_id:r.task_id,finished:r.state==='finished'};});
+   const finished=r.state==='finished'||r.kind==='result_decision';
+   this.db.prepare('UPDATE rt_trigger_messages SET execution_turn=?,state=?,updated_at=? WHERE id=?').run(proof.turn_id,finished?'finished':'started',this.now(),id);
+   return{execution_observed:true,turn_id:proof.turn_id,status:proof.status,owner_begin_required:r.kind==='task'&&!finished,task_id:r.task_id,finished};});
   const autonomy=ownerAutonomyPolicy(this.db);
   if(observed.task_id&&!observed.finished&&observed.status==='inProgress'&&autonomy?.enabled){
     const task=this.s.task(observed.task_id);

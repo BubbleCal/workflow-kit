@@ -232,7 +232,18 @@ export class ReactiveDriver {
   }
   async deliverInbox() {
     if(!this.config.inbox||this.capability?.verified!==true)return;
-    if(this.config.inbox.delivery_mode==='on_request')return {delivered:false,reason:'inbox_on_request'};
+    if(this.config.inbox.delivery_mode==='on_request'){
+      const scoped=this.config.inbox.result_decisions;
+      if(scoped&&this.config.message_trigger?.enabled){
+        const m=new Mailbox(join(this.root,'mailbox.sqlite'),{now:this.now});
+        try{
+          for(const row of m.db.prepare("SELECT item_key FROM mail WHERE lane='inbox' AND kind='decision' AND state='pending' AND batch_id IS NULL AND created_at>=? AND item_key LIKE 'result-decision:%' ORDER BY seq").all(scoped.since_ms))
+            this.messageTrigger.registerResultDecision(row.item_key);
+        }catch(error){this.state.diagnostic('result-decision-delivery',{error:error.message});}
+        finally{m.close();}
+      }
+      return {delivered:false,reason:'inbox_on_request'};
+    }
     const m=new Mailbox(join(this.root,'mailbox.sqlite'),{now:this.now});
     try{
       if(this.config.service_tasks && !this.config.owner_delivery)this.requestNativeQueueChecks(m);

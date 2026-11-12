@@ -10,6 +10,7 @@ import {reconcileCreationWorkspace} from './creation-workspace-repair.mjs';
 import {beginDiscoveryFollowup,beginDiscoveryInteractive,settleDiscoveryDelivery,recoverUnstartedDiscoveryFollowup} from './discovery-followup.mjs';
 import {reconcileArtifactBinding} from './registration-repair.mjs';
 import {reconcileQueuedFollowup,verifyFollowupTerminal} from './human-followup.mjs';
+import {validateResultDecisionDelivery} from './result-decision-delivery.mjs';
 import {verifyQueuedRecoveryProof} from './queued-resume.mjs';
 import {scheduleCalendarPreparation,prepareTaskOwner} from './calendar-preparation.mjs';
 import {transferPausedOwner} from './owner-transfer.mjs';
@@ -45,6 +46,7 @@ export function runtimeConfig(root=ROOT) {
   const path=join(root,'runtime.json');if(!existsSync(path))throw new Error('Run node workflow.mjs runtime init first');
   const c={...DEFAULT_RUNTIME,...read(path)};
   validateMessageTrigger(c.message_trigger);
+  validateResultDecisionDelivery(c,root);
   if(c.schema_version!==2||c.transport!=='native_queue'||c.adapter)throw new Error('Direct session transport was removed. Stop the old service and run runtime init, then verify the native queue');
   for(const key of ['tick_ms','poll_min_ms','poll_max_ms'])if(!Number.isSafeInteger(c[key])||c[key]<100||c[key]>3600000)throw new Error(`Invalid ${key}`);
   if(c.poll_min_ms>c.poll_max_ms)throw new Error('Poll bounds are reversed');
