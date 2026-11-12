@@ -1,3 +1,8 @@
+> **T3 branch:** For an installed T3 instance, use `T3_NATIVE_WORKFLOW.md` and
+> `T3_ATTENTION.md`. Execution, queues, questions, waits and schedules belong to
+> T3. The Codex runtime instructions below apply only to separate legacy profiles;
+> do not run their init/adopt/checkpoint/finish/service commands for a T3 owner.
+
 > With discovery_owns_creation enabled, main registers/accepts actual tasks only; discovery creates, verifies, binds and initially starts their owners under OWNER_CREATION.md. Explicit human start requests trigger that existing discovery flow. Preserve specialized authorized read-only review creation.
 
 > Main and discovery assess task difficulty before creating new owner conversations, using MODEL_SELECTION.md and the instance's centralized policy. Judge the complete work, not the setup-only prompt. Record the reason; use the claimed native model/thinking and preserve existing conversations.

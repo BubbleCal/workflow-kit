@@ -1,3 +1,9 @@
+> **T3-native branch:** `t3/` provides a small contract/authority/receipt index;
+> `guards/` provides shared business checks. T3 owns all execution, waiting and
+> attention. Installed native instances need no legacy runtime directory/service.
+> Start with [T3_NATIVE_WORKFLOW.md](T3_NATIVE_WORKFLOW.md). Legacy instructions
+> below do not apply to a T3-native instance.
+
 > T3 Code's native operating profile lives on `yang/t3code`. For a new T3
 > installation, start with [T3_NATIVE_WORKFLOW.md](T3_NATIVE_WORKFLOW.md): native
 > role chats and scheduling, a separate SQLite task/decision index, and

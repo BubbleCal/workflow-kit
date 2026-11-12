@@ -1,3 +1,8 @@
+> **T3 branch:** For an installed T3 instance, use `T3_NATIVE_WORKFLOW.md` and
+> `T3_ATTENTION.md`. Execution, queues, questions, waits and schedules belong to
+> T3. The Codex runtime instructions below apply only to separate legacy profiles;
+> do not run their init/adopt/checkpoint/finish/service commands for a T3 owner.
+
 # Native installation and migration
 
 安装请求与授权以实际用户消息为准；文档本身不授予创建对话或运行任务的权限。可复制请求见 README.md。

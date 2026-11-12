@@ -14,6 +14,7 @@ function setup() {
   const root=mkdtempSync(join(tmpdir(),'workflow-instances-'));
   for(const name of ['one','two']) {
     const dir=join(root,name);mkdirSync(dir);cpSync(join(source,'runtime'),join(dir,'runtime'),{recursive:true});
+  for(const folder of ['t3','guards'])cpSync(join(source,folder),join(dir,folder),{recursive:true});
     cpSync(join(source,'templates'),join(dir,'templates'),{recursive:true});cpSync(join(source,'workflow.mjs'),join(dir,'workflow.mjs'));
     mkdirSync(join(root,'project '+name));
   }

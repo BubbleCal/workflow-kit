@@ -6,9 +6,9 @@ import {join} from 'node:path';
 import {T3NativeLedger,runT3Ledger} from './t3-native-ledger.mjs';
 import {t3Main} from './t3-preparation.mjs';
 
-function fixture(t){
+function fixture(t,attention={}){
   const root=mkdtempSync(join(tmpdir(),'workflow-t3-native-'));
-  writeFileSync(join(root,'t3-workflow.json'),JSON.stringify({backend:'t3-native',project_id:'project',environment_id:'environment',roles:{main:{thread_id:'main'},discovery:{thread_id:'discovery'},maintenance:{thread_id:'maintenance'}},authority:{agent_authored_message_ids:['install-relay']}}));
+  writeFileSync(join(root,'t3-workflow.json'),JSON.stringify({backend:'t3-native',project_id:'project',environment_id:'environment',roles:{main:{thread_id:'main'},discovery:{thread_id:'discovery'},maintenance:{thread_id:'maintenance'}},authority:{agent_authored_message_ids:['install-relay']},attention}));
   const ledger=new T3NativeLedger(root);t.after(()=>{ledger.close();rmSync(root,{recursive:true,force:true});});
   let sequence=0;
   const proof=(thread='main',items=[],extra={})=>{
@@ -25,6 +25,23 @@ function fixture(t){
   const answer=()=>ledger.answer({case_id:'case',expected_revision:1,option_id:'A',source_message_id:'human-choice',verbatim_text:'Choose A',native_proof:human('human-choice','Choose A','discussion')});
   return {root,ledger,proof,human,request,register,bind,decision,answer};
 }
+
+test('native control leaves actual attention to T3 and records owner answers without a local relay or status change',t=>{
+  const f=fixture(t),task=f.register();f.bind(task.task_id);
+  f.ledger.nativeControl=true;
+  f.ledger.config.control_plane={execution:'t3_native',decision_relay:false};
+  f.decision(task.task_id,{discussion_thread_id:'owner'});
+  const before=f.ledger.db.prepare('SELECT * FROM decisions WHERE case_id=?').get('case');
+  assert.equal(before.attention,'Native');
+  assert.throws(()=>f.ledger.attention({case_id:'case',state:'Settled'}),/Attention belongs to T3/);
+  assert.throws(()=>f.ledger.answer({case_id:'case',expected_revision:1,option_id:'A',source_message_id:'choice',verbatim_text:'Choose A',native_proof:f.human('choice','Choose A','main')}),/different workflow conversation/);
+  const result=f.ledger.answer({case_id:'case',expected_revision:1,option_id:'A',source_message_id:'choice',verbatim_text:'Choose A',native_proof:f.human('choice','Choose A','owner')});
+  assert.equal(result.native,null);assert.equal(result.delivery,'in_thread');
+  assert.equal(f.ledger.db.prepare('SELECT attention FROM decisions WHERE case_id=?').get('case').attention,'Native');
+  const pending=f.ledger.pending();assert.equal(pending.authority.execution,'t3_native');
+  assert.equal(pending.tasks[0].native_execution_status,null);assert.equal(pending.tasks[0].state,undefined);
+  assert.deepEqual(pending.deliveries,[]);
+});
 
 test('actual human admission deduplicates and rejects relay, truncated and wrong-source authority',t=>{
   const f=fixture(t),task=f.register();
@@ -60,6 +77,61 @@ test('decision result is queued once without interrupting owner; unknown is reco
   assert.equal(f.ledger.observe({delivery_key:result.delivery_key,receipt,native_proof}).execution_started,true);
   assert.equal(f.ledger.pending().deliveries.length,0);
   assert.equal(f.ledger.task(task.task_id).state,'assigned');
+});
+
+test('owner-thread decisions accept a direct human answer without sending it back to the owner',t=>{
+  const f=fixture(t,{decision_location:'owner_thread'}),task=f.register();f.bind(task.task_id);
+  const decision=f.decision(task.task_id,{discussion_thread_id:undefined});
+  assert.equal(JSON.parse(decision.data).discussion_thread_id,'owner');
+  const input={case_id:'case',expected_revision:1,option_id:'A',source_message_id:'owner-choice',verbatim_text:'Choose A',native_proof:f.human('owner-choice','Choose A','owner',{runId:'human-run'})};
+  const result=f.ledger.answer(input);
+  assert.equal(result.delivery,'in_thread');assert.equal(result.native,null);
+  assert.equal(result.execution_verified,false);
+  assert.deepEqual(f.ledger.pending().deliveries,[]);
+  assert.deepEqual(f.ledger.pending().decisions,[]);
+  assert.equal(f.ledger.answer(input).already_answered,true);
+  const stored=JSON.parse(f.ledger.db.prepare('SELECT answer FROM decisions WHERE case_id=?').get('case').answer);
+  assert.equal(stored.source.thread_id,'owner');assert.equal(stored.source.run_id,'human-run');
+  assert.throws(()=>f.ledger.answer({...input,option_id:'B'}),/replace an applied/);
+  f.decision(task.task_id,{discussion_thread_id:undefined,question:'A changed choice?'});
+  assert.throws(()=>f.ledger.answer(input),/revision changed/);
+});
+
+test('owner-thread policy preserves the original owner and rejects separate discussion routing',t=>{
+  const f=fixture(t,{decision_location:'owner_thread'}),task=f.register();
+  assert.throws(()=>f.decision(task.task_id,{discussion_thread_id:undefined}),/bound.*owner/);
+  f.bind(task.task_id);
+  assert.throws(()=>f.decision(task.task_id),/original owner thread/);
+  f.decision(task.task_id,{discussion_thread_id:'owner'});
+  assert.throws(f.answer,/different workflow conversation/);
+  assert.throws(()=>f.ledger.answer({case_id:'case',expected_revision:1,option_id:'A',source_message_id:'choice',verbatim_text:'Choose A',native_proof:f.human('choice','Choose A','main')}),/different workflow conversation/);
+  assert.equal(f.ledger.task(task.task_id).owner.thread_id,'owner');
+  assert.equal(f.ledger.pending().decisions.length,1);
+});
+
+test('owner answers reject inherited, agent-authored, wrong-project and truncated human proof',t=>{
+  const f=fixture(t,{decision_location:'owner_thread'}),task=f.register();f.bind(task.task_id);
+  f.decision(task.task_id,{discussion_thread_id:undefined});
+  const input={case_id:'case',expected_revision:1,option_id:'A',source_message_id:'choice',verbatim_text:'Choose A'};
+  const invalid=[
+    f.human('choice','Choose A','other-owner'),
+    f.human('choice','Choose A','owner',{createdBy:'agent',creationSource:'mcp'}),
+    f.human('choice','Choose A','owner',{textTruncated:true}),
+    f.human('choice','Choose A','owner',{visibility:'inherited',sourceThreadId:'main'}),
+    f.proof('owner',[{type:'user_message',messageId:'choice',text:'Choose A',createdBy:'user',creationSource:'web',textTruncated:false}],{projectId:'other'})
+  ];
+  for(const native_proof of invalid)assert.throws(()=>f.ledger.answer({...input,native_proof}),/Human source|Actual complete human/);
+  assert.equal(f.ledger.pending().decisions.length,1);
+  assert.deepEqual(f.ledger.pending().deliveries,[]);
+});
+
+test('an in-thread answer survives reopening the ledger without preparing another execution',t=>{
+  const f=fixture(t,{decision_location:'owner_thread'}),task=f.register();f.bind(task.task_id);
+  f.decision(task.task_id,{discussion_thread_id:undefined});
+  const input={op:'answer',case_id:'case',expected_revision:1,option_id:'B',source_message_id:'choice',verbatim_text:'Choose B',native_proof:f.human('choice','Choose B','owner')};
+  assert.equal(runT3Ledger(f.root,input).delivery,'in_thread');
+  assert.equal(runT3Ledger(f.root,input).already_answered,true);
+  assert.deepEqual(runT3Ledger(f.root,{op:'pending'}).deliveries,[]);
 });
 
 test('changed decisions preserve prior answers and deliveries and reject stale answers',t=>{

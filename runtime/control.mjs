@@ -1,3 +1,4 @@
+import {assessPrAction} from '../guards/pr-action.mjs';
 import {isDiscoveryResume,discoveryResumeReasons} from './discovery-queued-recovery.mjs';
 import {initReviewAttempts,archiveReviewAttempt,verifiedUnsentReviewRetry} from './review-context-retry.mjs';
 import {createdProjectRepairReasons} from './created-project-repair.mjs';
@@ -112,8 +113,10 @@ export function resolvePlacement({ projects, project_id, project_label, host_id,
 
 // These checks validate supplied evidence. The coordinator must obtain that
 // evidence from the owning tools; this is not a replacement for tool permissions.
-export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPACITY_LIMITS, reviewRule = REVIEW_WINDOW, outcomeBindings = kind === 'notion_sync' && payload?.page_id !== PAGE ? readOutcomeBindings() : null, dependencyPolicy = ['pr_ready','slack_pr','review_decision','merge'].includes(kind) ? readDependencyPolicy() : null, reviewChannels = ['pr_ready','slack_pr','review_decision','merge'].includes(kind) ? readReviewChannels() : null) {
-  const reasons = instancePolicyReasons(kind, payload, e);
+export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPACITY_LIMITS, reviewRule = REVIEW_WINDOW, outcomeBindings = kind === 'notion_sync' && payload?.page_id !== PAGE ? readOutcomeBindings() : null, dependencyPolicy = ['pr_ready','slack_pr','review_decision','merge'].includes(kind) ? readDependencyPolicy() : null, reviewChannels = ['pr_ready','slack_pr','review_decision','merge'].includes(kind) ? readReviewChannels() : null, guardContext = {}) {
+  const actionBindings=guardContext.bindings??bindings;
+  if(['slack_pr','pr_ready','merge'].includes(kind))return assessPrAction(kind,payload,e,{...guardContext,bindings:actionBindings,now,reviewRule,dependencyPolicy,reviewChannels});
+  const reasons = instancePolicyReasons(kind, payload, e, actionBindings);
   reasons.push(...dependencyReasons(deliveryGuardKind(kind),payload,e,dependencyPolicy,now));
   const need = (condition, reason) => { if (!condition) reasons.push(reason); };
   // A current human instruction can start engineering directly. This only
@@ -273,29 +276,15 @@ export function assess(kind, payload, e = {}, now = Date.now(), capacity = CAPAC
     } else if (payload?.category !== 'important_completion') need(e.human_action_required === true, 'no_human_action_required');
     else need(e.completion_verified === true, 'completion_not_verified');
   }
-  if (isReviewDelivery(kind) || kind === 'merge') {
-    need(e.pr_owner === bindings.identity.github_login, 'pr_not_owned_by_configured_user');
-    need(e.pr_open === true && e.pr_draft === (kind === 'pr_ready'), 'pr_not_ready');
-    need((kind === 'review_decision' || e.ordinary_change === true || personalReviewAllowsStage(kind,payload,e,reviewChannels,now) || kind === 'merge' && explicitMergeAllowed(payload,e,reviewChannels)) && e.material_findings_open === false, 'important_or_unresolved_change');
+  if (kind === 'review_decision') {
+    need(e.pr_owner === actionBindings.identity.github_login, 'pr_not_owned_by_configured_user');
+    need(e.pr_open === true && e.pr_draft === false, 'pr_not_ready');
+    need(e.material_findings_open === false, 'important_or_unresolved_change');
     need(e.validation_current === true && e.technical_review_current === true, 'current_head_validation_or_review_missing');
     need(typeof payload?.expected_head_sha === 'string' && /^[a-f0-9]{40,64}$/.test(payload.expected_head_sha) && payload.expected_head_sha === e.current_head_sha, 'head_changed_or_unknown');
-  }
-  if (kind === 'pr_ready') need(payload?.operation === 'mark_ready' && prUrl(payload.pr_url) && payload.pr_url === e.pr_url, 'verified_draft_transition_required');
-  if (isReviewDelivery(kind)) reasons.push(...reviewStageReasons(kind, payload, e, now,60000,reviewChannels?.gatekeeper_applicability));
-  reasons.push(...personalReviewReasons(kind,payload,e,reviewChannels,now));
-  if (kind === 'review_decision') reasons.push(...reviewDecisionReasons(payload,e,reviewChannels,now));
-  if (kind === 'slack_pr') {
-    reasons.push(...reviewDestinationReasons(payload,e,reviewChannels));
-    need(prUrl(payload?.message) && payload.message === e.pr_url, 'slack_message_must_match_verified_PR_URL');
-    need(e.already_announced === false, 'already_announced_or_unknown');
-  }
-  if (kind === 'merge') {
-    need(prUrl(payload?.pr_url) && payload.pr_url === e.pr_url, 'merge_PR_identity_mismatch');
-    need(e.approver === bindings.delivery.approver_login && e.approver_identity_verified === true && e.approval_state === 'APPROVED', 'designated_approval_missing');
-    if (e.approved_head_sha !== e.current_head_sha || e.approval_verification)
-      reasons.push(...retainedApprovalReasons(payload, e, now));
-    need(e.required_checks_pass === true && e.repository_rules_satisfied === true && e.mergeable === true, 'repository_merge_requirements_unsatisfied');
-    need(e.admin_override === false, 'admin_override_forbidden');
+    reasons.push(...reviewStageReasons(kind,payload,e,now,60000,reviewChannels?.gatekeeper_applicability));
+    reasons.push(...personalReviewReasons(kind,payload,e,reviewChannels,now,guardContext));
+    reasons.push(...reviewDecisionReasons(payload,e,reviewChannels,now));
   }
   if (kind === 'unarchive') {
     need(e.actual_human_message_verified === true && e.source_actor_verified === true && e.resume_request_verified === true, 'explicit_resume_request_required');

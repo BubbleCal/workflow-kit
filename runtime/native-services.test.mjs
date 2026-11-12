@@ -75,6 +75,7 @@ test('the public runtime CLI claims an ordinary service batch after actual begin
  const f=setup();try{
   f.enqueue('cli-input');f.activate();f.service.bridge();const b=f.m.db.prepare('SELECT id FROM batches').get(),w=f.begin();
   cpSync(dirname(fileURLToPath(import.meta.url)),join(f.root,'runtime'),{recursive:true});
+  for(const folder of ['t3','guards'])cpSync(join(dirname(fileURLToPath(import.meta.url)),'..',folder),join(f.root,folder),{recursive:true});
   writeFileSync(join(f.root,'instance.json'),JSON.stringify({layout:'native',instance_id:'fixture',scope:{project_id:'project',project_root:f.root},threads:{main:'main'},legacy_roles:{coordinator:'coordinator',maintenance:'maintenance'}}));
   writeFileSync(join(f.root,'runtime.json'),JSON.stringify({schema_version:2,transport:'native_queue',service_tasks:{coordinator:'T-1'}}));
   writeFileSync(join(f.root,'input.json'),JSON.stringify({op:'service_begin',task_id:'T-1',owner_thread_id:OWNER,wake_id:w.id,batch_id:b.id}));

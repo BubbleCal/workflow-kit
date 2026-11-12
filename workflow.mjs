@@ -13,8 +13,12 @@ const output = value => process.stdout.write(JSON.stringify(value,null,2)+'\n');
 const configPath=join(root,'instance.json');
 
 try {
+  const legacyCommand=['runtime','task','sources','discovery','schedule'].includes(command)||command==='init'&&args.includes('--legacy');
+  const candidates=[root,process.cwd(),join(process.cwd(),'.workflow/t3'),option('instance')].filter(Boolean);
+  if(legacyCommand&&candidates.some(dir=>existsSync(join(dir,'t3-workflow.json'))))
+    throw new Error('T3-native instance: use T3 native tools and t3 ledger; legacy runtime/queue/scheduler commands are disabled here');
   if(command==='t3') {
-    const {t3Main}=await import('./runtime/t3-preparation.mjs');
+    const {t3Main}=await import('./t3/cli.mjs');
     await t3Main(args,{output});
   } else if(command==='migrate' || command==='init'&&!args.includes('--legacy') || ['bind','doctor'].includes(command)&&existsSync(configPath)&&read(configPath).layout==='native') {
     const {nativeBootstrap}=await import('./runtime/native-bootstrap.mjs');
