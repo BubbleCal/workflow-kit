@@ -13,7 +13,10 @@ const output = value => process.stdout.write(JSON.stringify(value,null,2)+'\n');
 const configPath=join(root,'instance.json');
 
 try {
-  if(command==='migrate' || command==='init'&&!args.includes('--legacy') || ['bind','doctor'].includes(command)&&existsSync(configPath)&&read(configPath).layout==='native') {
+  if(command==='t3') {
+    const {t3Main}=await import('./runtime/t3-preparation.mjs');
+    await t3Main(args,{output});
+  } else if(command==='migrate' || command==='init'&&!args.includes('--legacy') || ['bind','doctor'].includes(command)&&existsSync(configPath)&&read(configPath).layout==='native') {
     const {nativeBootstrap}=await import('./runtime/native-bootstrap.mjs');
     const result=nativeBootstrap(command,args,root);output(result);if(command==='doctor'&&!result.local_ready)process.exitCode=2;
   } else if (command === 'runtime' || command==='task' || command==='sources' || command==='discovery' || command==='schedule') {
