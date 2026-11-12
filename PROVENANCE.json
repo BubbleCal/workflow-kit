@@ -1,7 +1,7 @@
 {
   "version": "0.9.1",
   "source": "workflow-kit repository source",
-  "upstream_base_commit": "3da51314b9c95203f635bb05e0401c5a91e346b9",
+  "upstream_base_commit": "fcb2d60a81ba73e20272bab8b411fadecb27ce0f",
   "source_files": {
     "package.json": "80ba1b31f033e1d5c6727bbf5381196cf7c644b6b90ecedc9ceedd376df42a8d",
     "runtime/calendar-preparation.mjs": "a7f10283d91de767a7f382e2402675c16c274db8b3c6c8a9f718c87dcd99a9bf",
@@ -148,7 +148,9 @@
     "runtime/scope-exclusions.test.mjs": "68f6dff9b593e834c09d6ada5e30049f6a977cc6850799818e95688bb79af410",
     "runtime/source-rate.mjs": "d4e84b41823a85813602f3138c045c5e9186b776cd4b8827cba69d5d42b2bb9d",
     "runtime/source-rate.test.mjs": "a3f752d24e51c0e0a228174a67c72c3a6eedc7c1dca0f41e8d26ad34ea145311",
-    "runtime/t3-preparation.mjs": "5f6722b1a603a928047ceea3b4a7cd77b28ac6c09b0c931e3e53b1f644917613",
+    "runtime/t3-native-ledger.mjs": "eb6689b0356126833a134435d69e2db737e115ab689cfe96e4bad8cd6b950636",
+    "runtime/t3-native-ledger.test.mjs": "22311a1e033a367370ddc251b235131a2463a5c70ec806d90f4a8a2619295e26",
+    "runtime/t3-preparation.mjs": "208dd69cdbca54b9535f0daaefa82becc95515c33fac52214a50d0bfc8b04f84",
     "runtime/t3-preparation.test.mjs": "f05d97cb3921d3881156be36a9d6a211e7222fe3aff159d478d894250bfb6c30",
     "runtime/t3-transport.mjs": "69ad481a8d823510489e838a65c1cd180bfdacc390dfa9bad198ffae845cafb2",
     "runtime/t3-transport.test.mjs": "ace7505b0c1f69365a63866af5b0c80d120f1aa39320bc318c43fbcac6151e09",

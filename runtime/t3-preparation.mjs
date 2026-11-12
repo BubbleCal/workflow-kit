@@ -34,7 +34,12 @@ export function prepareT3Migration(instance){
 
 export async function t3Main(args,{output=v=>process.stdout.write(JSON.stringify(v,null,2)+'\n')}={}){
   const command=args[0],option=name=>{const i=args.indexOf('--'+name);return i<0?undefined:args[i+1];};
-  if(command==='prepare'){
+  if(command==='ledger'){
+    const instance=option('instance'),file=option('file');
+    if(!instance||!file)throw new Error('Use t3 ledger --instance <T3-native root> --file <operation.json>');
+    const {runT3Ledger}=await import('./t3-native-ledger.mjs');
+    output(runT3Ledger(resolve(instance),JSON.parse(readFileSync(resolve(file),'utf8'))));
+  }else if(command==='prepare'){
     const instance=option('instance');if(!instance)throw new Error('Use t3 prepare --instance <existing-workflow-root> [--out <new-manifest.json>]');
     const manifest=prepareT3Migration(instance),out=option('out');
     if(out){writeFileSync(resolve(out),JSON.stringify(manifest,null,2)+'\n',{flag:'wx',mode:0o600});output({prepared:true,output:resolve(out),summary:manifest.summary,live_cutover_enabled:false});}
@@ -46,5 +51,5 @@ export async function t3Main(args,{output=v=>process.stdout.write(JSON.stringify
     const capabilities=await client.call('orchestrator_capabilities',config.environment_id?{environmentId:config.environment_id}:{});
     output({read_only:true,server:client.serverInfo,capabilities,baseline:T3_BASELINE,
       live_cutover_enabled:false,note:'Capability/read access is not a successful cold/busy execution or connector migration.'});
-  }else output({commands:['t3 prepare --instance <root> --out <new manifest>','t3 probe --config <connection JSON>'],live_cutover_enabled:false});
+  }else output({commands:['t3 ledger --instance <T3-native root> --file <operation.json>','t3 prepare --instance <root> --out <new manifest>','t3 probe --config <connection JSON>'],live_cutover_enabled:false});
 }
