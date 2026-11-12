@@ -1,3 +1,4 @@
+import {creationPermissionRequirement,readOwnerPermissions} from './owner-permissions.mjs';
 import {continuationAfterReport} from './owner-continuation.mjs';
 import {assessDifficulty,routineMeetingDifficulty} from './model-selection.mjs';
 import {calendarPreparation} from './calendar-preparation.mjs';
@@ -286,13 +287,13 @@ export class WorkCatalog {
     return this.atomic(()=>{
       const t=this.get(task_id);if(!t||t.state!=='accepted'||t.owner_thread_id)throw new Error('An accepted unowned task is required');
       const prior=this.db.prepare('SELECT * FROM work_owner_requests WHERE task_id=?').get(t.id);if(prior)return {...prior,request:{...parse(prior.request),difficulty_assessment:t.data.difficulty_assessment??null},...(t.data.meeting_preparation?{next_operation:'task prepare_owner with fresh projects/project_catalog_ref/checked_at; do not hand-build legacy evidence fields'}:{})};
-      const key=`owner-create:${t.canonical_key}`;
-      const request={task_id:t.id,canonical_task_key:t.canonical_key,source_message_id,verbatim_text,difficulty_assessment:t.data.difficulty_assessment??null,
+      const key=`owner-create:${t.canonical_key}`,permissions=creationPermissionRequirement(this.config.instance_root);
+      const request={task_id:t.id,...(permissions?{required_native_permissions:permissions}:{}),canonical_task_key:t.canonical_key,source_message_id,verbatim_text,difficulty_assessment:t.data.difficulty_assessment??null,
         model_routing_guidance:'Assess the full task before control prepare using task assess_difficulty or payload.difficulty_assessment. Read MODEL_SELECTION.md. Unknown difficulty uses the other route; do not copy a previous default model into native arguments.',
         control_action_key:key,required_tool:'create_thread',requires_existing_control_guards:true,
         project_id:this.config.scope.project_id,workspace:t.data.workspace,
         scope_authorization_ref:t.authorization.evidence_ref,
-        initial_prompt:`You are the execution owner for ${t.id}: ${t.data.title}. This is one ordinary ${t.kind} task. Confirm setup only; wait for native-queue execution after binding. Do not become the background discovery role, change settings, or start unregistered work. Workflow instance: ${this.config.instance_root??'[use the actual instance root]'}. Read its WORK_TASKS.md.`};
+        initial_prompt:`You are the execution owner for ${t.id}: ${t.data.title}. This is one ordinary ${t.kind} task. Confirm setup only; wait for native-queue execution after binding. Do not become the background discovery role, change settings, or start unregistered work. Workflow instance: ${this.config.instance_root??'[use the actual instance root]'}. Read its WORK_TASKS.md.${permissions?' Report your actual turn permissions during setup; discovery verifies them before binding. UI Full access and host defaults are not proof. If restricted, report the mismatch and keep this same chat pending native settings correction.':''}`};
       this.db.prepare("INSERT INTO work_owner_requests VALUES (?,?,?,'requested')").run(t.id,key,json(request));return {action_key:key,state:'requested',request,...(t.data.meeting_preparation?{next_operation:'task prepare_owner with fresh projects/project_catalog_ref/checked_at; do not hand-build legacy evidence fields'}:{})};
     });
   }
@@ -305,6 +306,13 @@ export class WorkCatalog {
       if(protectedOwners.includes(owner_thread_id))throw new Error('Control/discovery conversations cannot own ordinary execution or exploration tasks');
       if(t.owner_thread_id&&t.owner_thread_id!==owner_thread_id)throw new Error('Do not replace a live canonical owner');
       verifyNativeBinding(native_binding,{thread_id:owner_thread_id,workspace:t.data.workspace,now:this.now()});
+      const ownerRequest=parse(this.db.prepare('SELECT request FROM work_owner_requests WHERE task_id=?').get(t.id)?.request);
+      if(!t.owner_thread_id&&ownerRequest?.required_native_permissions){
+        const turn=nativeReadback(native_binding.readback)?.turns?.[0]?.id;
+        if(!turn)throw new Error('Native setup turn required for effective permission verification');
+        const permissions=readOwnerPermissions({thread_id:owner_thread_id,workspace:t.data.workspace,expected_turn_id:turn});
+        if(!permissions.verified)throw new Error(`effective_owner_permissions_mismatch: ${permissions.approval_policy}/${permissions.sandbox_policy?.type}; keep the existing owner and correct native settings`);
+      }
       if(creation_action_key){
         const action=this.db.prepare("SELECT * FROM actions WHERE action_key=? AND kind='create_thread' AND state='sent'").get(creation_action_key);
         const setup=this.db.prepare('SELECT * FROM thread_setups WHERE creation_key=?').get(creation_action_key);

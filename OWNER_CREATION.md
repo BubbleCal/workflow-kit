@@ -87,3 +87,49 @@ model, authorization, receipt and external-action guards all still apply.
 This is an application guard over supported workflow operations and genuine
 native tool evidence, not an OS security boundary against direct database edits
 or callers fabricating tool exports. Do not bypass the workflow APIs.
+
+## Effective permission verification
+
+For future creations covered by the recorded Full access policy, `request_owner`
+records `required_native_permissions`. Before binding, the runtime reads the
+original local owner's **latest native rollout turn_context**, matches its
+session ID, workspace and fresh native readback turn, and requires
+`danger-full-access`, `approval_policy = "never"`, and no restricted permission
+profile. A UI badge, thread-summary database row, prompt, or global default is
+not evidence of the running turn's permissions. The session store is read-only.
+
+Inspect the original created or bound owner without changing it:
+
+```json
+{"op":"permissions","task_id":"T-274","owner_thread_id":"01a1ce0f-d90f-7200-95d5-1230b96ed2e5"}
+```
+
+Use `node workflow.mjs task op` with JSON stdin or `--file`. On a mismatch,
+retain the creation receipt and the same chat; correct its permissions through
+supported native settings and verify a subsequent actual setup turn. The current
+`create_thread` tool has no permission-setting argument. Do not recreate owners,
+write App databases, or claim this verification changes permissions. Existing
+bound owners and healthy jobs are unaffected by this admission check.
+
+Command permissions and MCP tool approvals are separate. The bundled App-tools
+plugin can require `prompt` for creation and messages even in a Full access
+turn. With `approval_policy = "never"`, such a tool call is rejected rather than
+approved. Yang has authorized this workflow's scoped creation and owner messaging;
+the user configuration can express that choice using these supported overrides:
+
+```toml
+[plugins."codex-app-tools@openai-bundled".mcp_servers.codex_app.tools.create_thread]
+approval_mode = "approve"
+
+[plugins."codex-app-tools@openai-bundled".mcp_servers.codex_app.tools.send_message_to_thread]
+approval_mode = "approve"
+```
+
+These are per-tool user preferences, not blanket access to other connectors,
+archival/deletion, external actions or unrequested chats. Actual human scope,
+creation actor, ownership and existing workflow guards still apply. Install only
+under the user's corresponding authorization; never change the signed plugin.
+Validate with the installed CLI's `config/read`; an already running turn can keep
+its earlier policy until normal native refresh/a subsequent turn. A configured
+override alone is not proof of successful delivery. Preserve failed or uncertain
+receipts and verify actual target history before any authorized retry.

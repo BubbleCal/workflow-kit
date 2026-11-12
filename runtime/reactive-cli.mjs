@@ -1,3 +1,4 @@
+import {readOwnerPermissions} from './owner-permissions.mjs';
 import {recoverNativeWake} from './execution-recovery.mjs';
 import {MessageTrigger,validateMessageTrigger} from './message-trigger.mjs';
 import {reconcileUnsentTrigger} from './trigger-recovery.mjs';
@@ -158,6 +159,12 @@ export async function runtimeMain(args,{root=ROOT,output=v=>process.stdout.write
         if(input.op==='list'||input.op==='status')result=control.work.list();
         else if(input.op==='builtin')result=control.work.seedBuiltins();
         else if(input.op==='get')result=control.work.get(input.task_id);
+        else if(input.op==='permissions'){
+          const task=control.work.get(input.task_id),owner=input.owner_thread_id??task?.owner_thread_id;
+          if(!task||!owner||task.owner_thread_id&&task.owner_thread_id!==owner)throw new Error('Exact accepted task owner required');
+          if(!task.owner_thread_id&&!control.db.prepare("SELECT 1 FROM thread_setups s JOIN actions a ON a.action_key=s.creation_key WHERE a.task_id=? AND s.thread_id=? AND a.state='sent'").get(task.id,owner))throw new Error('Original native created owner required');
+          result=readOwnerPermissions({thread_id:owner,workspace:task.data.workspace,expected_turn_id:input.expected_turn_id});
+        }
         else if(input.op==='meeting_occurrences')result={task_id:input.task_id,occurrences:control.work.meetingOccurrences(input.task_id).map(r=>({...r,schedule:control.scheduler.get(r.preparation.schedule_id),runs:control.scheduler.runs(r.preparation.schedule_id)}))};
         else if(input.op==='reconcile_meeting'){result=control.work.reconcileMeeting(input);result={...result,schedule_update:scheduleCalendarPreparation(control,input.task_id)};}
         else if(input.op==='consolidate_meetings')result=control.work.consolidateMeetings(state,input);
