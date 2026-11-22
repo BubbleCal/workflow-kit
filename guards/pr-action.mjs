@@ -23,13 +23,20 @@ export function assessPrAction(kind,payload,e={},context={}){
   need(e.stopped===false,'human_hold_or_unknown_stop_state');
   need(e.pr_owner===bindings.identity.github_login,'pr_not_owned_by_configured_user');
   need(e.pr_open===true&&e.pr_draft===(kind==='pr_ready'),'pr_not_ready');
-  need((e.ordinary_change===true||personalReviewAllowsStage(kind,payload,e,reviewChannels,now,context)||
+  need((context.approvalScope?context.approvalScope.allowed:e.ordinary_change===true||personalReviewAllowsStage(kind,payload,e,reviewChannels,now,context)||
     kind==='merge'&&explicitMergeAllowed(payload,e,reviewChannels,context))&&e.material_findings_open===false,'important_or_unresolved_change');
   need(e.validation_current===true&&e.technical_review_current===true,'current_head_validation_or_review_missing');
   need(typeof payload?.expected_head_sha==='string'&&/^[a-f0-9]{40,64}$/.test(payload.expected_head_sha)&&payload.expected_head_sha===e.current_head_sha,'head_changed_or_unknown');
   if(kind==='pr_ready')need(payload.operation==='mark_ready'&&prUrl(payload.pr_url)&&payload.pr_url===e.pr_url,'verified_draft_transition_required');
   if(isReviewDelivery(kind))reasons.push(...reviewStageReasons(kind,payload,e,now,60000,reviewChannels?.gatekeeper_applicability,bindings));
-  reasons.push(...personalReviewReasons(kind,payload,e,reviewChannels,now,context));
+  if(context.approvalScope){
+    reasons.push(...context.approvalScope.reasons);
+    if(kind==='merge'){
+      // Keep explicit product holds, but merge is not an outbound Slack action.
+      const holds={...reviewChannels,review_implies_conditional_merge:undefined};
+      reasons.push(...personalReviewReasons(kind,payload,e,holds,now,context));
+    }
+  }else reasons.push(...personalReviewReasons(kind,payload,e,reviewChannels,now,context));
   if(kind==='slack_pr'){
     reasons.push(...reviewDestinationReasons(payload,e,reviewChannels,bindings.delivery.slack_channel_id));
     need(prUrl(payload.message)&&payload.message===e.pr_url,'slack_message_must_match_verified_PR_URL');

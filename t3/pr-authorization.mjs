@@ -7,6 +7,8 @@ import {assessPrAction} from '../guards/pr-action.mjs';
 import {ReviewFeedback,reviewSurfaceDigest} from '../guards/review-feedback.mjs';
 import {scopedReviewRule,reviewWindowAt,isReviewDelivery} from '../guards/review-window.mjs';
 import {migrationOperation} from './migration.mjs';
+import {recordApprovalPolicy} from './approval-policy.mjs';
+import {approvalScope} from '../guards/approval-scope.mjs';
 
 const need=(v,m)=>{if(!v)throw Error(m);},json=p=>JSON.parse(readFileSync(p,'utf8'));
 const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
@@ -69,8 +71,19 @@ function originalTask(l,i){
     o.task.contract.pull_requests?.some(p=>p.repository===o.repository&&p.pr_number===o.pr_number),'Accepted original task and bound PR required; supply native binding proof instead of legacy enrollment');
   return o;
 }
-function permission(source,input){
+function permission(source,input,approvalPolicy){
   const answer=source.text.trim().split('\n').at(-1).replace(/（推荐）$|\(Recommended\)$/,'').trim();
+  if(approvalPolicy&&input.approval_categories){
+    const names={'breaking-change':'breaking_change','format-change':'format_change','Enterprise 用户负面影响':'enterprise_negative_impact','发送 Slack 消息':'slack_message'};
+    const tokens=/^允许\s*(.+?)[。.]?$/.exec(answer)?.[1].split('、');
+    need(tokens?.length&&tokens.every(t=>names[t])&&new Set(tokens).size===tokens.length,'Actual explicit approval categories required');
+    const categories=tokens.map(t=>names[t]).sort();
+    need(Array.isArray(input.approval_categories)&&JSON.stringify([...input.approval_categories].sort())===JSON.stringify(categories),'Requested categories must equal actual human permission');
+    const urls=[...new Set(source.text.match(/https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*/g)??[])];
+    const heads=[...new Set([...source.text.matchAll(/\bhead\s*(?:(?:为|是|:|=)\s*)?`?([a-f0-9]{7,40})(?![a-f0-9])/gi)].map(m=>m[1]))];
+    need(urls.length===1&&urls[0]===input.pr_url&&heads.length===1&&input.head_sha.startsWith(heads[0])&&(heads[0].length===40||input.binding_proof),'One exact authorized PR/head required');
+    return {decision:'allow_explicit_categories',reviewed_personally:false,external_review:categories.includes('slack_message'),conditional_merge:categories.some(k=>k!=='slack_message'),approved_categories:categories,mentioned_head:heads[0]};
+  }
   const reviewed=/^(?:我已(?:经)?(?:亲自)?|已(?:经)?亲自)(?:审阅|看过|看完|检查)(?:完毕)?[，,；;。\s]+/.exec(answer);
   need(reviewed,'Explicit personal inspection answer required');
   const action=answer.slice(reviewed[0].length);
@@ -89,8 +102,22 @@ const policies=readPrPolicy;
 
 function grant(l,i){
   const row=l.db.prepare('SELECT data FROM native_pr_authorizations WHERE task_id=? AND pr_url=? AND head=?').get(i.task_id,i.pr_url,i.head_sha);
-  need(row,'Record the actual native human authorization first');
-  const g=JSON.parse(row.data),o=originalTask(l,i);
+  const categories=l.db.prepare('SELECT data FROM native_pr_category_authorizations WHERE task_id=? AND pr_url=? AND head=?').all(i.task_id,i.pr_url,i.head_sha);
+  if(!row&&!categories.length){
+    const policy=policies(l);need(policy.approval,'Record the actual native human authorization first');
+    const o=originalTask(l,i);
+    return {o,g:{protocol:'t3_standing_scope_v1',task_id:i.task_id,pr_url:i.pr_url,head_sha:i.head_sha,owner_thread_id:o.owner,
+      source:policy.approval.source,reviewed_personally:false,external_review:false,conditional_merge:false,supersedes:[]}};
+  }
+  const o=originalTask(l,i),grants=[...(row?[JSON.parse(row.data)]:[]),...categories.map(r=>JSON.parse(r.data))];
+  for(const g of grants)verifyGrant(l,i,g,o);
+  if(grants.length===1)return {g:grants[0],o};
+  grants.sort((a,b)=>Date.parse(a.source.source_at)-Date.parse(b.source.source_at)||a.source.message_id.localeCompare(b.source.message_id));
+  return {o,g:{protocol:'t3_composed_authority_v1',task_id:i.task_id,pr_url:i.pr_url,head_sha:i.head_sha,owner_thread_id:o.owner,
+    source:grants.at(-1).source,reviewed_personally:false,external_review:grants.some(g=>g.external_review),conditional_merge:grants.some(g=>g.conditional_merge),
+    approved_categories:[...new Set(grants.flatMap(g=>g.approved_categories??[]))].sort(),legacy_grants:grants,supersedes:grants.flatMap(g=>g.supersedes)}};
+}
+function verifyGrant(l,i,g,o){
   need(g.owner_thread_id===o.owner,'Preserve original owner');
   for(const s of [g.source,g.repair_source,g.maintenance_source].filter(Boolean)){
     need(fileHash(s.evidence_ref)===s.evidence_sha256,'Native authority evidence changed');
@@ -99,10 +126,10 @@ function grant(l,i){
   }
   if(g.binding){
     need(digest(g.binding)===digest(o.binding),'Authorization and native PR binding differ');
-    const parsed=permission(g.source,{...i,binding_proof:g.binding});
-    need(parsed.conditional_merge===g.conditional_merge&&g.external_review===true&&g.reviewed_personally===true,'Native grant must preserve actual human permission');
+    const parsed=permission(g.source,{...i,binding_proof:g.binding,...(g.approved_categories?{approval_categories:g.approved_categories}:{})},policies(l).approval);
+    need(parsed.conditional_merge===g.conditional_merge&&parsed.external_review===g.external_review&&parsed.reviewed_personally===g.reviewed_personally&&
+      digest(parsed.approved_categories??[])===digest(g.approved_categories??[]),'Native grant must preserve actual human permission');
   }
-  return {g,o};
 }
 function actor(l,proof,expected){
   const r=readProof(proof);
@@ -115,7 +142,7 @@ function register(l,i){
   actor(l,i.caller_proof,process.env.T3CODE_THREAD_ID);
   need(/^[a-f0-9]{40}$/.test(i.head_sha??''),'Exact inspected head required');
   const source=directHuman(i.native_proof,mapped.owner,l.config.project_id,i.source_message_id);
-  const allowed=permission(source,i);
+  const allowed=permission(source,i,policies(l).approval);
   const binding=i.binding_proof?nativeBinding(l,i,mapped,i.binding_proof):null;
   if(!binding)originalTask(l,i);
   const o=mapped;
@@ -133,26 +160,31 @@ function register(l,i){
     supersedes.push({message_id:id,hold_digest:digest(holds[0])});
   }
   need(supersedes.length<=1,'No bulk hold changes');
-  const g={protocol:binding?'t3_owner_pr_authorization_v2':'t3_owner_pr_authorization_v1',task_id:i.task_id,pr_url:i.pr_url,head_sha:i.head_sha,owner_thread_id:o.owner,
+  need(!allowed.approved_categories||binding,'Category approval requires native PR/full-head binding');
+  const g={protocol:allowed.approved_categories?'t3_owner_pr_authorization_v3':binding?'t3_owner_pr_authorization_v2':'t3_owner_pr_authorization_v1',task_id:i.task_id,pr_url:i.pr_url,head_sha:i.head_sha,owner_thread_id:o.owner,
     source,...(repair?{repair_source:repair}:{}),...(maintenance?{maintenance_source:maintenance}:{}),
     ...(binding?{binding,head_resolution:{mentioned_head:allowed.mentioned_head,full_head:i.head_sha,pr_evidence_ref:binding.pr_native_proof.evidence_ref}}:{}),
-    reviewed_personally:true,external_review:true,conditional_merge:allowed.conditional_merge,
+    reviewed_personally:allowed.reviewed_personally,external_review:allowed.external_review,conditional_merge:allowed.conditional_merge,
+    ...(allowed.approved_categories?{approved_categories:allowed.approved_categories}:{}),
     release:false,deploy:false,other_channel_holds_waived:false,supersedes};
-  const prior=l.db.prepare('SELECT data FROM native_pr_authorizations WHERE task_id=? AND pr_url=? AND head=?').get(i.task_id,i.pr_url,i.head_sha);
+  const category=!!allowed.approved_categories;
+  const prior=category?l.db.prepare('SELECT data FROM native_pr_category_authorizations WHERE task_id=? AND pr_url=? AND head=? AND message_id=?').get(i.task_id,i.pr_url,i.head_sha,source.message_id):
+    l.db.prepare('SELECT data FROM native_pr_authorizations WHERE task_id=? AND pr_url=? AND head=?').get(i.task_id,i.pr_url,i.head_sha);
   if(prior){need(prior.data===JSON.stringify(g),'Native authorization is immutable');return {recorded:false,already_recorded:true,authorization:g};}
   if(binding){
     const old=l.db.prepare('SELECT data FROM native_pr_bindings WHERE task_id=? AND pr_url=? AND head=?').get(i.task_id,i.pr_url,i.head_sha);
     if(old)need(old.data===JSON.stringify(binding),'Native PR binding is immutable');
     else l.db.prepare('INSERT INTO native_pr_bindings VALUES (?,?,?,?)').run(i.task_id,i.pr_url,i.head_sha,JSON.stringify(binding));
   }
-  l.db.prepare('INSERT INTO native_pr_authorizations VALUES (?,?,?,?)').run(i.task_id,i.pr_url,i.head_sha,JSON.stringify(g));
+  if(category)l.db.prepare('INSERT INTO native_pr_category_authorizations VALUES (?,?,?,?,?)').run(i.task_id,i.pr_url,i.head_sha,source.message_id,JSON.stringify(g));
+  else l.db.prepare('INSERT INTO native_pr_authorizations VALUES (?,?,?,?)').run(i.task_id,i.pr_url,i.head_sha,JSON.stringify(g));
   return {recorded:true,authorization:g,legacy_policy_changed:false,product_action_performed:false};
 }
 function overlay(p,g){
   const policy=structuredClone(p);
   policy.merge_holds=(policy.merge_holds??[]).filter(h=>!g.supersedes.some(s=>s.message_id===h.source_message_id&&s.hold_digest===digest(h)));
   const base={task_id:g.task_id,pr_url:g.pr_url,head_sha:g.head_sha,source_thread_id:g.source.thread_id,source_message_id:g.source.message_id,
-    evidence_ref:g.source.evidence_ref,record_protocol:g.protocol,reviewed_personally:true,nonordinary_change_accepted:true};
+    evidence_ref:g.source.evidence_ref,record_protocol:g.protocol,reviewed_personally:g.reviewed_personally,nonordinary_change_accepted:true};
   const review={...base,decision:'allow_external_review'},merge={...base,decision:'allow_merge'};
   const grants=[...(g.external_review?[review]:[]),...(g.conditional_merge?[merge]:[])];
   policy.personal_review.authorizations.push(...grants.filter(d=>d.decision==='allow_external_review'));
@@ -170,13 +202,15 @@ function evaluate(l,i,now){
   need(['pr_ready','slack_pr','merge'].includes(i.kind),'Only draft-to-ready, canonical review URL delivery and conditional merge are supported');
   need(payload.expected_head_sha===g.head_sha&&(payload.pr_url??payload.message)===g.pr_url,'Exact authorized PR/head required');
   const {policy,nativeAuthorization}=overlay(p.p,g),reasons=[];
-  if(i.kind==='merge'&&g.conditional_merge!==true)reasons.push('native_authorization_external_review_only');
+  const approval=p.approval?approvalScope(i.kind,payload,{...e,task_id:i.task_id},p.approval,g,now):null;
+  if(approval)reasons.push(...approval.reasons);
+  else if(i.kind==='merge'&&g.conditional_merge!==true)reasons.push('native_authorization_external_review_only');
   const rule=scopedReviewRule(p.window,now,{task_id:i.task_id,pull_requests:o.task.contract.pull_requests,payload});
   const evidence={...e,task_id:i.task_id};
   if(e.executor_thread_id!==o.owner)reasons.push('original_native_owner_required');
   if(e.policy_version!==p.version||e.current_policy_version!==p.version)reasons.push('policy_changed_or_unknown');
   if(e.authorization_ref!==g.source.evidence_ref)reasons.push('exact_native_authorization_reference_required');
-  reasons.push(...assessPrAction(i.kind,payload,evidence,{now,reviewRule:rule,dependencyPolicy:p.dependency,reviewChannels:policy,bindings:p.b,nativeAuthorization}).reasons);
+  reasons.push(...assessPrAction(i.kind,payload,evidence,{now,reviewRule:rule,dependencyPolicy:p.dependency,reviewChannels:policy,bindings:p.b,nativeAuthorization,approvalScope:approval}).reasons);
   const feedback=new ReviewFeedback(l.db,()=>now);
   // Ingest and semantically assess complete actual source surfaces. The same
   // current review surface must feed Gatekeeper and the full-feedback guard.
@@ -190,16 +224,26 @@ function evaluate(l,i,now){
   if(i.kind!=='pr_ready'&&(!surface||surface.review_digest!==reviewSurfaceDigest(e.gatekeeper?.reviews)))reasons.push('Gatekeeper_and_feedback_review_surfaces_differ');
   const previous=previousActions(l,p.root,i.kind,g.pr_url);
   for(const a of previous)if(!['cancelled','failed','not_sent'].includes(a.state))reasons.push(`existing_${a.source??'native'}_action:${a.action_key}:${a.state}`);
-  return {allowed:!reasons.length,reasons:[...new Set(reasons)],human_authorization_recognized:true,authorization:g,
+  return {allowed:!reasons.length,reasons:[...new Set(reasons)],human_authorization_recognized:true,authorization:g,...(approval?{approval_scope:approval}:{}),
     feedback_status:feedback.status(o.repository,o.pr_number),policy_version:p.version,window:reviewWindowAt(now,rule),previous_actions:previous,
     product_action_performed:false};
 }
 export function nativePrOperation(l,i,{now=Date.now()}={}){
   l.db.exec(`CREATE TABLE IF NOT EXISTS native_pr_authorizations(task_id TEXT,pr_url TEXT,head TEXT,data TEXT,PRIMARY KEY(task_id,pr_url,head));
+    CREATE TABLE IF NOT EXISTS native_pr_category_authorizations(task_id TEXT,pr_url TEXT,head TEXT,message_id TEXT,data TEXT,PRIMARY KEY(task_id,pr_url,head,message_id));
     CREATE TABLE IF NOT EXISTS native_pr_bindings(task_id TEXT,pr_url TEXT,head TEXT,data TEXT,PRIMARY KEY(task_id,pr_url,head));
     CREATE TABLE IF NOT EXISTS native_pr_actions(action_key TEXT PRIMARY KEY,task_id TEXT,pr_url TEXT,kind TEXT,payload TEXT,state TEXT,attempt_id TEXT,valid_until INTEGER,receipt TEXT);
     CREATE TABLE IF NOT EXISTS native_pr_action_events(event_id TEXT PRIMARY KEY,action_key TEXT,data TEXT);`);
   return l.atomic(()=>{
+    if(i.op==='approval_policy_record')return recordApprovalPolicy(l,i);
+    if(i.op==='pr_binding_record'){
+      const o=migratedOwner(l,i);actor(l,i.caller_proof,o.owner);
+      const binding=nativeBinding(l,i,o,i.binding_proof);
+      const old=l.db.prepare('SELECT data FROM native_pr_bindings WHERE task_id=? AND pr_url=? AND head=?').get(i.task_id,i.pr_url,i.head_sha);
+      if(old){need(old.data===JSON.stringify(binding),'Native PR binding is immutable');return {recorded:false,already_recorded:true,binding};}
+      l.db.prepare('INSERT INTO native_pr_bindings VALUES (?,?,?,?)').run(i.task_id,i.pr_url,i.head_sha,JSON.stringify(binding));
+      return {recorded:true,binding,permission_granted:false,product_action_performed:false};
+    }
     if(i.op==='pr_authorization_record')return register(l,i);
     if(i.op==='pr_authorization_get'){
       const {g}=grant(l,i);return {authorization:g,policy_version:policies(l).version,actions:l.db.prepare('SELECT * FROM native_pr_actions WHERE task_id=? AND pr_url=?').all(i.task_id,i.pr_url)};
@@ -218,7 +262,7 @@ export function nativePrOperation(l,i,{now=Date.now()}={}){
     }
     need(['pr_action_settle','pr_action_reconcile'].includes(i.op),'Unknown native PR operation');
     const row=l.db.prepare('SELECT * FROM native_pr_actions WHERE action_key=?').get(i.action_key);need(row&&row.attempt_id===i.attempt_id,'Exact existing action attempt required');
-    const {o}=grant(l,{task_id:row.task_id,pr_url:row.pr_url,head_sha:JSON.parse(row.payload).expected_head_sha});actor(l,i.caller_proof,o.owner);
+    const o=originalTask(l,{task_id:row.task_id,pr_url:row.pr_url,head_sha:JSON.parse(row.payload).expected_head_sha});actor(l,i.caller_proof,o.owner);
     need((i.op==='pr_action_settle'&&row.state==='claimed'||i.op==='pr_action_reconcile'&&['claimed','uncertain'].includes(row.state))&&
       ['sent','uncertain'].includes(i.outcome)&&i.receipt_ref,'Exact receipt and unresolved owned attempt required; unsupported non-delivery assertions cannot unlock a retry');
     const proof=json(i.receipt_ref);let verification;

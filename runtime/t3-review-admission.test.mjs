@@ -36,6 +36,12 @@ test('standing human authority admits independent PR and document reviews withou
   const f=fixture(t),pr=f.ledger.registerReview(f.pr),doc=f.ledger.registerReview(f.doc);
   assert.equal(pr.created,true);assert.equal(doc.created,true);assert.notEqual(pr.task.task_id,doc.task.task_id);
   assert.equal(pr.task.canonical_key,'github:org/repo:7');
+  assert.deepEqual(pr.task.data.review.follow_up.events,['renewed_review_readiness','reply_to_own_feedback']);
+  assert.equal(pr.task.data.review.follow_up.owner,'original_thread');
+  assert.equal(pr.task.data.review.follow_up.consume_existing_replies_first,true);
+  assert.equal(pr.task.data.review.follow_up.feedback_send_completes_review,false);
+  assert.equal(pr.task.data.review.follow_up.auto_settle,'Never');
+  assert.equal(doc.task.data.review.follow_up,undefined);
   assert.equal(doc.task.canonical_key,'document:https://app.notion.com/p/abc');
   for(const r of [pr,doc]){
     assert.equal(r.task.data.review.read_only,true);

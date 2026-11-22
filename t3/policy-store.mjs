@@ -3,6 +3,7 @@ import {join,resolve,relative} from 'node:path';
 import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {normalizeBindings} from '../guards/instance.mjs';
+import {readApprovalPolicy} from './approval-policy.mjs';
 
 const need=(v,m)=>{if(!v)throw Error(m);},hash=b=>createHash('sha256').update(b).digest('hex');
 const read=p=>JSON.parse(readFileSync(p,'utf8')),encode=v=>JSON.stringify(v,null,2)+'\n';
@@ -27,7 +28,8 @@ export function readPrPolicy(ledger){
     const value=artifact(ledger.root,store.pr_policy);
     need(value.project_id===ledger.config.project_id,'Policy snapshot belongs to another project');
     const {b,p,window,dependency}=value.policy;
-    return {b,p,window,dependency,version:hash(JSON.stringify({b,p,window,dependency})),source:'instance_policy'};
+    const approval=readApprovalPolicy(ledger);
+    return {b,p,window,dependency,approval,version:hash(JSON.stringify({b,p,window,dependency,...(approval?{approval}:{})})),source:'instance_policy'};
   }
   need(ledger.config.control_plane?.legacy_runtime_required!==false,'Native instance policy is missing; never fall back to the legacy runtime');
   // Transitional installations only. Detaching replaces these reads atomically.

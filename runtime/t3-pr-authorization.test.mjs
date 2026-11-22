@@ -11,6 +11,7 @@ import {passedReviewGates} from './test-fixtures/pr-review.mjs';
 import {detachLegacyRuntime} from '../t3/policy-store.mjs';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {approvalPolicyText} from '../t3/approval-policy.mjs';
 
 const NOW=Date.parse('2026-11-12T06:00:00Z'),head='a'.repeat(40),url='https://github.com/example/service/pull/14';
 const sha=p=>createHash('sha256').update(readFileSync(p)).digest('hex');
@@ -351,6 +352,96 @@ test('native CLI is usable with no runtime directory and refuses fallback if an 
   // Still-present original policy files must not become a silent fallback.
   assert.equal(JSON.parse(readFileSync(join(f.root,'channels.json'))).personal_review.authorizations.length,0);
 });
+function scopeFixture(t,{recordGrant=false,hold=false}={}){
+  const f=fixture(t);nativeGrant(f);if(recordGrant)f.record();
+  if(hold){f.policy.merge_holds=[{task_id:'T-014',pr_url:url,decision:'hold_merge',source_thread_id:'old-main',source_message_id:'specific-stop',actual_human_verified:true,evidence_ref:'stop-evidence'}];f.save('channels.json',f.policy);}
+  detach(f);
+  const items=[{type:'user_message',messageId:'scope-policy',createdBy:'user',creationSource:'web',visibility:'local',textTruncated:false,
+    updatedAt:new Date(NOW).toISOString(),text:approvalPolicyText}];
+  const policyInput={op:'approval_policy_record',native_proof:f.proof('scope-human.json','maintenance',items),source_message_id:'scope-policy'};
+  const installed=f.op(policyInput);
+  if(!recordGrant){process.env.T3CODE_THREAD_ID='owner';f.op({op:'pr_binding_record',...f.identity,caller_proof:f.proof('binding-caller.json','owner'),binding_proof:f.input.binding_proof});}
+  const current=kind=>{const c=f.ready(kind);c.evidence.pr_impact={...c.evidence.pr_impact,breaking_change:false,format_change:false,enterprise_negative_impact:false};
+    if(!recordGrant)c.evidence.authorization_ref=installed.policy.source.evidence_ref;
+    return c;};
+  return {...f,items,policyInput,installed,current};
+}
+test('three-category policy allows ordinary Ready/merge without personal-review enrollment or Slack delivery',t=>{
+  const f=scopeFixture(t),c=f.current('merge');
+  // Broad architecture/high-risk labels alone are not a fourth permission class.
+  c.evidence.ordinary_change=false;c.evidence.pr_impact.broad_impact=true;c.evidence.pr_impact.high_risk=true;
+  const result=f.op(c);assert.equal(result.allowed,true,JSON.stringify(result.reasons));
+  assert.equal(result.authorization.reviewed_personally,false);assert.equal(result.authorization.external_review,false);
+  assert.equal(f.l.db.prepare('SELECT count(*) n FROM native_pr_authorizations').get().n,0);
+  const ready=f.current('pr_ready');ready.payload.operation='mark_ready';ready.evidence.pr_draft=true;ready.evidence.applicable_ci.phase='pre_ready';delete ready.evidence.gatekeeper;
+  assert.equal(f.op(ready).allowed,true);
+  const slack=f.op(f.current('slack_pr'));assert.ok(slack.reasons.includes('Yang_authorization_required:slack_message'));assert.equal(slack.approval_scope.requires_human,true);
+});
+test('breaking, format and Enterprise negative effects require actual exact-head permission; missing assessment is owner work',t=>{
+  const f=scopeFixture(t);
+  for(const key of ['breaking_change','format_change','enterprise_negative_impact']){const c=f.current('merge');c.evidence.pr_impact[key]=true;assert.ok(f.op(c).reasons.includes('Yang_authorization_required:'+key));}
+  const label=f.current('merge');label.evidence.pr_impact.labels=['format-change'];assert.ok(f.op(label).reasons.includes('Yang_authorization_required:format_change'));
+  const missing=f.current('merge');delete missing.evidence.pr_impact.enterprise_negative_impact;const result=f.op(missing);assert.ok(result.reasons.includes('current_owner_impact_assessment_required'));assert.equal(result.approval_scope.requires_human,false);
+  const stale=f.current('merge');stale.evidence.pr_impact.head_sha='b'.repeat(40);assert.equal(f.op(stale).allowed,false);
+});
+test('standing ordinary permission does not waive technical gates, explicit task holds, ownership or unknown receipts',t=>{
+  const f=scopeFixture(t);
+  for(const patch of [{required_checks_pass:false},{approval_state:'CHANGES_REQUESTED'},{material_findings_open:true},{current_head_sha:'b'.repeat(40)},{stopped:true},{executor_thread_id:'maintenance'}]){
+    const c=f.current('merge');Object.assign(c.evidence,patch);assert.equal(f.op(c).allowed,false,JSON.stringify(patch));
+  }
+  const c=f.current('merge');process.env.T3CODE_THREAD_ID='owner';const caller=f.proof('scope-claim.json','owner');
+  const claim=f.op({...c,op:'pr_action_claim',action_key:'ordinary-merge',caller_proof:caller});assert.equal(claim.send,true);
+  const uncertain=f.save('ordinary-unknown.json',{transport_error:true});f.op({op:'pr_action_settle',action_key:claim.action_key,attempt_id:claim.attempt_id,caller_proof:caller,outcome:'uncertain',receipt_ref:uncertain});
+  assert.equal(f.op({...f.current('merge'),op:'pr_action_claim',action_key:'different-key',caller_proof:caller}).send,false);
+  const ref=f.l.config.policy_store.pr_policy; // Detached policy artifact remains immutable.
+  assert.equal(JSON.parse(readFileSync(join(f.root,ref.path))).policy.p.personal_review.enabled,true);
+  const held=scopeFixture(t,{hold:true});assert.ok(held.op(held.current('merge')).reasons.includes('merge_explicitly_held_by_user'));
+});
+test('later standing policy supersedes absent ordinary merge permission but preserves actual outbound-only grant and risky merge boundary',t=>{
+  const f=scopeFixture(t,{recordGrant:true});assert.equal(f.op(f.current('slack_pr')).allowed,true);
+  assert.equal(f.op(f.current('merge')).allowed,true);
+  const risk=f.current('merge');risk.evidence.pr_impact.enterprise_negative_impact=true;assert.ok(f.op(risk).reasons.includes('Yang_authorization_required:enterprise_negative_impact'));
+  assert.equal(f.op({op:'pr_authorization_get',...f.identity}).authorization.conditional_merge,false);
+});
+test('shared policy installation rejects agent relay, wrong project and proof tampering; repeats are idempotent',t=>{
+  const f=scopeFixture(t);process.env.T3CODE_THREAD_ID='maintenance';assert.equal(f.op(f.policyInput).already_recorded,true);
+  const saved=JSON.parse(readFileSync(f.policyInput.native_proof.evidence_ref));saved.items[0].createdBy='agent';f.save('scope-human.json',saved);
+  assert.throws(()=>f.op(f.current('merge')),/Actual complete direct human|provenance|changed/);
+  const g=fixture(t);detach(g);const bad=g.proof('bad-scope.json','maintenance',[{type:'user_message',messageId:'bad',createdBy:'agent',creationSource:'mcp',visibility:'local',textTruncated:false,text:approvalPolicyText}]);
+  assert.throws(()=>g.op({op:'approval_policy_record',native_proof:bad,source_message_id:'bad'}),/Actual complete direct human/);
+});
+test('explicit category authorization does not require personal inspection or permit a different risk or outbound message',t=>{
+  const f=scopeFixture(t);process.env.T3CODE_THREAD_ID='owner';
+  const text=`${url} head ${head}\n允许 format-change`;
+  const input={op:'pr_authorization_record',...f.identity,caller_proof:f.proof('category-caller.json','owner'),native_proof:f.human('category-answer.json',text),source_message_id:'category-answer.json',binding_proof:f.input.binding_proof,approval_categories:['format_change']};
+  const grant=f.op(input);assert.equal(grant.authorization.reviewed_personally,false);assert.equal(grant.authorization.external_review,false);
+  const c=f.current('merge');c.evidence.authorization_ref=input.native_proof.evidence_ref;c.evidence.pr_impact.format_change=true;
+  assert.equal(f.op(c).allowed,true);c.evidence.pr_impact.enterprise_negative_impact=true;
+  assert.ok(f.op(c).reasons.includes('Yang_authorization_required:enterprise_negative_impact'));
+  const outbound=f.current('slack_pr');outbound.evidence.authorization_ref=input.native_proof.evidence_ref;assert.ok(f.op(outbound).reasons.includes('Yang_authorization_required:slack_message'));
+  assert.throws(()=>f.op({...input,approval_categories:['format_change','slack_message']}),/Requested categories/);
+});
+test('later category answers append without rewriting existing grants or losing an authorized Slack delivery',t=>{
+  const f=scopeFixture(t,{recordGrant:true}),before=f.l.db.prepare('SELECT data FROM native_pr_authorizations').get().data;
+  process.env.T3CODE_THREAD_ID='owner';
+  const input={op:'pr_authorization_record',...f.identity,caller_proof:f.proof('add-risk-caller.json','owner'),native_proof:f.human('add-risk-answer.json',`${url} head ${head}\n允许 Enterprise 用户负面影响`),source_message_id:'add-risk-answer.json',binding_proof:f.input.binding_proof,approval_categories:['enterprise_negative_impact']};
+  assert.equal(f.op(input).recorded,true);assert.equal(f.op(input).already_recorded,true);
+  assert.equal(f.l.db.prepare('SELECT data FROM native_pr_authorizations').get().data,before);
+  const a=f.op({op:'pr_authorization_get',...f.identity}).authorization;
+  assert.equal(a.legacy_grants.length,2);assert.equal(a.external_review,true);
+  const c=f.current('merge');c.evidence.authorization_ref=a.source.evidence_ref;c.evidence.pr_impact.enterprise_negative_impact=true;
+  assert.equal(f.op(c).allowed,true);const slack=f.current('slack_pr');slack.evidence.authorization_ref=a.source.evidence_ref;assert.equal(f.op(slack).allowed,true);
+});
+test('plain Slack permission needs no personal-review statement and never grants risky merge',t=>{
+  const f=scopeFixture(t);process.env.T3CODE_THREAD_ID='owner';
+  const native_proof=f.human('plain-slack-answer.json',`${url} head ${head}\n允许发送 Slack 消息`);
+  const input={op:'pr_authorization_record',...f.identity,caller_proof:f.proof('plain-slack-caller.json','owner'),native_proof,source_message_id:'plain-slack-answer.json',binding_proof:f.input.binding_proof,approval_categories:['slack_message']};
+  const g=f.op(input).authorization;assert.equal(g.reviewed_personally,false);assert.equal(g.conditional_merge,false);
+  const c=f.current('slack_pr');c.evidence.authorization_ref=native_proof.evidence_ref;assert.equal(f.op(c).allowed,true);
+  const risk=f.current('merge');risk.evidence.authorization_ref=native_proof.evidence_ref;risk.evidence.pr_impact.format_change=true;
+  assert.ok(f.op(risk).reasons.includes('Yang_authorization_required:format_change'));
+});
+
 test('native conversion rejects an agent relay, wrong project/caller, active old processing and unapproved source',t=>{
   const f=fixture(t);f.config.task_admission={paused:true};f.save('t3-workflow.json',f.config);
   f.old.exec("CREATE TABLE settings(key TEXT,value TEXT); INSERT INTO settings VALUES ('processing','on')");
