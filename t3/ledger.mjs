@@ -47,6 +47,7 @@ export class T3NativeLedger {
     need(['t3code','t3-native'].includes(this.config.backend)&&this.config.project_id&&this.config.roles?.main,'Verified T3-native instance configuration required');
     this.nativeControl=this.config.control_plane?.execution==='t3_native';
     this.roles=Object.fromEntries(Object.entries(this.config.roles).map(([k,v])=>[k,typeof v==='string'?v:v.thread_id]));
+    need(!this.roles.decision_report_inbox||this.roles.decision_report_inbox!==this.roles.main,'The Decision & Report Inbox must be a separate conversation from Main');
     this.db=new DatabaseSync(join(this.root,'t3-workflow.sqlite'));
     this.db.exec(`CREATE TABLE IF NOT EXISTS tasks(task_id TEXT PRIMARY KEY,canonical_key TEXT UNIQUE NOT NULL,data TEXT NOT NULL,owner TEXT,state TEXT NOT NULL,version INTEGER NOT NULL,created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS decisions(case_id TEXT PRIMARY KEY,task_id TEXT NOT NULL,revision INTEGER NOT NULL,data TEXT NOT NULL,answer TEXT,attention TEXT NOT NULL,snoozed_until TEXT);
@@ -55,6 +56,15 @@ export class T3NativeLedger {
       CREATE TABLE IF NOT EXISTS result_deliveries(delivery_key TEXT PRIMARY KEY,case_id TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL,receipt TEXT);`);
   }
   close(){this.db.close();}
+  // Standard Decision & Report Inbox routing applies whenever its role is bound;
+  // an explicit owner_thread setting keeps the legacy per-owner Ask behavior.
+  decisionLocation(){
+    const explicit=this.config.attention?.decision_location;
+    if(explicit==='decision_report_inbox')need(this.roles.decision_report_inbox,'Bind the standard decision_report_inbox role');
+    if(explicit)return explicit;
+    if(this.roles.decision_report_inbox)return 'decision_report_inbox';
+    return this.nativeControl?'owner_thread':'main';
+  }
   atomic(fn){this.db.exec('BEGIN IMMEDIATE');try{const v=fn();this.db.exec('COMMIT');return v;}catch(e){this.db.exec('ROLLBACK');throw e;}}
   task(id){const r=this.db.prepare('SELECT * FROM tasks WHERE task_id=? OR canonical_key=?').get(id,id);return r&&{...r,data:JSON.parse(r.data),owner:r.owner?JSON.parse(r.owner):null};}
   insertTask(key,data){
@@ -102,7 +112,8 @@ export class T3NativeLedger {
     }
     const old=this.task(key);if(old)return {created:false,task:old};
     need(!c.owner_binding||Array.isArray(c.owner_binding)&&c.owner_binding.length===0,'Preserve the existing owner; do not create a second review task');
-    const review={kind:i.review_kind,read_only:true,target_url:target.href,candidate_id:i.candidate_id,candidate_version:c.version,source_url:c.source_url,request_evidence_ref:i.request_evidence_ref,request_text:i.request_text??null};
+    const review={kind:i.review_kind,read_only:true,target_url:target.href,candidate_id:i.candidate_id,candidate_version:c.version,source_url:c.source_url,request_evidence_ref:i.request_evidence_ref,request_text:i.request_text??null,
+      ...(i.review_kind==='pull_request'?{follow_up:{after:'authorized_comment_or_request_changes_without_approval',owner:'original_thread',wait:'native_PR_watch',events:['renewed_review_readiness','reply_to_own_feedback'],consume_existing_replies_first:true,feedback_send_completes_review:false,auto_settle:'Never',readiness_only_wake_guaranteed:false}}:{})};
     const objective=`Review ${target.href} and report evidence-backed findings and recommendations to Yang in this task's own conversation`;
     return this.insertTask(key,{title:i.title??objective,objective,requirements:['Read the current target and relevant context','Deliver a substantive summary, findings, tradeoffs and recommendations in the original owner thread','Ask Yang in the owner thread before any approve, external feedback or follow-up implementation'],constraints:['Read-only assessment only; do not edit product code or the reviewed document','Do not approve, comment, publish, merge or implement without separate human authority','Use one independent ordinary task conversation; Discovery cannot execute this review'],project_id:this.config.project_id,workspace:this.config.project_root,source,review});
   });}
@@ -134,8 +145,13 @@ export class T3NativeLedger {
   decision(i){return this.atomic(()=>{
     const task=this.task(i.task_id);need(task&&i.case_id&&i.question&&i.recommendation&&i.options?.length&&i.evidence_refs?.length,'A concrete task decision with options and evidence is required');
     need(new Set(i.options.map(o=>o.id)).size===i.options.length&&i.options.every(o=>typeof o.id==='string'&&o.id),'Decision option identities must be unique');
-    const discussion=i.discussion_thread_id??task.owner?.thread_id??null;
-    if(this.nativeControl||this.config.attention?.decision_location==='owner_thread'){
+    const location=this.decisionLocation();
+    let discussion=i.discussion_thread_id??task.owner?.thread_id??null;
+    if(location==='decision_report_inbox'){
+      need(task.owner,'A bound original owner is required before requesting a decision');
+      discussion=i.discussion_thread_id??this.roles.decision_report_inbox;
+      need(discussion===this.roles.decision_report_inbox,'Route the decision through the Decision & Report Inbox');
+    }else if(this.nativeControl||location==='owner_thread'){
       need(task.owner,'A bound original owner is required before requesting a decision');
       need(discussion===task.owner.thread_id,'Discuss the decision in the original owner thread');
     }
@@ -151,7 +167,9 @@ export class T3NativeLedger {
     need(this.config.processing!==false,'Workflow paused; migration does not resume decisions');
     const c=this.db.prepare('SELECT * FROM decisions WHERE case_id=?').get(i.case_id);need(c&&c.revision===i.expected_revision,'Decision revision changed');
     const data=JSON.parse(c.data),task=this.task(c.task_id);need(task?.owner&&task.version===data.task_version,'Current original task owner and contract required');
-    const threads=this.nativeControl||this.config.attention?.decision_location==='owner_thread'?[task.owner.thread_id]:[this.roles.main,task.owner.thread_id,data.discussion_thread_id].filter(Boolean);
+    const location=this.decisionLocation();
+    const threads=location==='decision_report_inbox'?[this.roles.decision_report_inbox,task.owner.thread_id]
+      :this.nativeControl||location==='owner_thread'?[task.owner.thread_id]:[this.roles.main,task.owner.thread_id,data.discussion_thread_id].filter(Boolean);
     const source=human(i.native_proof,{threads,project_id:task.data.project_id,excluded:this.config.authority?.agent_authored_message_ids??[],message_id:i.source_message_id,text:i.verbatim_text});
     need(data.options.some(o=>o.id===i.option_id),'Select an actual recorded decision option');
     const answer={option_id:i.option_id,source,revision:c.revision};
@@ -168,7 +186,8 @@ export class T3NativeLedger {
     const prompt=`[workflow-decision:${c.case_id}:${c.revision}]\nActual human answer: ${source.text}\nSelected option: ${i.option_id}\nSource: ${source.thread_id}/${source.message_id}\nOriginal evidence: ${source.evidence_ref}\nApply only within the current contract and exact decision scope; reevaluate stale artifact/head assumptions. Continue the original task and preserve other holds.`;
     const payload={threadId:task.owner.thread_id,environmentId:task.owner.environment_id,message:prompt,mode:'queue',clientRequestId:'workflow-decision:'+hash(key)};
     this.db.prepare("INSERT OR IGNORE INTO result_deliveries VALUES (?,?,?,'prepared',NULL)").run(key,c.case_id,encode(payload));
-    this.db.prepare("UPDATE decisions SET answer=?,attention='Working',snoozed_until=NULL WHERE case_id=?").run(encode(answer),c.case_id);
+    if(this.nativeControl)this.db.prepare('UPDATE decisions SET answer=? WHERE case_id=?').run(encode(answer),c.case_id);
+    else this.db.prepare("UPDATE decisions SET answer=?,attention='Working',snoozed_until=NULL WHERE case_id=?").run(encode(answer),c.case_id);
     return {answered:true,delivery_key:key,native:{name:'t3_thread_send',arguments:payload},execution_verified:false};
   });}
   attention(i){
@@ -221,7 +240,7 @@ export class T3NativeLedger {
 }
 
 export function runT3Ledger(root,input){const ledger=new T3NativeLedger(root);try{
-  if(['pr_authorization_record','pr_authorization_get','pr_action_check','pr_action_claim','pr_action_settle','pr_action_reconcile'].includes(input.op))return nativePrOperation(ledger,input);
+  if(['approval_policy_record','pr_binding_record','pr_authorization_record','pr_authorization_get','pr_action_check','pr_action_claim','pr_action_settle','pr_action_reconcile'].includes(input.op))return nativePrOperation(ledger,input);
   if(input.op==='source_lookup'){
     need(input.task_id||input.canonical_key||input.source_key,'Exact task or source identity required');
     const index=originalSourceIndex(ledger),sources=index.sources.filter(s=>!input.source_key||s.source_key===input.source_key);

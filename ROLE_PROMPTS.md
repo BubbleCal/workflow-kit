@@ -11,6 +11,13 @@
 
 > Native owner-delivery installation has main, optional discovery, and independent task owners only. Owners read OWNER_DELIVERY.md and deliver their own tasks. Main handles decisions and post-completion archival; discovery also maintains explicitly authorized calendar preparation schedules. No coordinator service is created.
 
+# T3 standard roles
+
+For an installed T3 instance the standard roles are Main and the Decision &
+Report Inbox (`决策与汇报`); both are created at installation. Use the Inbox prompt
+from DECISION_REPORT_INBOX.md ("Inbox rules"). Discovery and Maintenance are
+optional services.
+
 # Native role templates
 
 将 INSTANCE_ROOT、INSTANCE_NAME 替换为当前实例实际值。保留用户选择的模型、推理和权限。角色模板不是新任务授权。新 native 安装使用以下角色；旧四角色仅见 LEGACY_ROLE_PROMPTS.md。

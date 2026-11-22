@@ -1,6 +1,8 @@
 import {readFileSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 
+export const STANDARD_ROLES=['main','decision_report_inbox'];
+
 export async function t3Main(args,{output=v=>process.stdout.write(JSON.stringify(v,null,2)+'\n')}={}){
   const command=args[0],option=name=>{const i=args.indexOf('--'+name);return i<0?undefined:args[i+1];};
   if(command==='ledger'){
@@ -12,7 +14,12 @@ export async function t3Main(args,{output=v=>process.stdout.write(JSON.stringify
   if(command==='status'){
     const instance=option('instance');if(!instance)throw Error('Use t3 status --instance <T3-native root>');
     const c=JSON.parse(readFileSync(join(resolve(instance),'t3-workflow.json'),'utf8'));
-    output({project_id:c.project_id,control_plane:c.control_plane??null,policy_store:c.policy_store??null,
+    const roles=Object.fromEntries(Object.entries(c.roles??{}).map(([k,v])=>[k,typeof v==='string'?v:v?.thread_id??null]));
+    const missing=STANDARD_ROLES.filter(r=>!roles[r]);
+    if(roles.decision_report_inbox&&roles.decision_report_inbox===roles.main)missing.push('decision_report_inbox (must differ from main)');
+    if(missing.length)process.exitCode=2;
+    output({project_id:c.project_id,standard_roles:STANDARD_ROLES,missing_standard_roles:missing,roles,
+      decision_location:c.attention?.decision_location??(roles.decision_report_inbox?'decision_report_inbox':null),control_plane:c.control_plane??null,policy_store:c.policy_store??null,
       admission_paused:c.processing===false||c.task_admission?.paused===true,
       resumed_owner_ids:c.migration?.resumption?.target_thread_ids??[],
       execution_status_source:'t3_thread_read / t3_thread_list',attention_source:'native pending requests / native thread controls',
