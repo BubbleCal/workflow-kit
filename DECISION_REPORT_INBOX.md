@@ -66,6 +66,10 @@ ones until Yang answers or migrates them.
   2. `completion`: a substantive result, such as a merged PR, a final benchmark
      verdict or a finished investigation. State what was done, the measured
      effect, the practical impact and the caveats.
+     When an upstream PR only matters after downstream adoption (for example
+     release → fork sync → consumer upgrade), its merge is a milestone. Report
+     completion after the adoption, or list the propagation steps you still
+     own. Give the disposition of every still-open linked PR.
   3. `review_ready`: a finished PR or document review with a recommendation for
      Yang's action.
   4. `hard_blocker`: an unrecoverable blocker. Try self-service authorized
